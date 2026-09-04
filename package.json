@@ -1,0 +1,29 @@
+{
+  "name": "nexa",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "test": "vitest run",
+    "db:generate": "nuxt db generate",
+    "db:migrate": "nuxt db migrate",
+    "db:seed": "tsx server/db/seed.ts",
+    "db:seed-pm": "tsx server/db/seed-pm.ts",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.18.0",
+    "@nuxt/ui": "^4.11.0",
+    "@nuxthub/core": "^0.10.8",
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.2",
+    "nuxt": "^4.5.2",
+    "tsx": "^4.23.13",
+    "vitest": "^5.0.0",
+    "vue": "^3.5.42",
+    "vue-router": "^5.3.0"
+  }
+}
