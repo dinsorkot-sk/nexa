@@ -10,7 +10,7 @@ Rule: one phase per version branch (`v0.0.1`, `v0.0.2`, ...), in order. Phase 0 
 | 1 | v0.0.2 | Meta schemas (Zod) + module lifecycle state machine | complete |
 | 2 | v0.0.3 | DB, migrations, tenancy, CLI migrate/seed/check | complete |
 | 3 | v0.0.4 | Module registry and lifecycle (FR-1) | complete |
-| 4 | v0.0.5 | Entity/Field/Relation engine (FR-2, FR-3) | todo |
+| 4 | v0.0.5 | Entity/Field/Relation engine (FR-2, FR-3) | complete |
 | 5 | v0.0.6 | Dynamic CRUD/API (FR-4) | todo |
 | 6 | v0.0.7 | Auth + RBAC (FR-7) | todo |
 | 7 | v0.0.8 | Formula/validation/computed (FR-8) | todo |

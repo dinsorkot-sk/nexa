@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   canTransitionModuleStatus,
+  EntityCreateInputSchema,
+  EntityUpdateInputSchema,
+  FieldCreateInputSchema,
+  FieldUpdateInputSchema,
+  RelationCreateInputSchema,
+  RelationUpdateInputSchema,
   RelationDefinitionSchema,
   FieldDefinitionSchema,
   HealthCheckSchema,
@@ -66,6 +72,41 @@ describe('@nexa/meta schemas', () => {
     expect(ModuleUpdateInputSchema.safeParse({}).success).toBe(false);
     expect(ModuleTransitionInputSchema.safeParse({ to: 'enabled' }).success).toBe(true);
     expect(ModuleTransitionInputSchema.safeParse({ to: 'enabled', status: 'draft' }).success).toBe(false);
+  });
+
+  it('enforces structural rules per field type', () => {
+    const field = (type: string, options: Record<string, unknown> = {}) => FieldDefinitionSchema.safeParse({
+      id: 'f', entityId: 'e', name: 'f', label: 'F', type, options, position: 0,
+    }).success;
+    expect(field('text')).toBe(true);
+    expect(field('select')).toBe(false);
+    expect(field('select', { choices: [] })).toBe(false);
+    expect(field('select', { choices: [{ value: 'a', label: 'A' }, { value: 'a', label: 'B' }] })).toBe(false);
+    expect(field('select', { choices: [{ value: 'a', label: 'A' }] })).toBe(true);
+    expect(field('multiSelect', { choices: [{ value: 'a', label: 'A' }] })).toBe(true);
+    expect(field('reference')).toBe(false);
+    expect(field('reference', { referenceEntityId: 'other' })).toBe(true);
+    expect(field('formula')).toBe(false);
+    expect(field('computed', { expression: 'a + b' })).toBe(true);
+    expect(field('number', { min: 5, max: 1 })).toBe(false);
+    expect(field('number', { min: 1, max: 5 })).toBe(true);
+    expect(field('text', { regex: '(' })).toBe(false);
+    expect(field('text', { regex: '^[A-Z]+$' })).toBe(true);
+  });
+
+  it('validates entity, field, and relation input schemas', () => {
+    expect(EntityCreateInputSchema.safeParse({ id: 'v', name: 'v', label: 'V', pluralLabel: 'Vs' }).success).toBe(true);
+    expect(EntityCreateInputSchema.safeParse({ id: 'v', moduleId: 'm', name: 'v', label: 'V', pluralLabel: 'Vs' }).success).toBe(false);
+    expect(EntityUpdateInputSchema.safeParse({}).success).toBe(false);
+    expect(EntityUpdateInputSchema.safeParse({ id: 'other' }).success).toBe(false);
+    expect(FieldCreateInputSchema.safeParse({ id: 'f', name: 'f', label: 'F', type: 'text' }).success).toBe(true);
+    expect(FieldCreateInputSchema.safeParse({ id: 'f', entityId: 'e', name: 'f', label: 'F', type: 'text' }).success).toBe(false);
+    expect(FieldUpdateInputSchema.safeParse({ type: 'number' }).success).toBe(false);
+    expect(RelationCreateInputSchema.safeParse({
+      id: 'r', name: 'r', sourceEntityId: 'a', targetEntityId: 'a', type: 'manyToMany',
+    }).success).toBe(false);
+    expect(RelationUpdateInputSchema.safeParse({ sourceEntityId: 'x' }).success).toBe(false);
+    expect(RelationUpdateInputSchema.safeParse({ onDelete: 'cascade' }).success).toBe(true);
   });
 
   it('enforces module lifecycle transitions and terminal archive', () => {
