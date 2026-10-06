@@ -1,24 +1,92 @@
-import { describe, it, expect } from 'vitest';
-import { HealthCheckSchema } from '../src/index';
+import { describe, expect, it } from 'vitest';
+import {
+  canTransitionModuleStatus,
+  RelationDefinitionSchema,
+  FieldDefinitionSchema,
+  HealthCheckSchema,
+  ModuleDefinitionSchema,
+  ModulePackageSchema,
+  transitionModuleStatus,
+  WorkflowDefinitionSchema,
+} from '../src/index';
 
-describe('@nexa/meta basic schema verification', () => {
-  it('validates a correct health check payload', () => {
-    const valid = {
+describe('@nexa/meta schemas', () => {
+  it('validates a health check payload', () => {
+    expect(HealthCheckSchema.parse({
       status: 'ok',
       timestamp: new Date().toISOString(),
       version: '0.0.1',
-    };
-    const parsed = HealthCheckSchema.parse(valid);
-    expect(parsed.status).toBe('ok');
-    expect(parsed.version).toBe('0.0.1');
+    }).status).toBe('ok');
   });
 
-  it('rejects invalid status', () => {
-    const invalid = {
-      status: 'unknown',
-      timestamp: new Date().toISOString(),
-      version: '0.0.1',
+  it('validates a tenant-scoped module definition and defaults metadata', () => {
+    const module = ModuleDefinitionSchema.parse({
+      id: 'inventory',
+      tenantId: 'tenant-1',
+      owner: { id: 'user-1', type: 'user' },
+      name: 'Inventory',
+      version: '1.0.0',
+      status: 'draft',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    expect(module.description).toBe('');
+    expect(module.settings).toEqual({});
+    expect(module.dependencies).toEqual([]);
+  });
+
+  it('rejects invalid field types and malformed semantic versions', () => {
+    expect(() => FieldDefinitionSchema.parse({
+      id: 'field-1', entityId: 'vehicle', name: 'make', label: 'Make', type: 'madeUp', position: 0,
+    })).toThrow();
+
+    expect(() => ModuleDefinitionSchema.parse({
+      id: 'inventory', tenantId: 'tenant-1', owner: { id: 'user-1', type: 'user' },
+      name: 'Inventory', version: '1.0', status: 'draft',
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    })).toThrow();
+  });
+
+  it('enforces module lifecycle transitions and terminal archive', () => {
+    expect(canTransitionModuleStatus('draft', 'review')).toBe(true);
+    expect(canTransitionModuleStatus('draft', 'enabled')).toBe(false);
+    expect(transitionModuleStatus('review', 'published')).toBe('published');
+    expect(() => transitionModuleStatus('archived', 'draft')).toThrow(/Invalid module status transition/);
+  });
+
+  it('rejects unsupported self-referential many-to-many relations', () => {
+    expect(RelationDefinitionSchema.safeParse({
+      id: 'related-items', name: 'Related items', sourceEntityId: 'item', targetEntityId: 'item', type: 'manyToMany',
+    }).success).toBe(false);
+  });
+
+  it('validates workflow state references and exactly one initial state', () => {
+    const valid = {
+      id: 'workflow-1', moduleId: 'fleet', entityId: 'vehicle', name: 'Availability',
+      states: [
+        { id: 'available', name: 'available', label: 'Available', initial: true },
+        { id: 'rented', name: 'rented', label: 'Rented' },
+      ],
+      transitions: [{ id: 'rent', from: 'available', to: 'rented', label: 'Rent' }],
     };
-    expect(() => HealthCheckSchema.parse(invalid)).toThrow();
+    expect(WorkflowDefinitionSchema.safeParse(valid).success).toBe(true);
+    expect(WorkflowDefinitionSchema.safeParse({
+      ...valid,
+      transitions: [{ id: 'broken', from: 'missing', to: 'rented', label: 'Broken' }],
+    }).success).toBe(false);
+  });
+
+  it('requires module packages to align manifest and module identity/version', () => {
+    const module = {
+      id: 'crm', tenantId: 'tenant-1', owner: { id: 'system', type: 'system' as const },
+      name: 'CRM', version: '1.2.0', status: 'published' as const,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    const pkg = {
+      manifest: { formatVersion: 1 as const, moduleId: 'crm', version: '1.2.0', exportedAt: new Date().toISOString() },
+      module,
+    };
+    expect(ModulePackageSchema.safeParse(pkg).success).toBe(true);
+    expect(ModulePackageSchema.safeParse({ ...pkg, manifest: { ...pkg.manifest, version: '2.0.0' } }).success).toBe(false);
   });
 });
