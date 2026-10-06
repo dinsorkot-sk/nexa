@@ -1,7 +1,19 @@
 {
   "name": "@nexa/sdk",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
-  "main": "src/index.ts"
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "hono": "^4.7.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.7"
+  }
 }

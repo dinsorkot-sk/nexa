@@ -1,12 +1,12 @@
 # Nexa Plans — source of truth for phases
 
 Product: metadata-driven business app platform (TS port of the LOGHOLIZON SRS).
-Stack: Nuxt 4 + Hono (mounted in Nitro) + shadcn-vue; PostgreSQL + Drizzle (PGlite in dev).
+Stack: Nuxt 4 in `apps/web`; standalone Hono API in `apps/server` under `/v1`; shadcn-vue; PostgreSQL + Drizzle (PGlite in dev).
 Rule: one phase per version branch (v0.0.1, v0.0.2, ...), in order. Phase N uses branch v0.0.(N+1) because Phase 0 is v0.0.1.
 
 | Phase | Branch | Scope | Status |
 |---|---|---|---|
-| 0 | v0.0.1 | Foundation: git, Nuxt 4, Hono at `/v1`, Tailwind + shadcn-vue, Drizzle + PGlite, vitest, lint, turbo, CI | todo |
+| 0 | v0.0.1 | Foundation: git, Nuxt 4, standalone Hono API at `/v1`, Tailwind + shadcn-vue utilities, Drizzle + PGlite, Vitest, ESLint, Turbo, CI | complete |
 | 1 | v0.0.2 | Meta schemas (Zod) + module lifecycle state machine | todo |
 | 2 | v0.0.3 | DB, migrations, tenancy, CLI migrate/seed/check | todo |
 | 3 | v0.0.4 | Module registry and lifecycle (FR-1) | todo |
