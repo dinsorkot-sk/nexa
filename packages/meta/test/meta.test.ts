@@ -5,6 +5,9 @@ import {
   FieldDefinitionSchema,
   HealthCheckSchema,
   ModuleDefinitionSchema,
+  ModuleCreateInputSchema,
+  ModuleUpdateInputSchema,
+  ModuleTransitionInputSchema,
   ModulePackageSchema,
   transitionModuleStatus,
   WorkflowDefinitionSchema,
@@ -45,6 +48,24 @@ describe('@nexa/meta schemas', () => {
       name: 'Inventory', version: '1.0', status: 'draft',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     })).toThrow();
+  });
+
+  it('validates module registry inputs and rejects immutable properties', () => {
+    const create = ModuleCreateInputSchema.parse({
+      id: 'fleet', owner: { id: 'user-1', type: 'user' }, name: 'Fleet', version: '1.0.0',
+    });
+    expect('status' in create).toBe(false);
+    expect(ModuleCreateInputSchema.safeParse({
+      id: 'fleet', owner: { id: 'user-1', type: 'user' }, name: 'Fleet', version: '1.0.0',
+      dependencies: [{ moduleId: 'fleet', version: '1.0.0' }],
+    }).success).toBe(false);
+    expect(ModuleCreateInputSchema.safeParse({
+      id: 'fleet', tenantId: 'spoofed', owner: { id: 'user-1', type: 'user' }, name: 'Fleet', version: '1.0.0',
+    }).success).toBe(false);
+    expect(ModuleUpdateInputSchema.safeParse({ status: 'enabled' }).success).toBe(false);
+    expect(ModuleUpdateInputSchema.safeParse({}).success).toBe(false);
+    expect(ModuleTransitionInputSchema.safeParse({ to: 'enabled' }).success).toBe(true);
+    expect(ModuleTransitionInputSchema.safeParse({ to: 'enabled', status: 'draft' }).success).toBe(false);
   });
 
   it('enforces module lifecycle transitions and terminal archive', () => {

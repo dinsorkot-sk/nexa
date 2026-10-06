@@ -57,6 +57,9 @@ importers:
       '@hono/node-server':
         specifier: ^1.13.8
         version: 1.19.17(hono@4.13.13)
+      '@nexa/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@nexa/meta':
         specifier: workspace:*
         version: link:../../packages/meta
@@ -162,6 +165,9 @@ importers:
       '@electric-sql/pglite':
         specifier: ^0.2.17
         version: 0.2.17
+      '@nexa/meta':
+        specifier: workspace:*
+        version: link:../meta
       drizzle-orm:
         specifier: ^0.39.3
         version: 0.39.3(@electric-sql/pglite@0.2.17)(@types/pg@8.23.1)(pg@8.23.1)

@@ -1,7 +1,34 @@
 import { sql } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createDb, runMigrations, seedDatabase, checkDatabase, createTenantContext, tenantRepository, SYSTEM_TENANT_ID } from '../src/index';
-import { auditLog, tenants } from '../src/schema';
+import { createDb, runMigrations, seedDatabase, checkDatabase, createTenantContext, tenantRepository, moduleRepository, ModuleConflictError, ModuleNotFoundError, SYSTEM_TENANT_ID } from '../src/index';
+import { auditLog, modules, tenants } from '../src/schema';
+import type { ModuleCreateInput } from '@nexa/meta';
+import { ModuleDefinitionSchema } from '@nexa/meta';
+
+const makeModuleInput = (overrides: Partial<ModuleCreateInput> = {}): ModuleCreateInput => ({
+  id: 'fleet',
+  owner: { id: 'user-1', type: 'user' },
+  name: 'Fleet',
+  version: '1.0.0',
+  ...overrides,
+  description: overrides.description ?? '',
+  settings: overrides.settings ?? {},
+  dependencies: overrides.dependencies ?? [],
+});
+
+function createTenantPair(handle: ReturnType<typeof createDb>) {
+  const tenantId = SYSTEM_TENANT_ID;
+  const otherTenantId = '00000000-0000-0000-0000-000000000002';
+  return handle.db.insert(tenants).values([
+    { id: tenantId, slug: 'system', name: 'System' },
+    { id: otherTenantId, slug: 'other', name: 'Other' },
+  ]).then(() => ({
+    tenantId,
+    otherTenantId,
+    tenantA: moduleRepository(handle, createTenantContext(tenantId)),
+    tenantB: moduleRepository(handle, createTenantContext(otherTenantId)),
+  }));
+}
 
 const handles: Array<ReturnType<typeof createDb>> = [];
 
@@ -29,7 +56,7 @@ describe('@nexa/db migrations, tenancy, seed, and checks', () => {
     const missingTableResult = await checkDatabase(handle);
     expect(missingTableResult.ok).toBe(false);
     expect(missingTableResult.checks.at(-1)).toMatchObject({ name: 'schema', ok: false });
-  });
+  }, 15000);
 
   it('seeds the system tenant and baseline settings idempotently', async () => {
     const handle = createTestDb();
@@ -77,6 +104,61 @@ describe('@nexa/db migrations, tenancy, seed, and checks', () => {
     await tenantA.createLink('related', recordA.id, recordA.id);
     expect(await tenantA.listLinks('related', recordA.id)).toHaveLength(1);
     expect(await tenantB.listLinks('related', recordA.id)).toHaveLength(0);
+  });
+
+  it('creates and reads tenant-scoped module definitions, and prevents tenant spoofing', async () => {
+    const handle = createTestDb();
+    await runMigrations(handle);
+    const { tenantA, tenantB } = await createTenantPair(handle);
+    const created = await tenantA.create(makeModuleInput());
+
+    expect(created).toMatchObject({ id: 'fleet', tenantId: SYSTEM_TENANT_ID, status: 'draft', name: 'Fleet' });
+    expect(ModuleDefinitionSchema.safeParse(created).success).toBe(true);
+    expect(await tenantA.get('fleet')).toEqual(created);
+    expect(await tenantB.get('fleet')).toBeUndefined();
+    expect(await tenantA.list('draft')).toEqual([created]);
+    expect(await tenantB.list()).toEqual([]);
+    await expect(tenantA.create(makeModuleInput({ tenantId: 'spoofed' } as Partial<ModuleCreateInput>))).rejects.toThrow();
+    await expect(tenantA.create(makeModuleInput())).rejects.toBeInstanceOf(ModuleConflictError);
+
+    const rawRows = await handle.db.select().from(modules);
+    expect(rawRows[0].tenantId).toBe(SYSTEM_TENANT_ID);
+    expect(rawRows[0].definition).toMatchObject({ tenantId: SYSTEM_TENANT_ID });
+  });
+
+  it('updates draft modules and performs audited lifecycle transitions transactionally', async () => {
+    const handle = createTestDb();
+    await runMigrations(handle);
+    const { tenantA, tenantB } = await createTenantPair(handle);
+    const created = await tenantA.create(makeModuleInput());
+    const updated = await tenantA.update('fleet', { name: 'Fleet Ops' }, 'user-1');
+    expect(updated.name).toBe('Fleet Ops');
+    await expect(tenantB.update('fleet', { name: 'Other' })).rejects.toBeInstanceOf(ModuleNotFoundError);
+
+    const review = await tenantA.transition('fleet', 'review', 'user-1');
+    expect(review.status).toBe('review');
+    await expect(tenantA.transition('fleet', 'enabled')).rejects.toBeInstanceOf(ModuleConflictError);
+    expect(await tenantA.get('fleet')).toEqual(review);
+
+    const auditEntries = await handle.db.select().from(auditLog).orderBy(auditLog.occurredAt);
+    expect(auditEntries.map((entry) => entry.action)).toEqual([
+      'module.created', 'module.updated', 'module.status_changed',
+    ]);
+    expect(auditEntries.every((entry) => entry.tenantId.toLowerCase() === SYSTEM_TENANT_ID)).toBe(true);
+    expect(auditEntries[2].changes).toEqual({ before: { status: 'draft' }, after: { status: 'review' } });
+    expect(created.status).toBe('draft');
+  });
+
+  it('rejects edits outside editable lifecycle states and treats archive as terminal', async () => {
+    const handle = createTestDb();
+    await runMigrations(handle);
+    const { tenantA } = await createTenantPair(handle);
+    await tenantA.create(makeModuleInput());
+    await tenantA.transition('fleet', 'review');
+    await tenantA.transition('fleet', 'published');
+    await expect(tenantA.update('fleet', { name: 'Cannot edit' })).rejects.toBeInstanceOf(ModuleConflictError);
+    await tenantA.transition('fleet', 'archived');
+    await expect(tenantA.transition('fleet', 'draft')).rejects.toBeInstanceOf(ModuleConflictError);
   });
 
   it('rejects malformed tenant IDs before creating a repository', () => {

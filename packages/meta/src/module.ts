@@ -25,6 +25,37 @@ export const ModuleDependencySchema = z.object({
   version: z.string().min(1),
 }).strict();
 
+export const ModuleCreateInputSchema = z.object({
+  id: z.string().trim().min(1).max(120),
+  owner: ModuleOwnerSchema,
+  name: z.string().trim().min(1).max(120),
+  description: z.string().max(2000).default(''),
+  icon: z.string().max(100).optional(),
+  version: SemanticVersionSchema,
+  settings: z.record(z.unknown()).default({}),
+  dependencies: z.array(ModuleDependencySchema).default([]),
+}).strict().superRefine((input, ctx) => {
+  if (input.dependencies.some((dependency) => dependency.moduleId === input.id)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'A module cannot depend on itself', path: ['dependencies'] });
+  }
+});
+export type ModuleCreateInput = z.infer<typeof ModuleCreateInputSchema>;
+
+export const ModuleUpdateInputSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  description: z.string().max(2000).optional(),
+  icon: z.string().max(100).nullable().optional(),
+  version: SemanticVersionSchema.optional(),
+  settings: z.record(z.unknown()).optional(),
+  dependencies: z.array(ModuleDependencySchema).optional(),
+}).strict().refine((input) => Object.keys(input).length > 0, 'At least one module property must be provided');
+export type ModuleUpdateInput = z.infer<typeof ModuleUpdateInputSchema>;
+
+export const ModuleTransitionInputSchema = z.object({
+  to: ModuleStatusSchema,
+}).strict();
+export type ModuleTransitionInput = z.infer<typeof ModuleTransitionInputSchema>;
+
 export const ModuleDefinitionSchema = z.object({
   id: z.string().min(1),
   tenantId: z.string().min(1),

@@ -9,10 +9,10 @@ Nexa is a metadata-driven app platform. The initial monorepo foundation is in pl
 ## Architecture
 
 - `apps/web`: Nuxt 4 app for the Builder and end-user Runtime.
-- `apps/server`: standalone Hono API server, versioned under `/v1`; `hono/app.ts` exports the app type for Hono RPC clients. It is run separately from Nuxt.
+- `apps/server`: standalone Hono API server, versioned under `/v1`; `hono/app.ts` exports the app type for Hono RPC clients. It is run separately from Nuxt. Module endpoints temporarily require `x-tenant-id`; it is caller-supplied, spoofable, and not authentication—do not expose these endpoints publicly before Phase 6 auth/RBAC.
 - `packages/meta`: source of truth for Zod schemas and TS types for modules, entities, fields, views, workflows, permissions, and related metadata.
 - `packages/engine`: server-side domain core, organised as plain subfolders (not a separate package): entity, query, permission, workflow, hooks.
-- `packages/db`: Drizzle on PostgreSQL; PGlite is the local development default when `DATABASE_URL` is unset. Shared-schema tenancy scopes generic JSONB-backed records and metadata; use `tenantRepository` for tenant record/link access. Migrations are forward-only under `packages/db/migrations`.
+- `packages/db`: Drizzle on PostgreSQL; PGlite is the local development default when `DATABASE_URL` is unset. Shared-schema tenancy scopes generic JSONB-backed records, metadata, and module definitions; use `tenantRepository` for tenant record/link access and `moduleRepository` for module lifecycle operations. Migrations are forward-only under `packages/db/migrations`.
 - `packages/ui`: shadcn-vue + Tailwind primitives and metadata-driven field/view renderers; keep those layers separate.
 - `packages/auth` and `packages/sdk`: authentication utilities and typed API client.
 - `templates/{inventory,crm,hr}`: metadata packages, not built-in domain logic. `integrations/*` provide workflow actions.
