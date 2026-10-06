@@ -12,7 +12,7 @@ Nexa is a metadata-driven app platform. The initial monorepo foundation is in pl
 - `apps/server`: standalone Hono API server, versioned under `/v1`; `hono/app.ts` exports the app type for Hono RPC clients. It is run separately from Nuxt.
 - `packages/meta`: source of truth for Zod schemas and TS types for modules, entities, fields, views, workflows, permissions, and related metadata.
 - `packages/engine`: server-side domain core, organised as plain subfolders (not a separate package): entity, query, permission, workflow, hooks.
-- `packages/db`: Drizzle on PostgreSQL; PGlite is the local development default when `DATABASE_URL` is unset. User-defined entities are intended to use generic JSONB-backed records rather than per-entity DDL.
+- `packages/db`: Drizzle on PostgreSQL; PGlite is the local development default when `DATABASE_URL` is unset. Shared-schema tenancy scopes generic JSONB-backed records and metadata; use `tenantRepository` for tenant record/link access. Migrations are forward-only under `packages/db/migrations`.
 - `packages/ui`: shadcn-vue + Tailwind primitives and metadata-driven field/view renderers; keep those layers separate.
 - `packages/auth` and `packages/sdk`: authentication utilities and typed API client.
 - `templates/{inventory,crm,hr}`: metadata packages, not built-in domain logic. `integrations/*` provide workflow actions.
@@ -27,9 +27,12 @@ Use pnpm 9.15.4 and Node.js `^22.21.0` (Nuxt 4 requirement).
 pnpm install
 pnpm dev          # Nuxt app
 pnpm dev:api      # Hono API server
-pnpm build        # Turbo workspace build
-pnpm typecheck    # Turbo workspace typecheck
-pnpm test         # Turbo workspace tests
+pnpm db:migrate   # Apply forward-only DB migrations
+pnpm db:seed      # Seed system tenant/settings
+pnpm db:check     # Check connectivity, schema, migrations
+pnpm build        # Workspace build
+pnpm typecheck    # Workspace typecheck
+pnpm test         # Vitest workspace tests
 ```
 
 Run tests directly if Turbo cannot spawn child processes in the current shell:

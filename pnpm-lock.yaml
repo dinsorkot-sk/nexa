@@ -36,6 +36,22 @@ importers:
         specifier: ^9.4.3
         version: 9.4.3(eslint@9.39.5(jiti@2.7.0))
 
+  apps/cli:
+    dependencies:
+      '@nexa/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      tsx:
+        specifier: ^4.19.3
+        version: 4.23.15
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.7
+        version: 3.2.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
+
   apps/server:
     dependencies:
       '@hono/node-server':
@@ -159,6 +175,9 @@ importers:
       drizzle-kit:
         specifier: ^0.30.4
         version: 0.30.6
+      tsx:
+        specifier: ^4.19.3
+        version: 4.23.15
       typescript:
         specifier: ^5.7.3
         version: 5.9.3

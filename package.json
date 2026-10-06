@@ -5,6 +5,9 @@
   "scripts": {
     "dev": "pnpm --filter @nexa/web dev",
     "dev:api": "pnpm --filter @nexa/server dev",
+    "db:migrate": "pnpm --filter @nexa/cli exec tsx src/index.ts migrate",
+    "db:seed": "pnpm --filter @nexa/cli exec tsx src/index.ts seed",
+    "db:check": "pnpm --filter @nexa/cli exec tsx src/index.ts check",
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "vitest run",
