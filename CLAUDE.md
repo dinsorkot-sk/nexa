@@ -49,4 +49,4 @@ Run tests directly if Turbo cannot spawn child processes in the current shell:
 
 ## Git workflow
 
-Follow `docs/plans/README.md` sequentially: one planned phase per version branch, run its applicable gates, review and commit/push before creating the next branch. Do not skip or reuse version branches, force-push, or add phases beyond the master plan. The current implementation phase is the one explicitly requested by the user; do not start later phases without authorization.
+Follow `docs/plans/README.md` sequentially: one planned phase per version branch, run its applicable gates, review and commit/push before creating the next branch. Do not skip or reuse version branches, force-push, or add phases beyond the master plan. Do not begin the next phase or create its branch until explicitly asked by the user.

@@ -66,6 +66,12 @@ importers:
 
   apps/web:
     dependencies:
+      '@nexa/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
+      '@nexa/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@nexa/meta':
         specifier: workspace:*
         version: link:../../packages/meta

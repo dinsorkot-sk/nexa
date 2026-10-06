@@ -5,11 +5,11 @@
   "scripts": {
     "dev": "pnpm --filter @nexa/web dev",
     "dev:api": "pnpm --filter @nexa/server dev",
-    "build": "turbo run build",
-    "typecheck": "turbo run typecheck",
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r --if-present typecheck",
     "test": "vitest run",
     "lint": "eslint .",
-    "clean": "turbo run clean"
+    "clean": "pnpm -r --if-present clean"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.25.0",
