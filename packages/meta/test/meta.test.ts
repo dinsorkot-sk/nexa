@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   canTransitionModuleStatus,
+  RecordCreateInputSchema,
+  RecordQuerySchema,
+  RecordUpdateInputSchema,
   EntityCreateInputSchema,
   EntityUpdateInputSchema,
   FieldCreateInputSchema,
@@ -107,6 +110,13 @@ describe('@nexa/meta schemas', () => {
     }).success).toBe(false);
     expect(RelationUpdateInputSchema.safeParse({ sourceEntityId: 'x' }).success).toBe(false);
     expect(RelationUpdateInputSchema.safeParse({ onDelete: 'cascade' }).success).toBe(true);
+  });
+
+  it('validates bounded record input and query defaults', () => {
+    expect(RecordCreateInputSchema.safeParse({ data: { name: 'Vehicle' } }).success).toBe(true);
+    expect(RecordUpdateInputSchema.safeParse({ data: {}, version: 1 }).success).toBe(true);
+    expect(RecordQuerySchema.parse({}).limit).toBe(25);
+    expect(RecordQuerySchema.safeParse({ limit: 101 }).success).toBe(false);
   });
 
   it('enforces module lifecycle transitions and terminal archive', () => {

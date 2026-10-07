@@ -112,7 +112,7 @@ describe('@nexa/db definition repository', () => {
   it('refuses to delete an entity that has records', async () => {
     const { defsA, handle } = ctx;
     await defsA.createEntity('fleet', vehicle);
-    await handle.db.insert(records).values({ tenantId: SYSTEM_TENANT_ID, entityId: 'vehicle', data: {} });
+    await handle.db.insert(records).values({ tenantId: SYSTEM_TENANT_ID, moduleId: 'fleet', entityId: 'vehicle', data: {} });
     await expect(defsA.deleteEntity('fleet', 'vehicle')).rejects.toThrow(/has records/);
   });
 

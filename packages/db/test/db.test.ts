@@ -1,7 +1,7 @@
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDb, runMigrations, seedDatabase, checkDatabase, createTenantContext, tenantRepository, moduleRepository, ModuleConflictError, ModuleNotFoundError, SYSTEM_TENANT_ID } from '../src/index';
-import { auditLog, modules, tenants } from '../src/schema';
+import { auditLog, modules, records, recordLinks, tenants } from '../src/schema';
 import type { ModuleCreateInput } from '@nexa/meta';
 import { ModuleDefinitionSchema } from '@nexa/meta';
 
@@ -57,6 +57,32 @@ describe('@nexa/db migrations, tenancy, seed, and checks', () => {
     expect(missingTableResult.ok).toBe(false);
     expect(missingTableResult.checks.at(-1)).toMatchObject({ name: 'schema', ok: false });
   }, 15000);
+
+  it('persists module-scoped records, validates relation cardinality and applies onDelete atomically', async () => {
+    const handle = createTestDb();
+    await runMigrations(handle);
+    await createTenantPair(handle);
+    const repo = tenantRepository(handle, createTenantContext(SYSTEM_TENANT_ID));
+    const moduleId = 'fleet';
+    const source = await repo.createScopedRecord(moduleId, 'vehicle', { name: 'A' });
+    const first = await repo.createScopedRecord(moduleId, 'part', { name: 'one' });
+    const second = await repo.createScopedRecord(moduleId, 'part', { name: 'two' });
+    const oneToMany = { id: 'parts', name: 'parts', sourceEntityId: 'vehicle', targetEntityId: 'part', type: 'oneToMany' as const, onDelete: 'restrict' as const };
+    await repo.createRelationLink(moduleId, oneToMany, source.id, first.id);
+    await repo.createRelationLink(moduleId, oneToMany, source.id, second.id);
+    await expect(repo.createRelationLink(moduleId, oneToMany, source.id, second.id)).resolves.toBeDefined();
+    await expect(repo.createRelationLink(moduleId, oneToMany, first.id, first.id)).rejects.toThrow(/endpoints/);
+    await expect(repo.createRelationLink(moduleId, oneToMany, second.id, first.id)).rejects.toThrow(/endpoints/);
+    await expect(repo.deleteScopedRecord(moduleId, 'vehicle', source.id, [oneToMany])).rejects.toThrow(/referenced/);
+    expect(await repo.getScopedRecord(moduleId, 'vehicle', source.id)).toBeDefined();
+
+    const cascading = { ...oneToMany, id: 'cascade-parts', type: 'manyToMany' as const, onDelete: 'cascade' as const };
+    await repo.createRelationLink(moduleId, cascading, source.id, second.id);
+    await expect(repo.deleteScopedRecord(moduleId, 'vehicle', source.id, [cascading])).resolves.toBeDefined();
+    expect(await handle.db.select().from(recordLinks).where(eq(recordLinks.relationId, cascading.id))).toHaveLength(0);
+    expect(await repo.getScopedRecord(moduleId, 'vehicle', source.id)).toBeUndefined();
+    expect(await handle.db.select().from(records).where(eq(records.moduleId, moduleId))).toHaveLength(3);
+  });
 
   it('seeds the system tenant and baseline settings idempotently', async () => {
     const handle = createTestDb();

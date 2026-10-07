@@ -24,7 +24,7 @@ const requiredConstraints = [
   'nexa_record_links_to_record_fk',
 ] as const;
 
-const requiredMigrations = 3;
+const requiredMigrations = 4;
 const tables = [tenants, systemSettings, modules, metadataDefinitions, records, recordLinks, auditLog, eventLog];
 
 export async function checkDatabase(handle: DbHandle): Promise<DatabaseCheck> {

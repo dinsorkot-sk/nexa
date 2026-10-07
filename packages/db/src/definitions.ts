@@ -181,7 +181,7 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
         const before = current.entities.find((entity) => entity.id === id);
         if (!before) throw new DefinitionNotFoundError('Entity', id);
         const [existing] = await tx.select({ id: records.id }).from(records)
-          .where(and(eq(records.tenantId, tenantId), eq(records.entityId, id))).limit(1);
+          .where(and(eq(records.tenantId, tenantId), eq(records.moduleId, moduleId), eq(records.entityId, id), sql`${records.deletedAt} IS NULL`)).limit(1);
         if (existing) throw new DefinitionConflictError(`Entity ${id} has records and cannot be deleted`);
         const ownedFields = current.fields.filter((field) => field.entityId === id);
         await removeDefinitions(tx, moduleId, 'field', ownedFields.map((field) => field.id));

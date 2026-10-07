@@ -1,226 +1,246 @@
 import {
-  EntityCreateInputSchema,
-  EntityUpdateInputSchema,
-  FieldCreateInputSchema,
-  FieldUpdateInputSchema,
-  HealthCheckSchema,
-  ModuleCreateInputSchema,
-  ModuleStatusSchema,
-  ModuleTransitionInputSchema,
-  ModuleUpdateInputSchema,
-  RelationCreateInputSchema,
-  RelationUpdateInputSchema,
+  EntityCreateInputSchema, EntityUpdateInputSchema, FieldCreateInputSchema, FieldUpdateInputSchema,
+  HealthCheckSchema, ModuleCreateInputSchema, ModuleStatusSchema, ModuleTransitionInputSchema,
+  ModuleUpdateInputSchema, RelationCreateInputSchema, RelationUpdateInputSchema,
+  RecordCreateInputSchema, RecordQuerySchema, RecordUpdateInputSchema,
 } from '@nexa/meta';
 import {
-  createDb,
-  createTenantContext,
-  DefinitionConflictError,
-  DefinitionNotFoundError,
-  definitionRepository,
-  ModuleConflictError,
-  ModuleNotFoundError,
-  moduleRepository,
+  createDb, createTenantContext, DefinitionConflictError, DefinitionNotFoundError,
+  RecordConflictError, tenantRepository, definitionRepository, ModuleConflictError,
+  ModuleNotFoundError, moduleRepository,
 } from '@nexa/db';
 import type { DbHandle } from '@nexa/db';
+import { validateRecordData } from '../../../packages/engine/entity/index';
+import { parseQuery } from '../../../packages/engine/query/index';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 
-export interface AppDependencies {
-  db?: DbHandle;
-}
-
-function errorResponse(code: string, message: string, status: 400 | 404 | 409 | 503) {
-  return { error: { code, message, status } };
+export interface AppDependencies { db?: DbHandle }
+function errorResponse(code: string, message: string, status: 400 | 404 | 409 | 422 | 503, details?: unknown) {
+  return { error: { code, message, status, ...(details === undefined ? {} : { details }) } };
 }
 
 export function createApp(dependencies: AppDependencies = {}) {
   const app = new Hono().basePath('/v1');
   app.use('*', logger());
   app.use('*', cors());
-
   app.onError((error, c) => {
     console.error('API Error:', error);
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: error.message || 'An unexpected error occurred' } }, 500);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } }, 500);
   });
 
-  app.get('/health', (c) => {
-    const health = HealthCheckSchema.parse({
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      version: '0.0.1',
-    });
-    return c.json(health);
-  });
+  app.get('/health', (c) => c.json(HealthCheckSchema.parse({ status: 'ok', timestamp: new Date().toISOString(), version: '0.0.1' })));
+  app.get('/status', (c) => c.json({ service: 'nexa-platform', version: '0.0.1', framework: 'Nuxt + Hono' }));
 
-  app.get('/status', (c) => c.json({
-    service: 'nexa-platform',
-    version: '0.0.1',
-    framework: 'Nuxt + Hono',
-  }));
-
-  // x-tenant-id is caller-supplied and NOT authentication; it is replaced by authenticated tenant context in Phase 6.
-  const withTenant = async (
-    c: Context,
-    callback: (db: DbHandle, context: ReturnType<typeof createTenantContext>) => Promise<Response>,
-  ): Promise<Response> => {
-    if (!dependencies.db) return c.json(errorResponse('DB_UNAVAILABLE', 'Module registry is unavailable', 503), 503);
-    const tenantId = c.req.header('x-tenant-id');
-    if (!tenantId) return c.json(errorResponse('TENANT_REQUIRED', 'x-tenant-id header is required', 400), 400);
-    let context;
-    try {
-      context = createTenantContext(tenantId);
-    } catch {
-      return c.json(errorResponse('INVALID_TENANT', 'x-tenant-id must be a valid UUID', 400), 400);
-    }
-    try {
-      return await callback(dependencies.db, context);
-    } catch (error) {
+  // x-tenant-id is caller-supplied and NOT authentication; replaced by authenticated context in Phase 6.
+  const withTenant = async (c: Context, callback: (db: DbHandle, tenantId: string) => Promise<Response>): Promise<Response> => {
+    if (!dependencies.db) return c.json(errorResponse('DB_UNAVAILABLE', 'Database is unavailable', 503), 503);
+    const rawTenantId = c.req.header('x-tenant-id');
+    if (!rawTenantId) return c.json(errorResponse('TENANT_REQUIRED', 'x-tenant-id header is required', 400), 400);
+    let tenantId: string;
+    try { tenantId = createTenantContext(rawTenantId).tenantId; }
+    catch { return c.json(errorResponse('INVALID_TENANT', 'x-tenant-id must be a valid UUID', 400), 400); }
+    try { return await callback(dependencies.db, tenantId); }
+    catch (error) {
       if (error instanceof ModuleNotFoundError) return c.json(errorResponse('MODULE_NOT_FOUND', error.message, 404), 404);
       if (error instanceof ModuleConflictError) return c.json(errorResponse('MODULE_CONFLICT', error.message, 409), 409);
       if (error instanceof DefinitionNotFoundError) return c.json(errorResponse('DEFINITION_NOT_FOUND', error.message, 404), 404);
       if (error instanceof DefinitionConflictError) return c.json(errorResponse('DEFINITION_CONFLICT', error.message, 409), 409);
+      if (error instanceof RecordConflictError) return c.json(errorResponse('RECORD_CONFLICT', error.message, 409), 409);
+      if (error instanceof Error && error.name === 'RecordValidationError') return c.json(errorResponse('VALIDATION_FAILED', error.message, 422, 'issues' in error ? error.issues : undefined), 422);
+      if (error instanceof Error && error.name === 'RecordQueryError') return c.json(errorResponse('INVALID_QUERY', error.message, 400, 'issues' in error ? error.issues : undefined), 400);
       if (error instanceof Error && error.name === 'ZodError') return c.json(errorResponse('INVALID_INPUT', error.message, 400), 400);
       throw error;
     }
   };
-
-  const withModules = (
-    c: Context,
-    callback: (repository: ReturnType<typeof moduleRepository>) => Promise<Response>,
-  ): Promise<Response> => withTenant(c, (db, context) => callback(moduleRepository(db, context)));
-
-  const withDefinitions = (
-    c: Context,
-    callback: (repository: ReturnType<typeof definitionRepository>, moduleId: string) => Promise<Response>,
-  ): Promise<Response> => withTenant(c, (db, context) => callback(definitionRepository(db, context), c.req.param('moduleId') ?? ''));
-
+  const withModules = (c: Context, callback: (repo: ReturnType<typeof moduleRepository>, tenantId: string) => Promise<Response>) => withTenant(c, (db, tenantId) => callback(moduleRepository(db, createTenantContext(tenantId)), tenantId));
+  const withDefinitions = (c: Context, callback: (repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string) => Promise<Response>) => withTenant(c, (db, tenantId) => callback(definitionRepository(db, createTenantContext(tenantId)), c.req.param('moduleId') ?? '', tenantId));
   const invalid = (c: Context, message: string) => c.json(errorResponse('INVALID_INPUT', message, 400), 400);
-  const notFound = (c: Context, what: string) => c.json(errorResponse('DEFINITION_NOT_FOUND', `${what} not found`, 404), 404);
+  const missingDefinition = (c: Context, what: string) => c.json(errorResponse('DEFINITION_NOT_FOUND', `${what} not found`, 404), 404);
+  const missingRecord = (c: Context) => c.json(errorResponse('RECORD_NOT_FOUND', 'Record not found', 404), 404);
+  const redactHidden = <T extends { data: Record<string, unknown> }>(record: T, fields: Array<{ id: string; options: { hidden?: boolean } }>) => ({ ...record, data: Object.fromEntries(Object.entries(record.data).filter(([id]) => !fields.some((field) => field.id === id && field.options.hidden))) });
+  const requireEnabled = async (repo: ReturnType<typeof moduleRepository>, moduleId: string) => (await repo.get(moduleId))?.status === 'enabled';
 
-  app.get('/modules', async (c) => withModules(c, async (repository) => {
-    const rawStatus = c.req.query('status');
-    const parsedStatus = rawStatus === undefined ? undefined : ModuleStatusSchema.safeParse(rawStatus);
-    if (parsedStatus && !parsedStatus.success) {
-      return c.json(errorResponse('INVALID_INPUT', parsedStatus.error.message, 400), 400);
-    }
-    return c.json(await repository.list(parsedStatus?.success ? parsedStatus.data : undefined));
+  app.get('/modules', async (c) => withModules(c, async (repo) => {
+    const raw = c.req.query('status');
+    const status = raw === undefined ? undefined : ModuleStatusSchema.safeParse(raw);
+    if (status && !status.success) return invalid(c, status.error.message);
+    return c.json(await repo.list(status?.success ? status.data : undefined));
   }));
-
-  app.post('/modules', async (c) => withModules(c, async (repository) => {
-    const body = await c.req.json().catch(() => undefined);
-    const parsed = ModuleCreateInputSchema.safeParse(body);
-    if (!parsed.success) return c.json(errorResponse('INVALID_INPUT', parsed.error.message, 400), 400);
-    const module = await repository.create(parsed.data);
-    return c.json(module, 201);
+  app.post('/modules', async (c) => withModules(c, async (repo) => {
+    const parsed = ModuleCreateInputSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    return c.json(await repo.create(parsed.data), 201);
   }));
-
-  app.get('/modules/:id', async (c) => withModules(c, async (repository) => {
-    const module = await repository.get(c.req.param('id'));
+  app.get('/modules/:id', async (c) => withModules(c, async (repo) => {
+    const module = await repo.get(c.req.param('id'));
     return module ? c.json(module) : c.json(errorResponse('MODULE_NOT_FOUND', 'Module not found', 404), 404);
   }));
-
-  app.patch('/modules/:id', async (c) => withModules(c, async (repository) => {
-    const body = await c.req.json().catch(() => undefined);
-    const parsed = ModuleUpdateInputSchema.safeParse(body);
-    if (!parsed.success) return c.json(errorResponse('INVALID_INPUT', parsed.error.message, 400), 400);
-    return c.json(await repository.update(c.req.param('id'), parsed.data));
+  app.patch('/modules/:id', async (c) => withModules(c, async (repo) => {
+    const parsed = ModuleUpdateInputSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    return c.json(await repo.update(c.req.param('id'), parsed.data));
+  }));
+  app.post('/modules/:id/transition', async (c) => withModules(c, async (repo) => {
+    const parsed = ModuleTransitionInputSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    return c.json(await repo.transition(c.req.param('id'), parsed.data.to));
   }));
 
-  app.post('/modules/:id/transition', async (c) => withModules(c, async (repository) => {
-    const body = await c.req.json().catch(() => undefined);
-    const parsed = ModuleTransitionInputSchema.safeParse(body);
-    if (!parsed.success) return c.json(errorResponse('INVALID_INPUT', parsed.error.message, 400), 400);
-    return c.json(await repository.transition(c.req.param('id'), parsed.data.to));
-  }));
-
-  // Module schema definitions: entities, fields, relations (editable while the module is draft/review).
-  app.get('/modules/:moduleId/schema', async (c) => withDefinitions(c, async (definitions, moduleId) => {
-    return c.json(await definitions.getModuleSchema(moduleId));
-  }));
-
-  app.get('/modules/:moduleId/entities', async (c) => withDefinitions(c, async (definitions, moduleId) => {
-    return c.json(await definitions.listEntities(moduleId));
-  }));
-
-  app.post('/modules/:moduleId/entities', async (c) => withDefinitions(c, async (definitions, moduleId) => {
+  app.get('/modules/:moduleId/schema', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.getModuleSchema(moduleId))));
+  app.get('/modules/:moduleId/entities', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.listEntities(moduleId))));
+  app.post('/modules/:moduleId/entities', async (c) => withDefinitions(c, async (repo, moduleId) => {
     const parsed = EntityCreateInputSchema.safeParse(await c.req.json().catch(() => undefined));
     if (!parsed.success) return invalid(c, parsed.error.message);
-    return c.json(await definitions.createEntity(moduleId, parsed.data), 201);
+    return c.json(await repo.createEntity(moduleId, parsed.data), 201);
   }));
-
-  app.get('/modules/:moduleId/entities/:id', async (c) => withDefinitions(c, async (definitions, moduleId) => {
-    const entity = await definitions.getEntity(moduleId, c.req.param('id'));
-    return entity ? c.json(entity) : notFound(c, 'Entity');
+  app.get('/modules/:moduleId/entities/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
+    const entity = await repo.getEntity(moduleId, c.req.param('id'));
+    return entity ? c.json(entity) : missingDefinition(c, 'Entity');
   }));
-
-  app.patch('/modules/:moduleId/entities/:id', async (c) => withDefinitions(c, async (definitions, moduleId) => {
+  app.patch('/modules/:moduleId/entities/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
     const parsed = EntityUpdateInputSchema.safeParse(await c.req.json().catch(() => undefined));
     if (!parsed.success) return invalid(c, parsed.error.message);
-    return c.json(await definitions.updateEntity(moduleId, c.req.param('id'), parsed.data));
+    return c.json(await repo.updateEntity(moduleId, c.req.param('id'), parsed.data));
   }));
-
-  app.delete('/modules/:moduleId/entities/:id', async (c) => withDefinitions(c, async (definitions, moduleId) => {
-    await definitions.deleteEntity(moduleId, c.req.param('id'));
+  app.delete('/modules/:moduleId/entities/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
+    await repo.deleteEntity(moduleId, c.req.param('id'));
     return c.body(null, 204);
   }));
-
-  app.get('/modules/:moduleId/fields', async (c) => withDefinitions(c, async (definitions, moduleId) => {
-    return c.json(await definitions.listFields(moduleId, c.req.query('entityId')));
-  }));
-
-  app.post('/modules/:moduleId/entities/:entityId/fields', async (c) => withDefinitions(c, async (definitions, moduleId) => {
+  app.get('/modules/:moduleId/fields', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.listFields(moduleId, c.req.query('entityId')))));
+  app.post('/modules/:moduleId/entities/:entityId/fields', async (c) => withDefinitions(c, async (repo, moduleId) => {
     const parsed = FieldCreateInputSchema.safeParse(await c.req.json().catch(() => undefined));
     if (!parsed.success) return invalid(c, parsed.error.message);
-    return c.json(await definitions.createField(moduleId, c.req.param('entityId'), parsed.data), 201);
+    return c.json(await repo.createField(moduleId, c.req.param('entityId'), parsed.data), 201);
   }));
-
-  app.get('/modules/:moduleId/fields/:id', async (c) => withDefinitions(c, async (definitions, moduleId) => {
-    const field = await definitions.getField(moduleId, c.req.param('id'));
-    return field ? c.json(field) : notFound(c, 'Field');
+  app.get('/modules/:moduleId/fields/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
+    const field = await repo.getField(moduleId, c.req.param('id'));
+    return field ? c.json(field) : missingDefinition(c, 'Field');
   }));
-
-  app.patch('/modules/:moduleId/fields/:id', async (c) => withDefinitions(c, async (definitions, moduleId) => {
+  app.patch('/modules/:moduleId/fields/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
     const parsed = FieldUpdateInputSchema.safeParse(await c.req.json().catch(() => undefined));
     if (!parsed.success) return invalid(c, parsed.error.message);
-    return c.json(await definitions.updateField(moduleId, c.req.param('id'), parsed.data));
+    return c.json(await repo.updateField(moduleId, c.req.param('id'), parsed.data));
   }));
-
-  app.delete('/modules/:moduleId/fields/:id', async (c) => withDefinitions(c, async (definitions, moduleId) => {
-    await definitions.deleteField(moduleId, c.req.param('id'));
+  app.delete('/modules/:moduleId/fields/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
+    await repo.deleteField(moduleId, c.req.param('id'));
     return c.body(null, 204);
   }));
-
-  app.get('/modules/:moduleId/relations', async (c) => withDefinitions(c, async (definitions, moduleId) => {
-    return c.json(await definitions.listRelations(moduleId));
-  }));
-
-  app.post('/modules/:moduleId/relations', async (c) => withDefinitions(c, async (definitions, moduleId) => {
+  app.get('/modules/:moduleId/relations', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.listRelations(moduleId))));
+  app.post('/modules/:moduleId/relations', async (c) => withDefinitions(c, async (repo, moduleId) => {
     const parsed = RelationCreateInputSchema.safeParse(await c.req.json().catch(() => undefined));
     if (!parsed.success) return invalid(c, parsed.error.message);
-    return c.json(await definitions.createRelation(moduleId, parsed.data), 201);
+    return c.json(await repo.createRelation(moduleId, parsed.data), 201);
   }));
-
-  app.get('/modules/:moduleId/relations/:id', async (c) => withDefinitions(c, async (definitions, moduleId) => {
-    const relation = await definitions.getRelation(moduleId, c.req.param('id'));
-    return relation ? c.json(relation) : notFound(c, 'Relation');
+  app.get('/modules/:moduleId/relations/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
+    const relation = await repo.getRelation(moduleId, c.req.param('id'));
+    return relation ? c.json(relation) : missingDefinition(c, 'Relation');
   }));
-
-  app.patch('/modules/:moduleId/relations/:id', async (c) => withDefinitions(c, async (definitions, moduleId) => {
+  app.patch('/modules/:moduleId/relations/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
     const parsed = RelationUpdateInputSchema.safeParse(await c.req.json().catch(() => undefined));
     if (!parsed.success) return invalid(c, parsed.error.message);
-    return c.json(await definitions.updateRelation(moduleId, c.req.param('id'), parsed.data));
+    return c.json(await repo.updateRelation(moduleId, c.req.param('id'), parsed.data));
+  }));
+  app.delete('/modules/:moduleId/relations/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
+    await repo.deleteRelation(moduleId, c.req.param('id'));
+    return c.body(null, 204);
   }));
 
-  app.delete('/modules/:moduleId/relations/:id', async (c) => withDefinitions(c, async (definitions, moduleId) => {
-    await definitions.deleteRelation(moduleId, c.req.param('id'));
-    return c.body(null, 204);
+  app.get('/modules/:moduleId/entities/:entityId/records', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+    const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
+    if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
+    const entityId = c.req.param('entityId');
+    if (!(await defs.getEntity(moduleId, entityId))) return missingDefinition(c, 'Entity');
+    const fields = await defs.listFields(moduleId, entityId);
+    const parsed = RecordQuerySchema.safeParse({ limit: c.req.query('limit'), offset: c.req.query('offset'), sort: c.req.query('sort'), filter: c.req.query('filter'), search: c.req.query('search') });
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    const query = parseQuery(parsed.data, fields);
+    const result = await tenantRepository(dependencies.db!, createTenantContext(tenantId)).listScopedRecords(moduleId, entityId, { ...query, fields });
+    return c.json({ items: result.items.map((item) => redactHidden(item, fields)), total: result.total, limit: query.limit, offset: query.offset });
+  }));
+  app.post('/modules/:moduleId/entities/:entityId/records', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+    const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
+    if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
+    const entityId = c.req.param('entityId');
+    const entity = await defs.getEntity(moduleId, entityId);
+    if (!entity) return missingDefinition(c, 'Entity');
+    const parsed = RecordCreateInputSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    const fields = await defs.listFields(moduleId, entityId);
+    const data = validateRecordData(entity, fields, parsed.data.data, { mode: 'create' });
+    const repo = tenantRepository(dependencies.db!, createTenantContext(tenantId));
+    await repo.assertReferences(moduleId, fields.filter((field) => field.type === 'reference'), data);
+    const record = await repo.createScopedRecord(moduleId, entityId, data, undefined, fields.filter((field) => field.options.unique).map((field) => field.id));
+    return c.json(redactHidden(record, fields), 201);
+  }));
+  app.get('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+    const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
+    if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
+    const entityId = c.req.param('entityId');
+    if (!(await defs.getEntity(moduleId, entityId))) return missingDefinition(c, 'Entity');
+    const fields = await defs.listFields(moduleId, entityId);
+    const record = await tenantRepository(dependencies.db!, createTenantContext(tenantId)).getScopedRecord(moduleId, entityId, c.req.param('recordId'));
+    return record ? c.json(redactHidden(record, fields)) : missingRecord(c);
+  }));
+  app.patch('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+    const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
+    if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
+    const entityId = c.req.param('entityId');
+    const entity = await defs.getEntity(moduleId, entityId);
+    if (!entity) return missingDefinition(c, 'Entity');
+    const parsed = RecordUpdateInputSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    const fields = await defs.listFields(moduleId, entityId);
+    const repo = tenantRepository(dependencies.db!, createTenantContext(tenantId));
+    const existing = await repo.getScopedRecord(moduleId, entityId, c.req.param('recordId'));
+    if (!existing) return missingRecord(c);
+    const data = validateRecordData(entity, fields, parsed.data.data, { mode: 'update', existing: existing.data });
+    await repo.assertReferences(moduleId, fields.filter((field) => field.type === 'reference'), data);
+    const updated = await repo.updateScopedRecord(moduleId, entityId, c.req.param('recordId'), data, parsed.data.version ?? existing.version, undefined, fields.filter((field) => field.options.unique).map((field) => field.id));
+    return updated ? c.json(redactHidden(updated, fields)) : missingRecord(c);
+  }));
+  app.delete('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+    const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
+    if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
+    if (!(await defs.getEntity(moduleId, c.req.param('entityId')))) return missingDefinition(c, 'Entity');
+    const relations = await defs.listRelations(moduleId);
+    const deleted = await tenantRepository(dependencies.db!, createTenantContext(tenantId)).deleteScopedRecord(moduleId, c.req.param('entityId'), c.req.param('recordId'), relations);
+    return deleted ? c.body(null, 204) : missingRecord(c);
+  }));
+
+  app.get('/modules/:moduleId/entities/:entityId/records/:recordId/relations/:relationId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+    const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
+    if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
+    const relation = await defs.getRelation(moduleId, c.req.param('relationId'));
+    if (!relation) return missingDefinition(c, 'Relation');
+    const entityId = c.req.param('entityId');
+    if (relation.sourceEntityId !== entityId && relation.targetEntityId !== entityId) return invalid(c, 'Relation does not include this entity');
+    const links = await tenantRepository(dependencies.db!, createTenantContext(tenantId)).listRelationTargets(moduleId, entityId, relation, c.req.param('recordId'));
+    return links === undefined ? missingRecord(c) : c.json(links);
+  }));
+  app.post('/modules/:moduleId/entities/:entityId/records/:recordId/relations/:relationId/:targetRecordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+    const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
+    if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
+    const relation = await defs.getRelation(moduleId, c.req.param('relationId'));
+    if (!relation) return missingDefinition(c, 'Relation');
+    if (relation.sourceEntityId !== c.req.param('entityId')) return invalid(c, 'Relation source does not match this entity');
+    const link = await tenantRepository(dependencies.db!, createTenantContext(tenantId)).createRelationLink(moduleId, relation, c.req.param('recordId'), c.req.param('targetRecordId'));
+    return c.json(link, 201);
+  }));
+  app.delete('/modules/:moduleId/entities/:entityId/records/:recordId/relations/:relationId/:targetRecordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+    const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
+    if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
+    const relation = await defs.getRelation(moduleId, c.req.param('relationId'));
+    if (!relation) return missingDefinition(c, 'Relation');
+    if (relation.sourceEntityId !== c.req.param('entityId')) return invalid(c, 'Relation source does not match this entity');
+    const link = await tenantRepository(dependencies.db!, createTenantContext(tenantId)).unlinkRelation(moduleId, relation, c.req.param('recordId'), c.req.param('targetRecordId'));
+    return link ? c.body(null, 204) : missingRecord(c);
   }));
 
   return app;
 }
-
 const productionDb = createDb();
 export const app = createApp({ db: productionDb });
 export const routes = app;

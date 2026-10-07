@@ -14,6 +14,7 @@ export * from './automation';
 export * from './report';
 export * from './dashboard';
 export * from './package';
+export * from './record';
 
 /** Readiness response shared by the API health route. */
 export const HealthCheckSchema = z.object({

@@ -52,6 +52,7 @@ export const metadataDefinitions = pgTable('nexa_metadata_definitions', {
 export const records = pgTable('nexa_records', {
   id: uuid('id').defaultRandom().notNull(),
   tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  moduleId: text('module_id'),
   entityId: text('entity_id').notNull(),
   data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
   createdBy: text('created_by'),
@@ -62,8 +63,10 @@ export const records = pgTable('nexa_records', {
 }, (table) => [
   primaryKey({ columns: [table.tenantId, table.id] }),
   index('nexa_records_tenant_entity_idx').on(table.tenantId, table.entityId),
+  index('nexa_records_tenant_module_entity_idx').on(table.tenantId, table.moduleId, table.entityId),
   index('nexa_records_data_gin_idx').using('gin', table.data),
   index('nexa_records_live_idx').on(table.tenantId, table.entityId).where(sql`${table.deletedAt} IS NULL`),
+  index('nexa_records_live_module_entity_idx').on(table.tenantId, table.moduleId, table.entityId).where(sql`${table.deletedAt} IS NULL`),
 ]);
 
 export const recordLinks = pgTable('nexa_record_links', {

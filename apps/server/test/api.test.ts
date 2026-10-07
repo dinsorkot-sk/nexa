@@ -171,6 +171,56 @@ describe('Hono API (/v1)', () => {
     expect((await send('/entities', 'POST', vehicle)).status).toBe(409);
   });
 
+  it('serves module-scoped record CRUD and relation links with metadata validation', async () => {
+    const api = await createTestApp();
+    const headers = { 'content-type': 'application/json', 'x-tenant-id': SYSTEM_TENANT_ID };
+    const call = (path: string, method: string, body?: unknown) => api.request(`/v1/modules/fleet${path}`, {
+      method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    await api.request('/v1/modules', { method: 'POST', headers, body: JSON.stringify({ id: 'fleet', owner: { id: 'user-1', type: 'user' }, name: 'Fleet', version: '1.0.0' }) });
+    await call('/entities', 'POST', { id: 'vehicle', name: 'vehicle', label: 'Vehicle', pluralLabel: 'Vehicles' });
+    await call('/entities', 'POST', { id: 'part', name: 'part', label: 'Part', pluralLabel: 'Parts' });
+    await call('/entities/vehicle/fields', 'POST', { id: 'name', name: 'name', label: 'Name', type: 'text', options: { required: true, hidden: false, searchable: true } });
+    await call('/entities/vehicle/fields', 'POST', { id: 'secret', name: 'secret', label: 'Secret', type: 'text', options: { hidden: true, defaultValue: 'classified' } });
+    await call('/entities/part/fields', 'POST', { id: 'label', name: 'label', label: 'Label', type: 'text', options: { required: false } });
+    await call('/relations', 'POST', { id: 'parts', name: 'parts', sourceEntityId: 'vehicle', targetEntityId: 'part', type: 'manyToMany', onDelete: 'cascade' });
+    const rejectedCreate = await call('/entities/vehicle/records', 'POST', { data: { name: 'Truck' } });
+    expect(rejectedCreate.status).toBe(409);
+    await call('/transition', 'POST', { to: 'review' });
+    await call('/transition', 'POST', { to: 'published' });
+    await call('/transition', 'POST', { to: 'enabled' });
+    const created = await call('/entities/vehicle/records', 'POST', { data: { name: 'Truck' } });
+    expect(created.status).toBe(201);
+    const vehicle = await created.json() as { id: string; data: Record<string, unknown>; version: number };
+    expect(vehicle.data).toEqual({ name: 'Truck' });
+    const fetchedVehicle = await call(`/entities/vehicle/records/${vehicle.id}`, 'GET');
+    const fetchedVehicleBody = await fetchedVehicle.json();
+    expect(fetchedVehicleBody).toMatchObject({ id: vehicle.id, version: 1, data: { name: 'Truck' } });
+    expect(fetchedVehicleBody.data).not.toHaveProperty('secret');
+
+    const invalid = await call('/entities/vehicle/records', 'POST', { data: {} });
+    expect(invalid.status).toBe(422);
+    await expect(invalid.json()).resolves.toMatchObject({ error: { code: 'VALIDATION_FAILED' } });
+    const tooManyFilters = await call('/entities/vehicle/records?filter=' + encodeURIComponent(JSON.stringify(Array.from({ length: 21 }, () => ({ fieldId: 'name', operator: 'eq', value: 'x' })))), 'GET');
+    expect(tooManyFilters.status).toBe(400);
+
+    const listed = await call('/entities/vehicle/records?search=Truck&limit=1', 'GET');
+    await expect(listed.json()).resolves.toMatchObject({ total: 1, limit: 1, items: [{ data: { name: 'Truck' } }] });
+    const stale = await call(`/entities/vehicle/records/${vehicle.id}`, 'PATCH', { data: { name: 'Truck 2' }, version: 2 });
+    expect(stale.status).toBe(409);
+    const updated = await call(`/entities/vehicle/records/${vehicle.id}`, 'PATCH', { data: { name: 'Truck 2' }, version: 1 });
+    expect(updated.status).toBe(200);
+
+    const partResponse = await call('/entities/part/records', 'POST', { data: { label: 'Wheel' } });
+    expect(partResponse.status).toBe(201);
+    const part = await partResponse.json() as { id: string };
+    const relation = await call(`/entities/vehicle/records/${vehicle.id}/relations/parts/${part.id}`, 'POST');
+    expect(relation.status).toBe(201);
+    expect((await call(`/entities/vehicle/records/${vehicle.id}/relations/parts`, 'GET')).status).toBe(200);
+    expect((await call(`/entities/vehicle/records/${vehicle.id}`, 'DELETE')).status).toBe(204);
+    expect((await call(`/entities/vehicle/records/${vehicle.id}/relations/parts/${part.id}`, 'DELETE')).status).toBe(404);
+  });
+
   it('returns 503 for module routes when the registry database is unavailable', async () => {
     const api = createApp();
     const response = await api.request('/v1/modules');
