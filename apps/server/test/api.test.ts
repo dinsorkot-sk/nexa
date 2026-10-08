@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createDb, runMigrations, SYSTEM_TENANT_ID } from '@nexa/db';
+import { createDb, runMigrations, SYSTEM_TENANT_ID, tenants } from '@nexa/db';
 import type { DbHandle } from '@nexa/db';
 import { app, createApp } from '../hono/app';
 
@@ -9,13 +9,27 @@ async function createTestApp() {
   const db = createDb({ dataDir: 'memory://' });
   handles.push(db);
   await runMigrations(db);
-  await db.db.insert((await import('@nexa/db')).tenants).values({
+  await db.db.insert(tenants).values({
     id: SYSTEM_TENANT_ID,
     slug: 'system',
     name: 'System',
   });
   return createApp({ db });
 }
+
+type Api = ReturnType<typeof createApp>;
+const jsonHeaders = { 'content-type': 'application/json' };
+
+/** Signs a user up and returns the session cookie plus the created user. */
+async function signup(api: Api, email: string, password = 'long-password') {
+  const response = await api.request('/v1/auth/signup', {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ email, password, displayName: email }),
+  });
+  const cookie = /nexa_session=([0-9a-f]{64})/.exec(response.headers.get('set-cookie') ?? '')?.[1];
+  return { response, cookie: cookie ? `nexa_session=${cookie}` : undefined };
+}
+
+const authHeaders = (cookie: string) => ({ ...jsonHeaders, cookie });
 
 afterEach(async () => {
   await Promise.all(handles.splice(0).map((handle) => handle.close()));
@@ -42,25 +56,91 @@ describe('Hono API (/v1)', () => {
     });
   });
 
-  it('requires a valid tenant header for module routes but not health checks', async () => {
+  it('signs up, authenticates, resolves the principal, and logs out', async () => {
+    const api = await createTestApp();
+
+    const anonymous = await api.request('/v1/auth/me');
+    expect(anonymous.status).toBe(401);
+    await expect(anonymous.json()).resolves.toMatchObject({ error: { code: 'AUTH_REQUIRED' } });
+
+    const { response: signupResponse, cookie } = await signup(api, 'admin@example.com');
+    expect(signupResponse.status).toBe(201);
+    expect(cookie).toBeDefined();
+    await expect(signupResponse.json()).resolves.toMatchObject({
+      user: { email: 'admin@example.com', tenantId: SYSTEM_TENANT_ID, status: 'active' },
+    });
+
+    const me = await api.request('/v1/auth/me', { headers: { cookie: cookie! } });
+    expect(me.status).toBe(200);
+    await expect(me.json()).resolves.toMatchObject({ tenantId: SYSTEM_TENANT_ID, roleIds: ['admin'] });
+
+    const duplicate = await signup(api, 'admin@example.com');
+    expect(duplicate.response.status).toBe(409);
+    await expect(duplicate.response.json()).resolves.toMatchObject({ error: { code: 'AUTH_CONFLICT' } });
+
+    const invalidBody = await api.request('/v1/auth/signup', {
+      method: 'POST', headers: jsonHeaders, body: JSON.stringify({ email: 'nope', password: 'short' }),
+    });
+    expect(invalidBody.status).toBe(400);
+
+    const badLogin = await api.request('/v1/auth/login', {
+      method: 'POST', headers: jsonHeaders, body: JSON.stringify({ email: 'admin@example.com', password: 'wrong-password' }),
+    });
+    expect(badLogin.status).toBe(401);
+    await expect(badLogin.json()).resolves.toMatchObject({ error: { code: 'INVALID_CREDENTIALS' } });
+
+    const login = await api.request('/v1/auth/login', {
+      method: 'POST', headers: jsonHeaders, body: JSON.stringify({ email: 'ADMIN@example.com', password: 'long-password' }),
+    });
+    expect(login.status).toBe(200);
+
+    const logout = await api.request('/v1/auth/logout', { method: 'POST', headers: { cookie: cookie! } });
+    expect(logout.status).toBe(204);
+    const afterLogout = await api.request('/v1/auth/me', { headers: { cookie: cookie! } });
+    expect(afterLogout.status).toBe(401);
+  }, 30000);
+
+  it('requires authentication and enforces role-based permissions', async () => {
     const api = await createTestApp();
 
     const missingTenant = await api.request('/v1/modules');
-    expect(missingTenant.status).toBe(400);
-    await expect(missingTenant.json()).resolves.toMatchObject({ error: { code: 'TENANT_REQUIRED' } });
+    expect(missingTenant.status).toBe(401);
+    await expect(missingTenant.json()).resolves.toMatchObject({ error: { code: 'AUTH_REQUIRED' } });
 
-    const invalidTenant = await api.request('/v1/modules', {
-      headers: { 'x-tenant-id': 'not-a-uuid' },
+    const { cookie: adminCookie } = await signup(api, 'admin@example.com');
+    const admin = { ...jsonHeaders, cookie: adminCookie! };
+    const created = await api.request('/v1/modules', {
+      method: 'POST', headers: admin, body: JSON.stringify({ id: 'fleet', owner: { id: 'user-1', type: 'user' }, name: 'Fleet', version: '1.0.0' }),
     });
-    expect(invalidTenant.status).toBe(400);
-    await expect(invalidTenant.json()).resolves.toMatchObject({ error: { code: 'INVALID_TENANT' } });
+    expect(created.status).toBe(201);
 
-    expect((await api.request('/v1/health')).status).toBe(200);
-  }, 15000);
+    const { cookie: memberCookie } = await signup(api, 'member@example.com');
+    const member = { ...jsonHeaders, cookie: memberCookie! };
+
+    const memberReads = await api.request('/v1/modules', { headers: member });
+    expect(memberReads.status).toBe(200);
+
+    const forbiddenCreate = await api.request('/v1/modules', {
+      method: 'POST', headers: member, body: JSON.stringify({ id: 'other', owner: { id: 'user-2', type: 'user' }, name: 'Other', version: '1.0.0' }),
+    });
+    expect(forbiddenCreate.status).toBe(403);
+    await expect(forbiddenCreate.json()).resolves.toMatchObject({ error: { code: 'FORBIDDEN' } });
+
+    const forbiddenDefinition = await api.request('/v1/modules/fleet/entities', {
+      method: 'POST', headers: member, body: JSON.stringify({ id: 'vehicle', name: 'vehicle', label: 'Vehicle', pluralLabel: 'Vehicles' }),
+    });
+    expect(forbiddenDefinition.status).toBe(403);
+
+    const allowedDefinition = await api.request('/v1/modules/fleet/entities', {
+      method: 'POST', headers: admin, body: JSON.stringify({ id: 'vehicle', name: 'vehicle', label: 'Vehicle', pluralLabel: 'Vehicles' }),
+    });
+    expect(allowedDefinition.status).toBe(201);
+  });
 
   it('creates, lists, reads, updates, and transitions tenant-scoped modules', async () => {
     const api = await createTestApp();
-    const headers = { 'content-type': 'application/json', 'x-tenant-id': SYSTEM_TENANT_ID };
+    const { cookie } = await signup(api, 'admin@example.com');
+    const headers = authHeaders(cookie!);
     const input = {
       id: 'fleet',
       owner: { id: 'user-1', type: 'user' },
@@ -101,7 +181,8 @@ describe('Hono API (/v1)', () => {
 
   it('maps invalid input, missing modules, and lifecycle conflicts', async () => {
     const api = await createTestApp();
-    const headers = { 'content-type': 'application/json', 'x-tenant-id': SYSTEM_TENANT_ID };
+    const { cookie } = await signup(api, 'admin@example.com');
+    const headers = authHeaders(cookie!);
 
     const invalidBody = await api.request('/v1/modules', {
       method: 'POST', headers, body: JSON.stringify({ id: 'invalid' }),
@@ -129,7 +210,8 @@ describe('Hono API (/v1)', () => {
 
   it('manages entities, fields, and relations and maps definition errors', async () => {
     const api = await createTestApp();
-    const headers = { 'content-type': 'application/json', 'x-tenant-id': SYSTEM_TENANT_ID };
+    const { cookie } = await signup(api, 'admin@example.com');
+    const headers = authHeaders(cookie!);
     const send = (path: string, method: string, body?: unknown) => api.request(`/v1/modules/fleet${path}`, {
       method, headers, body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -173,7 +255,8 @@ describe('Hono API (/v1)', () => {
 
   it('serves module-scoped record CRUD and relation links with metadata validation', async () => {
     const api = await createTestApp();
-    const headers = { 'content-type': 'application/json', 'x-tenant-id': SYSTEM_TENANT_ID };
+    const { cookie } = await signup(api, 'admin@example.com');
+    const headers = authHeaders(cookie!);
     const call = (path: string, method: string, body?: unknown) => api.request(`/v1/modules/fleet${path}`, {
       method, headers, body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -219,6 +302,36 @@ describe('Hono API (/v1)', () => {
     expect((await call(`/entities/vehicle/records/${vehicle.id}/relations/parts`, 'GET')).status).toBe(200);
     expect((await call(`/entities/vehicle/records/${vehicle.id}`, 'DELETE')).status).toBe(204);
     expect((await call(`/entities/vehicle/records/${vehicle.id}/relations/parts/${part.id}`, 'DELETE')).status).toBe(404);
+  });
+
+  it('computes formula and computed fields on record create', async () => {
+    const api = await createTestApp();
+    const { cookie } = await signup(api, 'admin@example.com');
+    const headers = authHeaders(cookie!);
+    const call = (path: string, method: string, body?: unknown) => api.request(`/v1/modules/fleet${path}`, {
+      method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    await api.request('/v1/modules', { method: 'POST', headers, body: JSON.stringify({ id: 'fleet', owner: { id: 'user-1', type: 'user' }, name: 'Fleet', version: '1.0.0' }) });
+    await call('/entities', 'POST', { id: 'order', name: 'order', label: 'Order', pluralLabel: 'Orders' });
+    await call('/entities/order/fields', 'POST', { id: 'quantity', name: 'quantity', label: 'Quantity', type: 'integer', options: { required: true } });
+    await call('/entities/order/fields', 'POST', { id: 'price', name: 'price', label: 'Price', type: 'number', options: { required: true } });
+    await call('/entities/order/fields', 'POST', { id: 'total', name: 'total', label: 'Total', type: 'computed', options: { expression: 'quantity * price' } });
+    await call('/entities/order/fields', 'POST', { id: 'withTax', name: 'withTax', label: 'With tax', type: 'formula', options: { expression: 'ROUND(total * 1.07, 2)' } });
+
+    const rejectedField = await call('/entities/order/fields', 'POST', { id: 'bad', name: 'bad', label: 'Bad', type: 'formula', options: { expression: 'ghost * 2' } });
+    expect(rejectedField.status).toBe(409);
+    await expect(rejectedField.json()).resolves.toMatchObject({ error: { code: 'DEFINITION_CONFLICT' } });
+
+    await call('/transition', 'POST', { to: 'review' });
+    await call('/transition', 'POST', { to: 'published' });
+    await call('/transition', 'POST', { to: 'enabled' });
+
+    const created = await call('/entities/order/records', 'POST', { data: { quantity: 3, price: 4 } });
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toMatchObject({ data: { quantity: 3, price: 4, total: 12, withTax: 12.84 } });
+
+    const tampered = await call('/entities/order/records', 'POST', { data: { quantity: 3, price: 4, total: 999 } });
+    expect(tampered.status).toBe(422);
   });
 
   it('returns 503 for module routes when the registry database is unavailable', async () => {

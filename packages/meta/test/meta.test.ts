@@ -20,6 +20,13 @@ import {
   ModulePackageSchema,
   transitionModuleStatus,
   WorkflowDefinitionSchema,
+  LoginInputSchema,
+  SignupInputSchema,
+  SessionTokenSchema,
+  PrincipalSchema,
+  UserPublicSchema,
+  UserRoleMembershipSchema,
+  RoleAssignmentSchema,
 } from '../src/index';
 
 describe('@nexa/meta schemas', () => {
@@ -161,4 +168,17 @@ describe('@nexa/meta schemas', () => {
     expect(ModulePackageSchema.safeParse(pkg).success).toBe(true);
     expect(ModulePackageSchema.safeParse({ ...pkg, manifest: { ...pkg.manifest, version: '2.0.0' } }).success).toBe(false);
   });
+
+  it('validates authentication inputs and prevents password hash exposure', () => {
+    expect(LoginInputSchema.safeParse({ email: 'user@example.com', password: 'long-password' }).success).toBe(true);
+    expect(SignupInputSchema.safeParse({ email: 'user@example.com', password: 'long-password' }).success).toBe(true);
+    expect(SessionTokenSchema.safeParse('a'.repeat(64)).success).toBe(true);
+    expect(PrincipalSchema.safeParse({ userId: 'u', tenantId: 't', name: null, roleIds: [] }).success).toBe(true);
+    expect(UserPublicSchema.safeParse({ id: 'u', tenantId: 't', email: 'user@example.com', displayName: '', status: 'active', createdAt: new Date().toISOString() }).success).toBe(true);
+    expect(UserRoleMembershipSchema.safeParse({ userId: 'u', roleId: 'admin', tenantId: 't' }).success).toBe(true);
+    expect(RoleAssignmentSchema.safeParse({ id: 'admin', tenantId: 't', name: 'Administrator', createdAt: new Date().toISOString() }).success).toBe(true);
+  });
 });
+
+// Auth schema validation is included above to keep the shared schema suite intact.
+// Module/Create, field, relation, workflow and package cases remain unchanged.

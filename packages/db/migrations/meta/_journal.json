@@ -36,6 +36,20 @@
       "when": 1791370000000,
       "tag": "0004_module_scoped_records",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791400000000,
+      "tag": "0005_auth_rbac",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791400100000,
+      "tag": "0006_auth_constraints",
+      "breakpoints": true
     }
   ]
 }

@@ -9,6 +9,7 @@ import {
   timestamp,
   uuid,
   integer,
+  unique,
 } from 'drizzle-orm/pg-core';
 
 export const tenants = pgTable('nexa_tenants', {
@@ -104,6 +105,71 @@ export const auditLog = pgTable('nexa_audit_log', {
   index('nexa_audit_log_tenant_time_idx').on(table.tenantId, table.occurredAt),
 ]);
 
+export const users = pgTable('nexa_users', {
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  id: uuid('id').defaultRandom().notNull(),
+  email: text('email').notNull(),
+  passwordHash: text('password_hash').notNull(),
+  displayName: text('display_name').notNull().default(''),
+  status: text('status').notNull().default('active'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.tenantId, table.id] }),
+  index('nexa_users_tenant_email_idx').on(table.tenantId, table.email),
+]);
+
+export const roleAssignments = pgTable('nexa_role_assignments', {
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  id: text('id').notNull(),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
+  isSystemRole: text('is_system_role').notNull().default('false'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.tenantId, table.id] }),
+  index('nexa_role_assignments_tenant_name_idx').on(table.tenantId, table.name),
+]);
+
+export const userRoleMemberships = pgTable('nexa_user_role_memberships', {
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull(),
+  roleId: text('role_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.tenantId, table.userId, table.roleId] }),
+  foreignKey({
+    name: 'nexa_user_role_memberships_user_fk',
+    columns: [table.tenantId, table.userId],
+    foreignColumns: [users.tenantId, users.id],
+  }).onDelete('cascade'),
+  foreignKey({
+    name: 'nexa_user_role_memberships_role_fk',
+    columns: [table.tenantId, table.roleId],
+    foreignColumns: [roleAssignments.tenantId, roleAssignments.id],
+  }).onDelete('cascade'),
+  index('nexa_user_role_memberships_user_idx').on(table.tenantId, table.userId),
+]);
+
+export const sessions = pgTable('nexa_sessions', {
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  id: uuid('id').defaultRandom().notNull(),
+  userId: uuid('user_id').notNull(),
+  tokenDigest: text('token_digest').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, (table) => [
+  primaryKey({ columns: [table.tenantId, table.id] }),
+  unique('nexa_sessions_token_digest_uq').on(table.tokenDigest),
+  foreignKey({
+    name: 'nexa_sessions_user_fk',
+    columns: [table.tenantId, table.userId],
+    foreignColumns: [users.tenantId, users.id],
+  }).onDelete('cascade'),
+  index('nexa_sessions_user_idx').on(table.tenantId, table.userId),
+]);
+
 export const eventLog = pgTable('nexa_event_log', {
   id: uuid('id').defaultRandom().primaryKey(),
   tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
@@ -131,3 +197,11 @@ export type AuditLogEntry = typeof auditLog.$inferSelect;
 export type NewAuditLogEntry = typeof auditLog.$inferInsert;
 export type EventLogEntry = typeof eventLog.$inferSelect;
 export type NewEventLogEntry = typeof eventLog.$inferInsert;
+export type UserRow = typeof users.$inferSelect;
+export type NewUserRow = typeof users.$inferInsert;
+export type RoleAssignmentRow = typeof roleAssignments.$inferSelect;
+export type NewRoleAssignmentRow = typeof roleAssignments.$inferInsert;
+export type UserRoleMembershipRow = typeof userRoleMemberships.$inferSelect;
+export type NewUserRoleMembershipRow = typeof userRoleMemberships.$inferInsert;
+export type SessionRow = typeof sessions.$inferSelect;
+export type NewSessionRow = typeof sessions.$inferInsert;

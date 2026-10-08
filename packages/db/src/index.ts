@@ -6,4 +6,5 @@ export * from './modules';
 export * from './definitions';
 export * from './seed';
 export * from './check';
+export * from './auth-repo';
 export * from './cli';

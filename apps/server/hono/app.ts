@@ -3,22 +3,27 @@ import {
   HealthCheckSchema, ModuleCreateInputSchema, ModuleStatusSchema, ModuleTransitionInputSchema,
   ModuleUpdateInputSchema, RelationCreateInputSchema, RelationUpdateInputSchema,
   RecordCreateInputSchema, RecordQuerySchema, RecordUpdateInputSchema,
+  LoginInputSchema, SignupInputSchema,
 } from '@nexa/meta';
 import {
-  createDb, createTenantContext, DefinitionConflictError, DefinitionNotFoundError,
+  createDb, createTenantContext, SYSTEM_TENANT_ID, DefinitionConflictError, DefinitionNotFoundError,
   RecordConflictError, tenantRepository, definitionRepository, ModuleConflictError,
-  ModuleNotFoundError, moduleRepository,
+  ModuleNotFoundError, moduleRepository, authRepository, identityRepository, AuthConflictError,
 } from '@nexa/db';
 import type { DbHandle } from '@nexa/db';
 import { validateRecordData } from '../../../packages/engine/entity/index';
 import { parseQuery } from '../../../packages/engine/query/index';
+import { hasPlatformPermission } from '../../../packages/engine/permission/index';
+import { digestSessionToken, generateSessionToken, hashPassword, verifyPassword } from '../../../packages/auth/src/index';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 
 export interface AppDependencies { db?: DbHandle }
-function errorResponse(code: string, message: string, status: 400 | 404 | 409 | 422 | 503, details?: unknown) {
+type Principal = { userId: string; tenantId: string; name: string | null; roleIds: string[]; sessionId: string };
+const sessionCookie = 'nexa_session';
+function errorResponse(code: string, message: string, status: 400 | 401 | 403 | 404 | 409 | 422 | 503, details?: unknown) {
   return { error: { code, message, status, ...(details === undefined ? {} : { details }) } };
 }
 
@@ -34,15 +39,99 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.get('/health', (c) => c.json(HealthCheckSchema.parse({ status: 'ok', timestamp: new Date().toISOString(), version: '0.0.1' })));
   app.get('/status', (c) => c.json({ service: 'nexa-platform', version: '0.0.1', framework: 'Nuxt + Hono' }));
 
-  // x-tenant-id is caller-supplied and NOT authentication; replaced by authenticated context in Phase 6.
-  const withTenant = async (c: Context, callback: (db: DbHandle, tenantId: string) => Promise<Response>): Promise<Response> => {
+  const principals = new WeakMap<object, Principal>();
+  const cookieValue = (header: string | undefined, name: string): string | undefined => header?.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1);
+  const setSessionCookie = (c: Context, token: string, expiresAt: Date) => {
+    const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+    c.header('Set-Cookie', `${sessionCookie}=${token}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt.toUTCString()}${secure}`);
+  };
+  const clearSessionCookie = (c: Context) => {
+    const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+    c.header('Set-Cookie', `${sessionCookie}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
+  };
+  app.use('*', async (c, next) => {
+    const token = cookieValue(c.req.header('cookie'), sessionCookie);
+    if (token && dependencies.db) {
+      const digest = digestSessionToken(token);
+      const identity = identityRepository(dependencies.db);
+      const session = await identity.getActiveSession(digest);
+      if (session) {
+        const user = await identity.getUser(session.tenantId, session.userId);
+        if (user?.status === 'active') {
+          const roleIds = await identity.listRoleIds(session.tenantId, session.userId);
+          principals.set(c, { userId: user.id, tenantId: user.tenantId, name: user.displayName || null, roleIds, sessionId: session.id });
+          void authRepository(dependencies.db, createTenantContext(session.tenantId)).touchSession(session.id).catch(() => {});
+        }
+      }
+    }
+    await next();
+  });
+
+  app.post('/auth/signup', async (c) => {
     if (!dependencies.db) return c.json(errorResponse('DB_UNAVAILABLE', 'Database is unavailable', 503), 503);
-    const rawTenantId = c.req.header('x-tenant-id');
-    if (!rawTenantId) return c.json(errorResponse('TENANT_REQUIRED', 'x-tenant-id header is required', 400), 400);
-    let tenantId: string;
-    try { tenantId = createTenantContext(rawTenantId).tenantId; }
-    catch { return c.json(errorResponse('INVALID_TENANT', 'x-tenant-id must be a valid UUID', 400), 400); }
-    try { return await callback(dependencies.db, tenantId); }
+    const parsed = SignupInputSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) return c.json(errorResponse('INVALID_INPUT', parsed.error.message, 400), 400);
+    const tenantId = SYSTEM_TENANT_ID;
+    const context = createTenantContext(tenantId);
+    const auth = authRepository(dependencies.db, context);
+    const email = parsed.data.email.trim().toLowerCase();
+    const passwordHash = await hashPassword(parsed.data.password);
+    try {
+      const user = await auth.createUser({ email, passwordHash, displayName: parsed.data.displayName });
+      const roles = await auth.listRoles();
+      const roleId = roles.length === 0 ? 'admin' : 'member';
+      if (!roles.some((role) => role.id === roleId)) await auth.createRole({ id: roleId, name: roleId === 'admin' ? 'Administrator' : 'Member', isSystemRole: true });
+      await auth.assignRole(user.id, roleId);
+      const token = generateSessionToken();
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      await auth.createSession(user.id, digestSessionToken(token), expiresAt);
+      setSessionCookie(c, token, expiresAt);
+      return c.json({ user: { id: user.id, tenantId, email: user.email, displayName: user.displayName, status: user.status, createdAt: user.createdAt.toISOString() } }, 201);
+    } catch (error) {
+      if (error instanceof AuthConflictError) return c.json(errorResponse('AUTH_CONFLICT', error.message, 409), 409);
+      throw error;
+    }
+  });
+  app.post('/auth/login', async (c) => {
+    if (!dependencies.db) return c.json(errorResponse('DB_UNAVAILABLE', 'Database is unavailable', 503), 503);
+    const parsed = LoginInputSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) return c.json(errorResponse('INVALID_INPUT', parsed.error.message, 400), 400);
+    const identity = identityRepository(dependencies.db);
+    const rows = await identity.findUserByEmail(parsed.data.email);
+    const candidates = await Promise.all(rows.map(async (user) => ({ user, valid: await verifyPassword(parsed.data.password, user.passwordHash) })));
+    const match = candidates.find(({ user, valid }) => valid && user.status === 'active');
+    if (!match) return c.json(errorResponse('INVALID_CREDENTIALS', 'Email or password is incorrect', 401), 401);
+    const roleIds = await identity.listRoleIds(match.user.tenantId, match.user.id);
+    if (!roleIds.length) return c.json(errorResponse('INVALID_CREDENTIALS', 'Email or password is incorrect', 401), 401);
+    const token = generateSessionToken();
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await authRepository(dependencies.db, createTenantContext(match.user.tenantId)).createSession(match.user.id, digestSessionToken(token), expiresAt);
+    setSessionCookie(c, token, expiresAt);
+    return c.json({ user: { id: match.user.id, tenantId: match.user.tenantId, email: match.user.email, displayName: match.user.displayName, status: match.user.status, createdAt: match.user.createdAt.toISOString() } });
+  });
+  app.get('/auth/me', (c) => {
+    const principal = principals.get(c);
+    if (!principal) return c.json(errorResponse('AUTH_REQUIRED', 'Authentication is required', 401), 401);
+    return c.json({ userId: principal.userId, tenantId: principal.tenantId, name: principal.name, roleIds: principal.roleIds });
+  });
+  app.post('/auth/logout', async (c) => {
+    const principal = principals.get(c);
+    const token = cookieValue(c.req.header('cookie'), sessionCookie);
+    if (principal && token && dependencies.db) await authRepository(dependencies.db, createTenantContext(principal.tenantId)).revokeSession(digestSessionToken(token));
+    clearSessionCookie(c);
+    return c.body(null, 204);
+  });
+
+  const withTenant = async (c: Context, permissionOrCallback: 'module:read' | 'module:write' | 'definition:read' | 'definition:write' | 'record:read' | 'record:write' | ((db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>): Promise<Response> => {
+    const permission = typeof permissionOrCallback === 'function'
+      ? (c.req.path.includes('/records') ? (c.req.method === 'GET' ? 'record:read' : 'record:write') : (c.req.method === 'GET' ? 'definition:read' : 'definition:write'))
+      : permissionOrCallback;
+    const callback = typeof permissionOrCallback === 'function' ? permissionOrCallback : maybeCallback!;
+    if (!dependencies.db) return c.json(errorResponse('DB_UNAVAILABLE', 'Database is unavailable', 503), 503);
+    const principal = principals.get(c);
+    if (!principal) return c.json(errorResponse('AUTH_REQUIRED', 'Authentication is required', 401), 401);
+    if (!hasPlatformPermission(principal, permission)) return c.json(errorResponse('FORBIDDEN', 'Permission denied', 403), 403);
+    try { return await callback(dependencies.db, principal.tenantId, principal); }
     catch (error) {
       if (error instanceof ModuleNotFoundError) return c.json(errorResponse('MODULE_NOT_FOUND', error.message, 404), 404);
       if (error instanceof ModuleConflictError) return c.json(errorResponse('MODULE_CONFLICT', error.message, 409), 409);
@@ -55,8 +144,16 @@ export function createApp(dependencies: AppDependencies = {}) {
       throw error;
     }
   };
-  const withModules = (c: Context, callback: (repo: ReturnType<typeof moduleRepository>, tenantId: string) => Promise<Response>) => withTenant(c, (db, tenantId) => callback(moduleRepository(db, createTenantContext(tenantId)), tenantId));
-  const withDefinitions = (c: Context, callback: (repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string) => Promise<Response>) => withTenant(c, (db, tenantId) => callback(definitionRepository(db, createTenantContext(tenantId)), c.req.param('moduleId') ?? '', tenantId));
+  const withModules = (c: Context, permissionOrCallback: 'module:read' | 'module:write' | ((repo: ReturnType<typeof moduleRepository>, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (repo: ReturnType<typeof moduleRepository>, tenantId: string, principal: Principal) => Promise<Response>) => withTenant(c, typeof permissionOrCallback === 'function' ? (c.req.method === 'GET' ? 'module:read' : 'module:write') : permissionOrCallback, (db, tenantId, principal) => {
+    const repo = moduleRepository(db, createTenantContext(tenantId));
+    return typeof permissionOrCallback === 'function' ? permissionOrCallback(repo, tenantId, principal) : maybeCallback!(repo, tenantId, principal);
+  });
+  const withDefinitions = (c: Context, permissionOrCallback: 'definition:read' | 'definition:write' | 'record:read' | 'record:write' | ((repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string, principal: Principal) => Promise<Response>) => withTenant(c, typeof permissionOrCallback === 'function'
+    ? (c.req.path.includes('/records') ? (c.req.method === 'GET' ? 'record:read' : 'record:write') : (c.req.method === 'GET' ? 'definition:read' : 'definition:write'))
+    : permissionOrCallback, (db, tenantId, principal) => {
+      const repo = definitionRepository(db, createTenantContext(tenantId));
+      return typeof permissionOrCallback === 'function' ? permissionOrCallback(repo, c.req.param('moduleId') ?? '', tenantId, principal) : maybeCallback!(repo, c.req.param('moduleId') ?? '', tenantId, principal);
+    });
   const invalid = (c: Context, message: string) => c.json(errorResponse('INVALID_INPUT', message, 400), 400);
   const missingDefinition = (c: Context, what: string) => c.json(errorResponse('DEFINITION_NOT_FOUND', `${what} not found`, 404), 404);
   const missingRecord = (c: Context) => c.json(errorResponse('RECORD_NOT_FOUND', 'Record not found', 404), 404);

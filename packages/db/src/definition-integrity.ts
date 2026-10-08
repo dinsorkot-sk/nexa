@@ -1,4 +1,5 @@
 import type { EntityDefinition, FieldDefinition, RelationDefinition } from '@nexa/meta';
+import { extractFormulaReferences, parseExpression } from '../../engine/formula/index';
 
 export interface DefinitionValidationIssue {
   kind: 'entity' | 'field' | 'relation';
@@ -113,6 +114,36 @@ export function validateModuleSchema(entities: EntityDefinition[], fields: Field
           id: relation.id,
           message: `Relation target field "${relation.targetFieldId}" does not exist in entity "${relation.targetEntityId}"`,
           path: ['targetFieldId'],
+        });
+      }
+    }
+  }
+
+  // Check formula/computed expressions parse and reference existing fields in the same entity
+  for (const field of fields) {
+    if (field.type !== 'formula' && field.type !== 'computed') continue;
+    const expression = field.options.expression;
+    if (!expression) continue; // schema-level rule already requires expression
+    let ast;
+    try {
+      ast = parseExpression(expression);
+    } catch (error) {
+      issues.push({
+        kind: 'field',
+        id: field.id,
+        message: `Invalid expression: ${error instanceof Error ? error.message : String(error)}`,
+        path: ['options', 'expression'],
+      });
+      continue;
+    }
+    const entityFields = fieldsByEntityId.get(field.entityId) || new Map();
+    for (const ref of extractFormulaReferences(ast)) {
+      if (!entityFields.has(ref)) {
+        issues.push({
+          kind: 'field',
+          id: field.id,
+          message: `Expression references field "${ref}" which does not exist in entity "${field.entityId}"`,
+          path: ['options', 'expression'],
         });
       }
     }

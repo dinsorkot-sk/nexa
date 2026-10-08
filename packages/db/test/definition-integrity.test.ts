@@ -47,4 +47,42 @@ describe('validateModuleSchema', () => {
       expect.stringContaining('source field'),
     ]);
   });
+
+  it('validates formula expression syntax and field references', () => {
+    const issues = validateModuleSchema(
+      [entity('e')],
+      [
+        field('name', 'e', 'name'),
+        field('quantity', 'e', 'quantity'),
+        field('price', 'e', 'price'),
+        {
+          id: 'total', entityId: 'e', name: 'total', label: 'Total', type: 'computed' as const, position: 0,
+          options: { required: false, unique: false, readonly: false, hidden: false, searchable: false, sortable: true, filterable: true, indexed: false, isStatus: false, ui: {}, expression: 'quantity * price' },
+        } satisfies FieldDefinition,
+        {
+          id: 'broken', entityId: 'e', name: 'broken', label: 'Broken', type: 'formula' as const, position: 0,
+          options: { required: false, unique: false, readonly: false, hidden: false, searchable: false, sortable: true, filterable: true, indexed: false, isStatus: false, ui: {}, expression: 'quantity * ghost' },
+        } satisfies FieldDefinition,
+      ],
+      [],
+    );
+    expect(issues).toHaveLength(1);
+    expect(issues[0].id).toBe('broken');
+    expect(issues[0].message).toMatch(/does not exist/);
+  });
+
+  it('rejects formula expressions with invalid syntax', () => {
+    const issues = validateModuleSchema(
+      [entity('e')],
+      [
+        {
+          id: 'bad', entityId: 'e', name: 'bad', label: 'Bad', type: 'formula' as const, position: 0,
+          options: { required: false, unique: false, readonly: false, hidden: false, searchable: false, sortable: true, filterable: true, indexed: false, isStatus: false, ui: {}, expression: 'eval(quantity)' },
+        } satisfies FieldDefinition,
+      ],
+      [],
+    );
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toMatch(/Invalid expression/);
+  });
 });

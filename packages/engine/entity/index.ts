@@ -1,4 +1,5 @@
 import type { EntityDefinition, FieldDefinition } from '@nexa/meta';
+import { evaluateFormulas } from '../formula/index';
 
 export interface RecordValidationIssue {
   fieldId?: string;
@@ -53,7 +54,9 @@ function validateValue(field: FieldDefinition, value: unknown): string | undefin
   }
   if (type === 'reference') return typeof value === 'string' ? undefined : 'Expected a record ID';
   if (type === 'json') return typeof value === 'object' && value !== null ? undefined : 'Expected a JSON object or array';
-  if (['formula', 'computed', 'autoNumber'].includes(type)) return 'This field type is not writable yet';
+  // formula/computed values are computed server-side from sibling fields;
+  // autoNumber is deferred (not writable yet).
+  if (['formula', 'computed', 'autoNumber'].includes(type)) return 'This field is not writable';
   return undefined;
 }
 
@@ -72,16 +75,26 @@ export function validateRecordData(
     const field = known.get(key);
     if (!field) issues.push({ fieldId: key, message: 'Unknown field' });
     else if (field.options.readonly || field.options.hidden) issues.push({ fieldId: key, message: 'Field is not writable' });
+    else if (['formula', 'computed', 'autoNumber'].includes(field.type)) issues.push({ fieldId: key, message: 'Field is not writable' });
   }
   for (const field of entityFields) {
     if (options.mode === 'create' && !(field.id in merged) && field.options.defaultValue !== undefined) {
       merged[field.id] = field.options.defaultValue;
     }
+    // formula/computed fields are never validated as input; they are
+    // computed server-side below after all writable fields validate.
+    if (['formula', 'computed', 'autoNumber'].includes(field.type)) continue;
     const issue = validateValue(field, merged[field.id]);
     if (issue) issues.push({ fieldId: field.id, message: issue });
   }
   if (issues.length) throw new RecordValidationError(issues);
-  return merged;
+
+  // Compute formula/computed fields in dependency order; cycle and
+  // evaluation errors surface as validation issues.
+  const formulaResult = evaluateFormulas(entityFields, merged);
+  if (formulaResult.errors.length) throw new RecordValidationError(formulaResult.errors);
+
+  return { ...merged, ...formulaResult.computed };
 }
 
 export const entityEngineStatus = { status: 'initialized', module: 'entity' };

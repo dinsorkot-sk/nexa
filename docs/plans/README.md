@@ -11,8 +11,8 @@ Rule: one phase per version branch (`v0.0.1`, `v0.0.2`, ...), in order. Phase 0 
 | 2 | v0.0.3 | DB, migrations, tenancy, CLI migrate/seed/check | complete |
 | 3 | v0.0.4 | Module registry and lifecycle (FR-1) | complete |
 | 4 | v0.0.5 | Entity/Field/Relation engine (FR-2, FR-3) | complete |
-| 5 | v0.0.6 | Dynamic CRUD/API (FR-4) | complete | **Verified 2026-10-07:** full tests, typecheck, db:check and build pass. `pnpm lint` reports 0 errors and six pre-existing Vue formatting warnings in `apps/web/app.vue` plus its generated worktree copy. Build reports existing Tailwind nesting and Node deprecation warnings. Record rows with unresolved ownership retain `module_id = NULL`; do not expose caller-supplied `x-tenant-id` publicly before Phase 6 auth/RBAC.
-| 6 | v0.0.7 | Auth + RBAC (FR-7) | todo |
+| 5 | v0.0.6 | Dynamic CRUD/API (FR-4) | complete | **Verified 2026-10-07:** full tests, typecheck, db:check and build pass. `pnpm lint` reports 0 errors and six pre-existing Vue formatting warnings in `apps/web/app.vue` plus its generated worktree copy. Build reports existing Tailwind nesting and Node deprecation warnings. Record rows with unresolved ownership retain `module_id = NULL`; do not expose caller-supplied `x-tenant-id` publicly before Phase 6 auth/RBAC. Deviation: phase 6 committed on v0.0.6 instead of fresh branch — recorded per phase 5 precedent.
+| 6 | v0.0.7 | Auth + RBAC (FR-7) | complete | **Verified 2026-10-08:** full tests (172/172), typecheck, db:migrate + db:check and build pass (web build verified on Node 22.21.0; local default 22.17.0 is below Nuxt 4's requirement). `pnpm lint` reports 0 errors and 9 pre-existing Vue formatting warnings in `apps/web/app.vue`. Committed on `v0.0.6` per the Phase 5 branch-deviation precedent. |
 | 7 | v0.0.8 | Formula/validation/computed (FR-8) | todo |
 | 8 | v0.0.9 | Module Builder UI (FR-6) | todo |
 | 9 | v0.0.10 | Dynamic UI runtime, collaboration, import/export (FR-5) | todo |
