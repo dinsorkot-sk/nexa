@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cn } from '../src/index';
+import { cn } from '../src/cn';
 
 describe('@nexa/ui utilities', () => {
   it('merges tailwind class names correctly', () => {
