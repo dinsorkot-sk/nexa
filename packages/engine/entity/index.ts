@@ -81,9 +81,15 @@ export function validateRecordData(
     if (options.mode === 'create' && !(field.id in merged) && field.options.defaultValue !== undefined) {
       merged[field.id] = field.options.defaultValue;
     }
+    // autoNumber generation is deferred to a later phase; reject rather than
+    // silently omitting the field from stored records.
+    if (field.type === 'autoNumber') {
+      issues.push({ fieldId: field.id, message: 'autoNumber fields are not supported yet' });
+      continue;
+    }
     // formula/computed fields are never validated as input; they are
     // computed server-side below after all writable fields validate.
-    if (['formula', 'computed', 'autoNumber'].includes(field.type)) continue;
+    if (field.type === 'formula' || field.type === 'computed') continue;
     const issue = validateValue(field, merged[field.id]);
     if (issue) issues.push({ fieldId: field.id, message: issue });
   }
@@ -94,7 +100,35 @@ export function validateRecordData(
   const formulaResult = evaluateFormulas(entityFields, merged);
   if (formulaResult.errors.length) throw new RecordValidationError(formulaResult.errors);
 
+  // Validate produced values against the constraints that are expressible
+  // without a declared result type (required, finite numbers, numeric bounds).
+  for (const field of entityFields) {
+    if (field.type !== 'formula' && field.type !== 'computed') continue;
+    const value = formulaResult.computed[field.id];
+    const issue = validateComputedResult(field, value);
+    if (issue) issues.push({ fieldId: field.id, message: issue });
+  }
+  if (issues.length) throw new RecordValidationError(issues);
+
   return { ...merged, ...formulaResult.computed };
+}
+
+/**
+ * Validate a computed/formula result against its field constraints.
+ *
+ * formula/computed fields declare no output type in the metadata model, so
+ * only type-agnostic constraints are applied: required, numeric finiteness,
+ * and numeric bounds when the result is a number.
+ */
+function validateComputedResult(field: FieldDefinition, value: unknown): string | undefined {
+  const { options } = field;
+  if (value === null || value === undefined) return options.required ? 'A value is required' : undefined;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return 'Result is not a finite number';
+    if (options.min !== undefined && value < options.min) return `Must be at least ${options.min}`;
+    if (options.max !== undefined && value > options.max) return `Must be at most ${options.max}`;
+  }
+  return undefined;
 }
 
 export const entityEngineStatus = { status: 'initialized', module: 'entity' };

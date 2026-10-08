@@ -72,4 +72,63 @@ describe('validateRecordData - formula/computed', () => {
     expect(validateRecordData(entity, fields, {})).toMatchObject({ total: 0 });
     expect(validateRecordData(entity, fields, { base: 3 })).toMatchObject({ total: 6 });
   });
+
+  it('recomputes formula fields on update from merged values', () => {
+    const fields = [
+      field('quantity', 'integer', { required: true }),
+      field('price', 'number', { required: true }),
+      field('total', 'computed', { expression: 'quantity * price' }),
+      field('withTax', 'formula', { expression: 'ROUND(total * 1.1, 2)' }),
+    ];
+    const existing = validateRecordData(entity, fields, { quantity: 2, price: 5 });
+    const updated = validateRecordData(
+      entity,
+      fields,
+      { price: 10 },
+      { mode: 'update', existing },
+    );
+    expect(updated).toMatchObject({ quantity: 2, price: 10, total: 20, withTax: 22 });
+  });
+
+  it('rejects computed results that violate field constraints', () => {
+    const bounded = [
+      field('price', 'number', { required: true }),
+      field('capped', 'computed', { expression: 'price * 2', max: 10 }),
+    ];
+    expect(() => validateRecordData(entity, bounded, { price: 6 })).toThrow(RecordValidationError);
+
+    const floored = [
+      field('price', 'number', { required: true }),
+      field('floored', 'computed', { expression: 'price - 100', min: 0 }),
+    ];
+    expect(() => validateRecordData(entity, floored, { price: 5 })).toThrow(RecordValidationError);
+
+    const requiredComputed = [
+      field('base', 'number'),
+      field('maybe', 'computed', { expression: 'base', required: true }),
+    ];
+    expect(() => validateRecordData(entity, requiredComputed, {})).toThrow(RecordValidationError);
+    expect(validateRecordData(entity, requiredComputed, { base: 1 })).toMatchObject({ maybe: 1 });
+  });
+
+  it('rejects non-finite computed results', () => {
+    const fields = [
+      field('big', 'number', { required: true }),
+      field('huge', 'computed', { expression: 'big * big' }),
+    ];
+    expect(() => validateRecordData(entity, fields, { big: 1e308 })).toThrow(RecordValidationError);
+  });
+
+  it('rejects records for unsupported autoNumber fields', () => {
+    const fields = [
+      field('code', 'autoNumber'),
+      field('name', 'text', { required: true }),
+    ];
+    expect(() => validateRecordData(entity, fields, { name: 'Truck' })).toThrow(RecordValidationError);
+  });
+
+  it('rejects client-supplied autoNumber values', () => {
+    const fields = [field('code', 'autoNumber')];
+    expect(() => validateRecordData(entity, fields, { code: 'A1' })).toThrow(RecordValidationError);
+  });
 });

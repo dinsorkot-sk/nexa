@@ -111,12 +111,32 @@ describe('@nexa/meta schemas', () => {
     expect(EntityUpdateInputSchema.safeParse({ id: 'other' }).success).toBe(false);
     expect(FieldCreateInputSchema.safeParse({ id: 'f', name: 'f', label: 'F', type: 'text' }).success).toBe(true);
     expect(FieldCreateInputSchema.safeParse({ id: 'f', entityId: 'e', name: 'f', label: 'F', type: 'text' }).success).toBe(false);
+    expect(FieldCreateInputSchema.safeParse({ id: 'f', name: 'f', label: 'F', type: 'text', options: { choices: [{ value: 'a', label: 'A' }] } }).success).toBe(true);
+    expect(FieldCreateInputSchema.safeParse({ id: 'f', name: 'f', label: 'F', type: 'select' }).success).toBe(false);
+    expect(FieldCreateInputSchema.safeParse({ id: 'f', name: 'f', label: 'F', type: 'reference' }).success).toBe(false);
     expect(FieldUpdateInputSchema.safeParse({ type: 'number' }).success).toBe(false);
     expect(RelationCreateInputSchema.safeParse({
       id: 'r', name: 'r', sourceEntityId: 'a', targetEntityId: 'a', type: 'manyToMany',
     }).success).toBe(false);
     expect(RelationUpdateInputSchema.safeParse({ sourceEntityId: 'x' }).success).toBe(false);
     expect(RelationUpdateInputSchema.safeParse({ onDelete: 'cascade' }).success).toBe(true);
+  });
+
+  it('requires expressions on computed field creation and rejects empty ones', () => {
+    expect(FieldCreateInputSchema.safeParse({ id: 'f', name: 'f', label: 'F', type: 'formula' }).success).toBe(false);
+    expect(FieldCreateInputSchema.safeParse({ id: 'f', name: 'f', label: 'F', type: 'computed' }).success).toBe(false);
+    expect(FieldCreateInputSchema.safeParse({ id: 'f', name: 'f', label: 'F', type: 'formula', options: { expression: '   ' } }).success).toBe(false);
+    expect(FieldCreateInputSchema.safeParse({ id: 'f', name: 'f', label: 'F', type: 'computed', options: { expression: 'a + 1' } }).success).toBe(true);
+  });
+
+  it('rejects autoNumber creation and computed defaultValue', () => {
+    expect(FieldCreateInputSchema.safeParse({ id: 'f', name: 'f', label: 'F', type: 'autoNumber' }).success).toBe(false);
+    expect(FieldCreateInputSchema.safeParse({ id: 'f', name: 'f', label: 'F', type: 'autoNumber', options: { defaultValue: 1 } }).success).toBe(false);
+    expect(FieldCreateInputSchema.safeParse({ id: 'f', name: 'f', label: 'F', type: 'formula', options: { expression: '1 + 1', defaultValue: 5 } }).success).toBe(false);
+    // stored legacy definitions without these restrictions remain readable
+    expect(FieldDefinitionSchema.safeParse({
+      id: 'legacy', entityId: 'e', name: 'legacy', label: 'Legacy', type: 'autoNumber', position: 0, options: {},
+    }).success).toBe(true);
   });
 
   it('validates bounded record input and query defaults', () => {

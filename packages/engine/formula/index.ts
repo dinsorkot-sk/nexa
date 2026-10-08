@@ -383,27 +383,41 @@ function evalNode(node: FormulaAstNode, fields: Map<string, unknown>): unknown {
             if (Number.isNaN(ln) || Number.isNaN(rn)) {
               return String(left) + String(right);
             }
-            return ln + rn;
+            const result = ln + rn;
+            if (!Number.isFinite(result)) throw new FormulaEvaluationError('Result is not a finite number');
+            return result;
           }
-          return toNumber(left) + toNumber(right);
+          const result = toNumber(left) + toNumber(right);
+          if (!Number.isFinite(result)) throw new FormulaEvaluationError('Result is not a finite number');
+          return result;
         }
-        case '-':
+        case '-': {
           if (left === null || right === null) return null;
-          return toNumber(left) - toNumber(right);
-        case '*':
+          const result = toNumber(left) - toNumber(right);
+          if (!Number.isFinite(result)) throw new FormulaEvaluationError('Result is not a finite number');
+          return result;
+        }
+        case '*': {
           if (left === null || right === null) return null;
-          return toNumber(left) * toNumber(right);
+          const result = toNumber(left) * toNumber(right);
+          if (!Number.isFinite(result)) throw new FormulaEvaluationError('Result is not a finite number');
+          return result;
+        }
         case '/': {
           if (left === null || right === null) return null;
           const divisor = toNumber(right);
           if (divisor === 0) throw new FormulaEvaluationError('Division by zero');
-          return toNumber(left) / divisor;
+          const result = toNumber(left) / divisor;
+          if (!Number.isFinite(result)) throw new FormulaEvaluationError('Result is not a finite number');
+          return result;
         }
         case '%': {
           if (left === null || right === null) return null;
           const divisor = toNumber(right);
           if (divisor === 0) throw new FormulaEvaluationError('Division by zero');
-          return toNumber(left) % divisor;
+          const result = toNumber(left) % divisor;
+          if (!Number.isFinite(result)) throw new FormulaEvaluationError('Result is not a finite number');
+          return result;
         }
         default:
           throw new FormulaEvaluationError(`Unknown operator: ${node.op}`);
@@ -430,10 +444,12 @@ function evalNode(node: FormulaAstNode, fields: Map<string, unknown>): unknown {
           const val = evalNode(node.args[0], fields);
           if (val === null) return null;
           const n = toNumber(val);
-          if (Number.isNaN(n)) throw new FormulaEvaluationError('ROUND argument is not a number');
+          if (!Number.isFinite(n)) throw new FormulaEvaluationError('ROUND argument is not a number');
           const decimals = node.args.length === 2 ? Math.trunc(toNumber(evalNode(node.args[1], fields))) : 0;
           const factor = 10 ** Math.min(Math.max(decimals, 0), 12);
-          return Math.round(n * factor) / factor;
+          const rounded = Math.round(n * factor) / factor;
+          if (!Number.isFinite(rounded)) throw new FormulaEvaluationError('Result is not a finite number');
+          return rounded;
         }
         default:
           throw new FormulaEvaluationError(`Disallowed function: ${node.name}`);
@@ -447,37 +463,38 @@ export function evaluateFormula(ast: FormulaAstNode, recordData: Record<string, 
 }
 
 // ---------------------------------------------------------------------------
-// Dependency-ordered batch evaluation
+// Dependency graph (shared by record evaluation and definition integrity)
 // ---------------------------------------------------------------------------
-export interface FormulaBatchResult {
-  computed: Record<string, unknown>;
-  errors: Array<{ fieldId: string; message: string }>;
+export interface FormulaGraphField {
+  id: string;
+  type: string;
+  options: { expression?: string };
 }
 
-interface FormulaNode {
+export interface FormulaGraphNode {
   id: string;
   ast: FormulaAstNode;
   /** IDs of other formula/computed fields this node depends on. */
   formulaDeps: string[];
 }
 
+export interface ParsedFormulaGraph {
+  nodes: FormulaGraphNode[];
+  /** Fields whose expression failed to parse. */
+  parseErrors: Array<{ fieldId: string; message: string }>;
+}
+
 /**
- * Compute formula/computed values in dependency order.
- *
- * Only formula-to-formula edges constrain ordering; references to ordinary
- * fields always resolve from `inputData` (missing → null). Cyclic
- * formula graphs are reported as errors and left unevaluated.
+ * Parse the formula/computed fields of one entity into a dependency graph.
+ * Only formula-to-formula edges become graph edges; references to ordinary
+ * fields are resolved from record data at evaluation time.
  */
-export function evaluateFormulas(
-  fields: Array<{ id: string; type: string; options: { expression?: string } }>,
-  inputData: Record<string, unknown>,
-): FormulaBatchResult {
-  const result: FormulaBatchResult = { computed: {}, errors: [] };
+export function parseFormulaGraph(fields: FormulaGraphField[]): ParsedFormulaGraph {
   const formulaIds = new Set(
     fields.filter((f) => f.type === 'formula' || f.type === 'computed').map((f) => f.id),
   );
-
-  const nodes: FormulaNode[] = [];
+  const nodes: FormulaGraphNode[] = [];
+  const parseErrors: ParsedFormulaGraph['parseErrors'] = [];
   for (const field of fields) {
     if (!formulaIds.has(field.id)) continue;
     if (!field.options.expression) continue;
@@ -485,14 +502,21 @@ export function evaluateFormulas(
     try {
       ast = parseExpression(field.options.expression);
     } catch (e) {
-      result.errors.push({ fieldId: field.id, message: e instanceof Error ? e.message : 'Invalid expression' });
+      parseErrors.push({ fieldId: field.id, message: e instanceof Error ? e.message : 'Invalid expression' });
       continue;
     }
     const formulaDeps = extractFormulaReferences(ast).filter((ref) => formulaIds.has(ref));
     nodes.push({ id: field.id, ast, formulaDeps });
   }
+  return { nodes, parseErrors };
+}
 
-  // Kahn's algorithm over formula-to-formula edges only.
+/**
+ * Kahn's algorithm over formula-to-formula edges. Returns a topological order
+ * plus the IDs of nodes that never became eligible — those participate in a
+ * cycle (including self-references).
+ */
+export function topologicalFormulaOrder(nodes: FormulaGraphNode[]): { sorted: string[]; cyclic: string[] } {
   const inDegree = new Map(nodes.map((n) => [n.id, n.formulaDeps.length]));
   const queue: string[] = [];
   for (const [id, deg] of inDegree) {
@@ -509,11 +533,36 @@ export function evaluateFormulas(
       }
     }
   }
+  const sortedSet = new Set(sorted);
+  return { sorted, cyclic: nodes.map((n) => n.id).filter((id) => !sortedSet.has(id)) };
+}
 
-  for (const node of nodes) {
-    if (!sorted.includes(node.id)) {
-      result.errors.push({ fieldId: node.id, message: 'Circular reference detected' });
-    }
+// ---------------------------------------------------------------------------
+// Dependency-ordered batch evaluation
+// ---------------------------------------------------------------------------
+export interface FormulaBatchResult {
+  computed: Record<string, unknown>;
+  errors: Array<{ fieldId: string; message: string }>;
+}
+
+/**
+ * Compute formula/computed values in dependency order.
+ *
+ * Only formula-to-formula edges constrain ordering; references to ordinary
+ * fields always resolve from `inputData` (missing → null). Cyclic
+ * formula graphs are reported as errors and left unevaluated.
+ */
+export function evaluateFormulas(
+  fields: FormulaGraphField[],
+  inputData: Record<string, unknown>,
+): FormulaBatchResult {
+  const result: FormulaBatchResult = { computed: {}, errors: [] };
+  const { nodes, parseErrors } = parseFormulaGraph(fields);
+  result.errors.push(...parseErrors);
+
+  const { sorted, cyclic } = topologicalFormulaOrder(nodes);
+  for (const id of cyclic) {
+    result.errors.push({ fieldId: id, message: 'Circular reference detected' });
   }
 
   const merged: Record<string, unknown> = { ...inputData };

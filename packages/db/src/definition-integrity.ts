@@ -1,5 +1,5 @@
 import type { EntityDefinition, FieldDefinition, RelationDefinition } from '@nexa/meta';
-import { extractFormulaReferences, parseExpression } from '../../engine/formula/index';
+import { extractFormulaReferences, parseExpression, parseFormulaGraph, topologicalFormulaOrder } from '../../engine/formula/index';
 
 export interface DefinitionValidationIssue {
   kind: 'entity' | 'field' | 'relation';
@@ -119,6 +119,19 @@ export function validateModuleSchema(entities: EntityDefinition[], fields: Field
     }
   }
 
+  // autoNumber generation is deferred; reject definitions that bypassed
+  // creation-time validation rather than failing on every record write.
+  for (const field of fields) {
+    if (field.type === 'autoNumber') {
+      issues.push({
+        kind: 'field',
+        id: field.id,
+        message: 'autoNumber fields are not supported yet',
+        path: ['type'],
+      });
+    }
+  }
+
   // Check formula/computed expressions parse and reference existing fields in the same entity
   for (const field of fields) {
     if (field.type !== 'formula' && field.type !== 'computed') continue;
@@ -146,6 +159,29 @@ export function validateModuleSchema(entities: EntityDefinition[], fields: Field
           path: ['options', 'expression'],
         });
       }
+    }
+  }
+
+  // Detect formula cycles at definition time so an invalid graph cannot be
+  // written and then fail silently on every record operation.
+  const formulaFieldsByEntity = new Map<string, typeof fields>();
+  for (const field of fields) {
+    if (field.type !== 'formula' && field.type !== 'computed') continue;
+    const group = formulaFieldsByEntity.get(field.entityId) ?? [];
+    group.push(field);
+    formulaFieldsByEntity.set(field.entityId, group);
+  }
+  for (const [entityId, group] of formulaFieldsByEntity) {
+    const { nodes, parseErrors } = parseFormulaGraph(group);
+    if (parseErrors.length > 0) continue; // already reported by the syntax check above
+    const { cyclic } = topologicalFormulaOrder(nodes);
+    for (const id of cyclic) {
+      issues.push({
+        kind: 'field',
+        id,
+        message: `Expression creates a circular reference in entity "${entityId}"`,
+        path: ['options', 'expression'],
+      });
     }
   }
 

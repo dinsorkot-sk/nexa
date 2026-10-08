@@ -4,6 +4,8 @@ import {
   evaluateFormulas,
   extractFormulaReferences,
   parseExpression,
+  parseFormulaGraph,
+  topologicalFormulaOrder,
 } from './index';
 
 describe('formula parser and evaluator', () => {
@@ -40,6 +42,56 @@ describe('formula parser and evaluator', () => {
 
   it('reports division by zero', () => {
     expect(() => evaluateFormula(parseExpression('10 / divisor'), { divisor: 0 })).toThrow(/Division by zero/);
+  });
+
+  it('rejects non-finite arithmetic results', () => {
+    // Overflow: finite operands producing Infinity are an evaluation error.
+    expect(() => evaluateFormula(parseExpression('a * b'), { a: 1e308, b: 10 })).toThrow(/not a finite/);
+    // Non-numeric operand in arithmetic (not string concatenation).
+    expect(() => evaluateFormula(parseExpression('a - b'), { a: 'x', b: 1 })).toThrow(/not a finite/);
+    expect(() => evaluateFormula(parseExpression('a / b'), { a: 1, b: 'x' })).toThrow(/not a finite/);
+    // Strings still concatenate when either side is a string.
+    expect(evaluateFormula(parseExpression('a + b'), { a: 'x', b: 1 })).toBe('x1');
+    // Null arithmetic stays null (handled before the finiteness check).
+    expect(evaluateFormula(parseExpression('a * b'), { a: null, b: 5 })).toBe(null);
+  });
+
+  it('shares cycle detection between the graph helper and batch evaluation', () => {
+    const fields = [
+      { id: 'a', type: 'formula', options: { expression: 'b + 1' } },
+      { id: 'b', type: 'formula', options: { expression: 'a + 1' } },
+      { id: 'self', type: 'formula', options: { expression: 'self + 1' } },
+    ];
+    const { nodes, parseErrors } = parseFormulaGraph(fields);
+    expect(parseErrors).toEqual([]);
+    const { sorted, cyclic } = topologicalFormulaOrder(nodes);
+    expect(sorted).toEqual([]);
+    expect(new Set(cyclic)).toEqual(new Set(['a', 'b', 'self']));
+
+    const chain = [
+      { id: 'base', type: 'formula', options: { expression: '1' } },
+      { id: 'mid', type: 'formula', options: { expression: 'base + 1' } },
+      { id: 'top', type: 'formula', options: { expression: 'mid + base' } },
+    ];
+    const chainOrder = topologicalFormulaOrder(parseFormulaGraph(chain).nodes);
+    expect(chainOrder.cyclic).toEqual([]);
+    expect(chainOrder.sorted.indexOf('base')).toBeLessThan(chainOrder.sorted.indexOf('mid'));
+    expect(chainOrder.sorted.indexOf('mid')).toBeLessThan(chainOrder.sorted.indexOf('top'));
+  });
+
+  it('reports parse failures through the graph helper', () => {
+    const { nodes, parseErrors } = parseFormulaGraph([
+      { id: 'ok', type: 'formula', options: { expression: '1 + 1' } },
+      { id: 'bad', type: 'formula', options: { expression: '1 +' } },
+    ]);
+    expect(nodes.map((n) => n.id)).toEqual(['ok']);
+    expect(parseErrors).toHaveLength(1);
+    expect(parseErrors[0].fieldId).toBe('bad');
+  });
+
+  it('rejects invalid ROUND inputs and arity', () => {
+    expect(() => evaluateFormula(parseExpression('ROUND(x)'), { x: 'abc' })).toThrow(/not a number/);
+    expect(() => evaluateFormula(parseExpression('IF(1)'), {})).toThrow(/exactly 3 arguments/);
   });
 
   it('evaluates formula dependencies in order and reports cycles', () => {

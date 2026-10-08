@@ -313,14 +313,40 @@ describe('Hono API (/v1)', () => {
     });
     await api.request('/v1/modules', { method: 'POST', headers, body: JSON.stringify({ id: 'fleet', owner: { id: 'user-1', type: 'user' }, name: 'Fleet', version: '1.0.0' }) });
     await call('/entities', 'POST', { id: 'order', name: 'order', label: 'Order', pluralLabel: 'Orders' });
+    // All definitions are created while the module is still draft: definitions
+    // are locked once the module leaves draft/review.
     await call('/entities/order/fields', 'POST', { id: 'quantity', name: 'quantity', label: 'Quantity', type: 'integer', options: { required: true } });
     await call('/entities/order/fields', 'POST', { id: 'price', name: 'price', label: 'Price', type: 'number', options: { required: true } });
     await call('/entities/order/fields', 'POST', { id: 'total', name: 'total', label: 'Total', type: 'computed', options: { expression: 'quantity * price' } });
     await call('/entities/order/fields', 'POST', { id: 'withTax', name: 'withTax', label: 'With tax', type: 'formula', options: { expression: 'ROUND(total * 1.07, 2)' } });
+    await call('/entities/order/fields', 'POST', { id: 'capped', name: 'capped', label: 'Capped', type: 'computed', options: { expression: 'quantity * price', max: 50 } });
+    await call('/entities/order/fields', 'POST', { id: 'code', name: 'code', label: 'Code', type: 'formula', options: { expression: "'ORD-' + quantity", unique: true } });
 
     const rejectedField = await call('/entities/order/fields', 'POST', { id: 'bad', name: 'bad', label: 'Bad', type: 'formula', options: { expression: 'ghost * 2' } });
     expect(rejectedField.status).toBe(409);
     await expect(rejectedField.json()).resolves.toMatchObject({ error: { code: 'DEFINITION_CONFLICT' } });
+
+    // autoNumber creation rejected at the schema layer (before any module state matters)
+    const auto = await call('/entities/order/fields', 'POST', { id: 'seq', name: 'seq', label: 'Seq', type: 'autoNumber' });
+    expect(auto.status).toBe(400);
+    await expect(auto.json()).resolves.toMatchObject({ error: { code: 'INVALID_INPUT' } });
+
+    // Cyclic formula graphs are rejected at definition time in a separate
+    // module that stays in draft so its definitions remain editable.
+    await api.request('/v1/modules', { method: 'POST', headers, body: JSON.stringify({ id: 'ops', owner: { id: 'user-1', type: 'user' }, name: 'Ops', version: '1.0.0' }) });
+    const opsCall = (path: string, method: string, body?: unknown) => api.request(`/v1/modules/ops${path}`, {
+      method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    await opsCall('/entities', 'POST', { id: 'task', name: 'task', label: 'Task', pluralLabel: 'Tasks' });
+    const cyc1 = await opsCall('/entities/task/fields', 'POST', { id: 'cyc1', name: 'cyc1', label: 'Cyc1', type: 'formula', options: { expression: '1' } });
+    expect(cyc1.status).toBe(201);
+    const cyc2 = await opsCall('/entities/task/fields', 'POST', { id: 'cyc2', name: 'cyc2', label: 'Cyc2', type: 'formula', options: { expression: '1' } });
+    expect(cyc2.status).toBe(201);
+    const relink = await opsCall('/fields/cyc1', 'PATCH', { options: { expression: 'cyc2 + 1' } });
+    expect(relink.status).toBe(200);
+    const cyclic2 = await opsCall('/fields/cyc2', 'PATCH', { options: { expression: 'cyc1 + 1' } });
+    expect(cyclic2.status).toBe(409);
+    await expect(cyclic2.json()).resolves.toMatchObject({ error: { code: 'DEFINITION_CONFLICT' } });
 
     await call('/transition', 'POST', { to: 'review' });
     await call('/transition', 'POST', { to: 'published' });
@@ -328,10 +354,26 @@ describe('Hono API (/v1)', () => {
 
     const created = await call('/entities/order/records', 'POST', { data: { quantity: 3, price: 4 } });
     expect(created.status).toBe(201);
-    await expect(created.json()).resolves.toMatchObject({ data: { quantity: 3, price: 4, total: 12, withTax: 12.84 } });
+    const order = await created.json() as { id: string; version: number; data: Record<string, unknown> };
+    expect(order.data).toMatchObject({ quantity: 3, price: 4, total: 12, withTax: 12.84, capped: 12, code: 'ORD-3' });
 
     const tampered = await call('/entities/order/records', 'POST', { data: { quantity: 3, price: 4, total: 999 } });
     expect(tampered.status).toBe(422);
+
+    const updated = await call(`/entities/order/records/${order.id}`, 'PATCH', { data: { price: 10 }, version: order.version });
+    expect(updated.status).toBe(200);
+    await expect(updated.json()).resolves.toMatchObject({ data: { quantity: 3, price: 10, total: 30, withTax: 32.1 } });
+
+    // computed result violating the max constraint
+    const capped = await call('/entities/order/records', 'POST', { data: { quantity: 3, price: 20 } });
+    expect(capped.status).toBe(422);
+    await expect(capped.json()).resolves.toMatchObject({ error: { code: 'VALIDATION_FAILED' } });
+
+    // duplicate values from a unique formula field
+    const first = await call('/entities/order/records', 'POST', { data: { quantity: 7, price: 1 } });
+    expect(first.status).toBe(201);
+    const second = await call('/entities/order/records', 'POST', { data: { quantity: 7, price: 2 } });
+    expect(second.status).toBe(409);
   });
 
   it('returns 503 for module routes when the registry database is unavailable', async () => {

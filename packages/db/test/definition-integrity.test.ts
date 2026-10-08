@@ -85,4 +85,38 @@ describe('validateModuleSchema', () => {
     expect(issues).toHaveLength(1);
     expect(issues[0].message).toMatch(/Invalid expression/);
   });
+
+  it('rejects cyclic formula dependencies at definition time', () => {
+    const issues = validateModuleSchema(
+      [entity('e')],
+      [
+        {
+          id: 'a', entityId: 'e', name: 'a', label: 'A', type: 'formula' as const, position: 0,
+          options: { required: false, unique: false, readonly: false, hidden: false, searchable: false, sortable: true, filterable: true, indexed: false, isStatus: false, ui: {}, expression: 'b + 1' },
+        } satisfies FieldDefinition,
+        {
+          id: 'b', entityId: 'e', name: 'b', label: 'B', type: 'formula' as const, position: 0,
+          options: { required: false, unique: false, readonly: false, hidden: false, searchable: false, sortable: true, filterable: true, indexed: false, isStatus: false, ui: {}, expression: 'a + 1' },
+        } satisfies FieldDefinition,
+      ],
+      [],
+    );
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.every((issue) => /circular/i.test(issue.message))).toBe(true);
+  });
+
+  it('rejects unsupported autoNumber definitions', () => {
+    const issues = validateModuleSchema(
+      [entity('e')],
+      [
+        {
+          id: 'code', entityId: 'e', name: 'code', label: 'Code', type: 'autoNumber' as const, position: 0,
+          options: { required: false, unique: false, readonly: false, hidden: false, searchable: false, sortable: true, filterable: true, indexed: false, isStatus: false, ui: {} },
+        } satisfies FieldDefinition,
+      ],
+      [],
+    );
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues[0].message).toMatch(/autoNumber/);
+  });
 });

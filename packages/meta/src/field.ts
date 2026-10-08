@@ -30,33 +30,21 @@ export const FieldOptionsSchema = z.object({
   ui: JsonObjectSchema.default({}),
 }).strict();
 
-export const FieldCreateInputSchema = z.object({
-  id: IdSchema,
-  name: z.string().trim().min(1).max(120),
-  label: z.string().trim().min(1).max(200),
-  type: FieldTypeSchema,
-  options: FieldOptionsSchema.default({}),
-  position: PositionedSchema.shape.position.default(0),
-}).strict();
-export type FieldCreateInput = z.infer<typeof FieldCreateInputSchema>;
+type FieldStructure = {
+  type: z.infer<typeof FieldTypeSchema>;
+  options: z.infer<typeof FieldOptionsSchema>;
+};
 
-export const FieldUpdateInputSchema = z.object({
-  name: z.string().trim().min(1).max(120).optional(),
-  label: z.string().trim().min(1).max(200).optional(),
-  options: FieldOptionsSchema.optional(),
-  position: PositionedSchema.shape.position.optional(),
-}).strict().refine((input) => Object.keys(input).length > 0, 'At least one field property must be provided');
-export type FieldUpdateInput = z.infer<typeof FieldUpdateInputSchema>;
-
-export const FieldDefinitionSchema = z.object({
-  id: IdSchema,
-  entityId: IdSchema,
-  name: z.string().trim().min(1).max(120),
-  label: z.string().trim().min(1).max(200),
-  type: FieldTypeSchema,
-  options: FieldOptionsSchema.default({}),
-  position: PositionedSchema.shape.position,
-}).strict().superRefine((field, ctx) => {
+/**
+ * Per-type structural rules shared by field creation inputs and stored
+ * definitions, so a field cannot be created through the API schema layer
+ * without satisfying the same constraints a stored definition enforces.
+ *
+ * `creation` gates rules that would otherwise make legacy stored definitions
+ * (e.g. autoNumber fields written before generation was deferred) unreadable:
+ * the read path must still parse them so validation can report them cleanly.
+ */
+function checkFieldStructure(field: FieldStructure, ctx: z.RefinementCtx, creation = false) {
   const { type, options } = field;
 
   // select/multiSelect require non-empty unique choices
@@ -87,13 +75,32 @@ export const FieldDefinitionSchema = z.object({
     });
   }
 
-  // formula/computed require expression
-  if ((type === 'formula' || type === 'computed') && !options.expression) {
+  // formula/computed require a non-empty expression
+  if ((type === 'formula' || type === 'computed') && !options.expression?.trim()) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: `${type} field must have an expression`,
       path: ['options', 'expression'],
     });
+  }
+
+  if (creation) {
+    // autoNumber generation is deferred to a later phase; reject explicit
+    // attempts rather than accepting a field record writes cannot populate.
+    if (type === 'autoNumber') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'autoNumber fields are not supported yet',
+        path: ['type'],
+      });
+    }
+    if (options.defaultValue !== undefined && ['autoNumber', 'formula', 'computed'].includes(type)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${type} fields cannot have a defaultValue`,
+        path: ['options', 'defaultValue'],
+      });
+    }
   }
 
   // numeric types: validate min <= max
@@ -119,5 +126,33 @@ export const FieldDefinitionSchema = z.object({
       });
     }
   }
-});
+}
+
+export const FieldCreateInputSchema = z.object({
+  id: IdSchema,
+  name: z.string().trim().min(1).max(120),
+  label: z.string().trim().min(1).max(200),
+  type: FieldTypeSchema,
+  options: FieldOptionsSchema.default({}),
+  position: PositionedSchema.shape.position.default(0),
+}).strict().superRefine((field, ctx) => checkFieldStructure(field, ctx, true));
+export type FieldCreateInput = z.infer<typeof FieldCreateInputSchema>;
+
+export const FieldUpdateInputSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  label: z.string().trim().min(1).max(200).optional(),
+  options: FieldOptionsSchema.optional(),
+  position: PositionedSchema.shape.position.optional(),
+}).strict().refine((input) => Object.keys(input).length > 0, 'At least one field property must be provided');
+export type FieldUpdateInput = z.infer<typeof FieldUpdateInputSchema>;
+
+export const FieldDefinitionSchema = z.object({
+  id: IdSchema,
+  entityId: IdSchema,
+  name: z.string().trim().min(1).max(120),
+  label: z.string().trim().min(1).max(200),
+  type: FieldTypeSchema,
+  options: FieldOptionsSchema.default({}),
+  position: PositionedSchema.shape.position,
+}).strict().superRefine(checkFieldStructure);
 export type FieldDefinition = z.infer<typeof FieldDefinitionSchema>;
