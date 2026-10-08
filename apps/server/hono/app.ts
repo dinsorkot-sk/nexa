@@ -30,7 +30,14 @@ function errorResponse(code: string, message: string, status: 400 | 401 | 403 | 
 export function createApp(dependencies: AppDependencies = {}) {
   const app = new Hono().basePath('/v1');
   app.use('*', logger());
-  app.use('*', cors());
+  const allowedOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  app.use('*', cors({
+    origin: (origin) => allowedOrigins.includes(origin) ? origin : '',
+    credentials: true,
+  }));
   app.onError((error, c) => {
     console.error('API Error:', error);
     return c.json({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } }, 500);

@@ -46,6 +46,22 @@ describe('Hono API (/v1)', () => {
     });
   });
 
+  it('allows credentialed CORS only from configured web origins', async () => {
+    const previousOrigins = process.env.CORS_ORIGINS;
+    process.env.CORS_ORIGINS = 'http://localhost:3000,https://builder.example.test';
+    const api = createApp();
+    try {
+      const allowed = await api.request('/v1/health', { headers: { origin: 'https://builder.example.test' } });
+      expect(allowed.headers.get('access-control-allow-origin')).toBe('https://builder.example.test');
+      expect(allowed.headers.get('access-control-allow-credentials')).toBe('true');
+      const denied = await api.request('/v1/health', { headers: { origin: 'https://evil.example.test' } });
+      expect(denied.headers.get('access-control-allow-origin')).toBeNull();
+    } finally {
+      if (previousOrigins === undefined) delete process.env.CORS_ORIGINS;
+      else process.env.CORS_ORIGINS = previousOrigins;
+    }
+  });
+
   it('returns service information', async () => {
     const response = await app.request('/v1/status');
 
