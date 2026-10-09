@@ -9,7 +9,7 @@ import {
 } from '@nexa/meta';
 import {
   createDb, createTenantContext, SYSTEM_TENANT_ID, DefinitionConflictError, DefinitionNotFoundError,
-  RecordConflictError, tenantRepository, definitionRepository, automationRepository, packageRepository, ModuleConflictError,
+  RecordConflictError, tenantRepository, definitionRepository, automationRepository, packageRepository, auditRepository, ModuleConflictError,
   ModuleNotFoundError, moduleRepository, authRepository, identityRepository, AuthConflictError,
 } from '@nexa/db';
 import type { DbHandle } from '@nexa/db';
@@ -590,6 +590,35 @@ export function createApp(dependencies: AppDependencies = {}) {
     return result ? c.json(redactHidden(result, fields)) : missingRecord(c);
   }));
 
+  app.get('/audit', async (c) => withTenant(c, 'definition:read', async (_db, tenantId) => {
+    const audit = auditRepository(dependencies.db!, createTenantContext(tenantId));
+    const limit = Number(c.req.query('limit') ?? '');
+    const result = await audit.listAuditLog({
+      action: c.req.query('action'),
+      entityId: c.req.query('entityId'),
+      recordId: c.req.query('recordId'),
+      actorId: c.req.query('actorId'),
+      limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
+      offset: Number.isFinite(Number(c.req.query('offset') ?? '')) && Number(c.req.query('offset')) > 0 ? Number(c.req.query('offset')) : undefined,
+    });
+    return c.json(result);
+  }));
+  app.get('/events', async (c) => withTenant(c, 'definition:read', async (_db, tenantId) => {
+    const audit = auditRepository(dependencies.db!, createTenantContext(tenantId));
+    const limit = Number(c.req.query('limit') ?? '');
+    const result = await audit.listEvents({
+      eventType: c.req.query('eventType'),
+      moduleId: c.req.query('moduleId'),
+      limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
+    });
+    return c.json(result);
+  }));
+  app.get('/operations/stats', async (c) => withTenant(c, 'definition:read', async (_db, tenantId) => {
+    const audit = auditRepository(dependencies.db!, createTenantContext(tenantId));
+    const sinceParam = c.req.query('since');
+    const since = sinceParam ? new Date(sinceParam) : undefined;
+    return c.json(await audit.operationsStats(since && !Number.isNaN(since.getTime()) ? since : undefined));
+  }));
   app.get('/modules/:moduleId/entities/:entityId/records/:recordId/activity', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
     const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
     if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);

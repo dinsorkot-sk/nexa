@@ -47,9 +47,9 @@ describe('module package export/import/upgrade', () => {
       module: { id: 'fleet', tenantId: SYSTEM_TENANT_ID, owner: { id: 'user-1', type: 'user' }, name: 'Fleet', version: '1.0.0', description: '', status: 'draft', settings: {}, dependencies: [], createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' } as never,
       entities: [{ id: 'vehicle', moduleId: 'fleet', name: 'vehicle', label: 'Vehicle', pluralLabel: 'Vehicles', description: '', settings: {}, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }] as never,
     };
-    await expect(packages.upgradePackage(asPackage({ ...base, manifest: { ...base.manifest, version: '1.0.0' }, module: { ...base.module, version: '1.0.0' } }))).rejects.toThrow(/must be greater/);
-    await expect(packages.upgradePackage(asPackage({ ...base, manifest: { ...base.manifest, version: '0.9.0' }, module: { ...base.module, version: '0.9.0' } }))).rejects.toThrow(/must be greater/);
-    const upgraded = await packages.upgradePackage(asPackage({ ...base, manifest: { ...base.manifest, version: '1.1.0' }, module: { ...base.module, version: '1.1.0' } }));
+    await expect(packages.upgradePackage(asPackage({ ...asPackage(base), manifest: { ...base.manifest, version: '1.0.0' }, module: { ...asPackage(base.module), version: '1.0.0' } }))).rejects.toThrow(/must be greater/);
+    await expect(packages.upgradePackage(asPackage({ ...asPackage(base), manifest: { ...base.manifest, version: '0.9.0' }, module: { ...asPackage(base.module), version: '0.9.0' } }))).rejects.toThrow(/must be greater/);
+    const upgraded = await packages.upgradePackage(asPackage({ ...asPackage(base), manifest: { ...base.manifest, version: '1.1.0' }, module: { ...asPackage(base.module), version: '1.1.0' } }));
     expect(upgraded.version).toBe('1.1.0');
     const after = await moduleRepository(handle, ctx).get('fleet');
     expect(after?.version).toBe('1.1.0');

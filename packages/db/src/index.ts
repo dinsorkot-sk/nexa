@@ -10,3 +10,4 @@ export * from './auth-repo';
 export * from './cli';
 export * from './automation-repo';
 export * from './package-repo';
+export * from './audit-repo';
