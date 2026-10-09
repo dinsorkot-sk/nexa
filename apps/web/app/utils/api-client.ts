@@ -19,11 +19,33 @@ export interface NexaApiClient {
       transition: { $post(options: EndpointOptions): ApiResponse };
     };
     ':moduleId': {
+      schema: { $get(options: EndpointOptions): ApiResponse };
       entities: {
         $get(options: EndpointOptions): ApiResponse;
         $post(options: EndpointOptions): ApiResponse;
         ':id': { $get(options: EndpointOptions): ApiResponse };
-        ':entityId': { fields: { $post(options: EndpointOptions): ApiResponse } };
+        ':entityId': {
+          fields: { $post(options: EndpointOptions): ApiResponse };
+          records: {
+            $get(options: EndpointOptions): ApiResponse;
+            $post(options: EndpointOptions): ApiResponse;
+            ':recordId': {
+              $get(options: EndpointOptions): ApiResponse;
+              $patch(options: EndpointOptions): ApiResponse;
+              $delete(options: EndpointOptions): ApiResponse;
+              activity: { $get(options: EndpointOptions): ApiResponse };
+              relations: {
+                ':relationId': {
+                  $get(options: EndpointOptions): ApiResponse;
+                  ':targetRecordId': {
+                    $post(options: EndpointOptions): ApiResponse;
+                    $delete(options: EndpointOptions): ApiResponse;
+                  };
+                };
+              };
+            };
+          };
+        };
       };
       fields: { $get(options: EndpointOptions): ApiResponse };
       relations: { $get(options: EndpointOptions): ApiResponse; $post(options: EndpointOptions): ApiResponse };
@@ -41,6 +63,9 @@ export function createApiClient(baseUrl: string, fetchImpl: ApiFetch = fetch): N
     body: JSON.stringify(json),
   });
   const moduleUrl = (param?: Record<string, string>) => `${base}/v1/modules/${encodeURIComponent(param?.moduleId ?? '')}`;
+  const entityUrl = (param?: Record<string, string>) => `${moduleUrl(param)}/entities/${encodeURIComponent(param?.entityId ?? '')}`;
+  const recordUrl = (param?: Record<string, string>) => `${entityUrl(param)}/records/${encodeURIComponent(param?.recordId ?? '')}`;
+  const targetUrl = (param?: Record<string, string>) => `${recordUrl(param)}/relations/${encodeURIComponent(param?.relationId ?? '')}/${encodeURIComponent(param?.targetRecordId ?? '')}`;
   return {
     auth: {
       me: { $get: () => request(`${base}/v1/auth/me`) },
@@ -57,11 +82,33 @@ export function createApiClient(baseUrl: string, fetchImpl: ApiFetch = fetch): N
         transition: { $post: ({ param, json }) => jsonRequest(`${base}/v1/modules/${encodeURIComponent(param?.id ?? '')}/transition`, 'POST', json) },
       },
       ':moduleId': {
+        schema: { $get: ({ param }) => request(`${moduleUrl(param)}/schema`) },
         entities: {
           $get: ({ param }) => request(`${moduleUrl(param)}/entities`),
           $post: ({ param, json }) => jsonRequest(`${moduleUrl(param)}/entities`, 'POST', json),
           ':id': { $get: ({ param }) => request(`${moduleUrl(param)}/entities/${encodeURIComponent(param?.id ?? '')}`) },
-          ':entityId': { fields: { $post: ({ param, json }) => jsonRequest(`${moduleUrl(param)}/entities/${encodeURIComponent(param?.entityId ?? '')}/fields`, 'POST', json) } },
+          ':entityId': {
+            fields: { $post: ({ param, json }) => jsonRequest(`${moduleUrl(param)}/entities/${encodeURIComponent(param?.entityId ?? '')}/fields`, 'POST', json) },
+            records: {
+              $get: ({ param, query }) => request(`${entityUrl(param)}/records${queryString(query)}`),
+              $post: ({ param, json }) => jsonRequest(`${entityUrl(param)}/records`, 'POST', json),
+              ':recordId': {
+                $get: ({ param }) => request(`${recordUrl(param)}`),
+                $patch: ({ param, json }) => jsonRequest(`${recordUrl(param)}`, 'PATCH', json),
+                $delete: ({ param }) => request(`${recordUrl(param)}`, { method: 'DELETE' }),
+                activity: { $get: ({ param, query }) => request(`${recordUrl(param)}/activity${queryString(query)}`) },
+                relations: {
+                  ':relationId': {
+                    $get: ({ param }) => request(`${recordUrl(param)}/relations/${encodeURIComponent(param?.relationId ?? '')}`),
+                    ':targetRecordId': {
+                      $post: ({ param }) => request(`${targetUrl(param)}`, { method: 'POST' }),
+                      $delete: ({ param }) => request(`${targetUrl(param)}`, { method: 'DELETE' }),
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
         fields: { $get: ({ param, query }) => request(`${moduleUrl(param)}/fields${queryString(query)}`) },
         relations: {

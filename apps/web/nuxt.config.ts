@@ -1,8 +1,15 @@
+import { fileURLToPath } from 'node:url';
+
 export default defineNuxtConfig({
   compatibilityDate: '2026-10-06',
   devtools: { enabled: false },
   modules: ['@nuxtjs/tailwindcss'],
   srcDir: 'app/',
+  components: [
+    { path: '~/components' },
+    { path: '~/components/runtime', pathPrefix: false },
+    { path: fileURLToPath(new URL('../../packages/ui/src/components', import.meta.url)), pattern: '*.vue', pathPrefix: false },
+  ],
   runtimeConfig: {
     public: {
       apiBaseUrl: process.env.NUXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3001',
@@ -15,5 +22,8 @@ export default defineNuxtConfig({
     '@nexa/ui': '../../packages/ui/src/index.ts',
     '@nexa/sdk': '../../packages/sdk/src/index.ts',
     '@nexa/server': '../../apps/server/hono/app.ts',
+  },
+  tailwindcss: {
+    configPath: 'tailwind.config.ts',
   },
 });

@@ -23,6 +23,7 @@ const MESSAGES: Record<string, string> = {
   VALIDATION_FAILED: 'Some values are missing or invalid.',
   MODULE_NOT_FOUND: 'That module no longer exists.',
   MODULE_CONFLICT: 'This change conflicts with another update. Reload and try again.',
+  MODULE_NOT_ENABLED: 'This module is not enabled.',
   DEFINITION_NOT_FOUND: 'That definition no longer exists.',
   DEFINITION_CONFLICT: 'The definition is invalid or conflicts with the current schema.',
   RECORD_CONFLICT: 'This record changed elsewhere. Reload and try again.',

@@ -7,6 +7,7 @@
           <span class="text-lg font-bold tracking-tight">Nexa Builder</span>
         </NuxtLink>
         <div class="flex items-center space-x-4">
+          <NuxtLink to="/app" class="text-sm text-slate-400 hover:text-slate-200">Runtime</NuxtLink>
           <span class="text-sm text-slate-400">{{ principal.name || principal.userId }}</span>
           <UiButton variant="ghost" size="sm" @click="logout">Sign out</UiButton>
         </div>

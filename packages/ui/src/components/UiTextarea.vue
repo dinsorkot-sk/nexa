@@ -8,7 +8,7 @@
 </template>
 
 <script setup lang="ts">
-import { cn } from '../index';
+import { cn } from '../cn';
 
 const props = defineProps<{ modelValue?: string; class?: string }>();
 defineOptions({ inheritAttrs: false });

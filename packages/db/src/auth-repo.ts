@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { DbHandle } from './client';
 import type { TenantContext } from './tenancy';
 import { roleAssignments, sessions, userRoleMemberships, users } from './schema';
@@ -71,6 +71,12 @@ export function identityRepository(handle: DbHandle) {
       const [row] = await handle.db.select().from(users)
         .where(and(eq(users.tenantId, tenantId), eq(users.id, userId))).limit(1);
       return row as UserRecord | undefined;
+    },
+    async listUsersByIds(tenantId: string, userIds: string[]): Promise<UserRecord[]> {
+      if (!userIds.length) return [];
+      const rows = await handle.db.select().from(users)
+        .where(and(eq(users.tenantId, tenantId), inArray(users.id, userIds)));
+      return rows as UserRecord[];
     },
     async listRoleIds(tenantId: string, userId: string): Promise<string[]> {
       const rows = await handle.db.select({ roleId: userRoleMemberships.roleId }).from(userRoleMemberships)

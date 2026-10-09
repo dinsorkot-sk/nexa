@@ -195,6 +195,14 @@ export function tenantRepository(handle: DbHandle, context: TenantContext) {
       const [link] = await handle.db.delete(recordLinks).where(and(eq(recordLinks.tenantId, tenantId), eq(recordLinks.relationId, relation.id), eq(recordLinks.fromRecordId, fromRecordId), eq(recordLinks.toRecordId, toRecordId))).returning();
       return link;
     },
+    async listRecordActivity(entityId: string, recordId: string, options: { limit?: number; offset?: number } = {}) {
+      const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
+      const offset = Math.max(options.offset ?? 0, 0);
+      const where = and(eq(auditLog.tenantId, tenantId), eq(auditLog.entityId, entityId), eq(auditLog.recordId, recordId));
+      const items = await handle.db.select().from(auditLog).where(where).orderBy(desc(auditLog.occurredAt)).limit(limit).offset(offset);
+      const [countRow] = await handle.db.select({ total: count() }).from(auditLog).where(where);
+      return { items, total: countRow?.total ?? 0 };
+    },
     async createLink(relationId: string, fromRecordId: string, toRecordId: string) { return handle.db.transaction(async (tx) => { const ids = new Set([fromRecordId, toRecordId]); const linked = await tx.select({ id: records.id }).from(records).where(and(eq(records.tenantId, tenantId), inArray(records.id, [...ids]), isNull(records.deletedAt))); if (linked.length !== ids.size) throw new RecordConflictError('Both linked records must belong to the current tenant'); const [link] = await tx.insert(recordLinks).values({ tenantId, relationId, fromRecordId, toRecordId }).returning(); return link; }); },
     async listLinks(relationId: string, fromRecordId: string) { return handle.db.select().from(recordLinks).where(and(eq(recordLinks.tenantId, tenantId), eq(recordLinks.relationId, relationId), eq(recordLinks.fromRecordId, fromRecordId))); },
     async deleteLink(relationId: string, fromRecordId: string, toRecordId: string) { const [link] = await handle.db.delete(recordLinks).where(and(eq(recordLinks.tenantId, tenantId), eq(recordLinks.relationId, relationId), eq(recordLinks.fromRecordId, fromRecordId), eq(recordLinks.toRecordId, toRecordId))).returning(); return link; },

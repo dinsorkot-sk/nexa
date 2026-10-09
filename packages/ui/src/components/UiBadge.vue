@@ -6,7 +6,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { cn } from '../index';
+import { cn } from '../cn';
 
 const props = withDefaults(defineProps<{ tone?: 'neutral' | 'success' | 'warning' | 'danger'; class?: string }>(), { tone: 'neutral' });
 const toneClass = computed(() => ({

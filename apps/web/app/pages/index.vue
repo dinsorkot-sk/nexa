@@ -6,7 +6,8 @@
       <p class="mt-2 text-sm text-slate-400">Create and manage metadata-driven modules.</p>
       <div class="mt-6 flex justify-center gap-3">
         <UiButton @click="navigateTo('/modules')">Open builder</UiButton>
-        <UiButton variant="secondary" @click="navigateTo('/login')">Sign in</UiButton>
+        <UiButton variant="secondary" @click="navigateTo('/app')">Open runtime</UiButton>
+        <UiButton variant="ghost" @click="navigateTo('/login')">Sign in</UiButton>
       </div>
     </UiCard>
   </NuxtLayout>

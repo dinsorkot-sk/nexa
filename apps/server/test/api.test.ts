@@ -320,6 +320,38 @@ describe('Hono API (/v1)', () => {
     expect((await call(`/entities/vehicle/records/${vehicle.id}/relations/parts/${part.id}`, 'DELETE')).status).toBe(404);
   });
 
+  it('exposes record activity with actor names and hidden-field redaction', async () => {
+    const api = await createTestApp();
+    const { cookie } = await signup(api, 'admin@example.com');
+    const headers = authHeaders(cookie!);
+    const call = (path: string, method: string, body?: unknown) => api.request(`/v1/modules/fleet${path}`, {
+      method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    await api.request('/v1/modules', { method: 'POST', headers, body: JSON.stringify({ id: 'fleet', owner: { id: 'user-1', type: 'user' }, name: 'Fleet', version: '1.0.0' }) });
+    await call('/entities', 'POST', { id: 'vehicle', name: 'vehicle', label: 'Vehicle', pluralLabel: 'Vehicles' });
+    await call('/entities/vehicle/fields', 'POST', { id: 'name', name: 'name', label: 'Name', type: 'text', options: { required: true } });
+    await call('/entities/vehicle/fields', 'POST', { id: 'secret', name: 'secret', label: 'Secret', type: 'text', options: { hidden: true, defaultValue: 'classified' } });
+    await call('/transition', 'POST', { to: 'review' });
+    await call('/transition', 'POST', { to: 'published' });
+    await call('/transition', 'POST', { to: 'enabled' });
+
+    expect((await call('/entities/vehicle/records/00000000-0000-0000-0000-0000000000aa/activity', 'GET')).status).toBe(404);
+    expect((await call('/entities/ghost/records/00000000-0000-0000-0000-0000000000aa/activity', 'GET')).status).toBe(404);
+
+    const created = await call('/entities/vehicle/records', 'POST', { data: { name: 'Truck' } });
+    const vehicle = await created.json() as { id: string };
+    await call(`/entities/vehicle/records/${vehicle.id}`, 'PATCH', { data: { name: 'Van' } });
+
+    const activity = await call(`/entities/vehicle/records/${vehicle.id}/activity`, 'GET');
+    expect(activity.status).toBe(200);
+    const body = await activity.json() as { items: Array<{ action: string; actorName: string; changes: Record<string, Record<string, unknown>> }>; total: number };
+    expect(body.total).toBe(2);
+    expect(body.items.map((entry) => entry.action)).toEqual(['record.updated', 'record.created']);
+    expect(body.items[0]!.actorName).toBe('admin@example.com');
+    expect(body.items[0]!.changes.after).not.toHaveProperty('secret');
+    expect(body.items[0]!.changes.after).toMatchObject({ name: 'Van' });
+  });
+
   it('computes formula and computed fields on record create', async () => {
     const api = await createTestApp();
     const { cookie } = await signup(api, 'admin@example.com');

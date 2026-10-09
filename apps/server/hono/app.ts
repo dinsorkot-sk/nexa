@@ -264,7 +264,7 @@ export function createApp(dependencies: AppDependencies = {}) {
     const result = await tenantRepository(dependencies.db!, createTenantContext(tenantId)).listScopedRecords(moduleId, entityId, { ...query, fields });
     return c.json({ items: result.items.map((item) => redactHidden(item, fields)), total: result.total, limit: query.limit, offset: query.offset });
   }));
-  app.post('/modules/:moduleId/entities/:entityId/records', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+  app.post('/modules/:moduleId/entities/:entityId/records', async (c) => withDefinitions(c, async (defs, moduleId, tenantId, principal) => {
     const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
     if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
     const entityId = c.req.param('entityId');
@@ -276,7 +276,7 @@ export function createApp(dependencies: AppDependencies = {}) {
     const data = validateRecordData(entity, fields, parsed.data.data, { mode: 'create' });
     const repo = tenantRepository(dependencies.db!, createTenantContext(tenantId));
     await repo.assertReferences(moduleId, fields.filter((field) => field.type === 'reference'), data);
-    const record = await repo.createScopedRecord(moduleId, entityId, data, undefined, fields.filter((field) => field.options.unique).map((field) => field.id));
+    const record = await repo.createScopedRecord(moduleId, entityId, data, principal.userId, fields.filter((field) => field.options.unique).map((field) => field.id));
     return c.json(redactHidden(record, fields), 201);
   }));
   app.get('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
@@ -288,7 +288,7 @@ export function createApp(dependencies: AppDependencies = {}) {
     const record = await tenantRepository(dependencies.db!, createTenantContext(tenantId)).getScopedRecord(moduleId, entityId, c.req.param('recordId'));
     return record ? c.json(redactHidden(record, fields)) : missingRecord(c);
   }));
-  app.patch('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+  app.patch('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId, principal) => {
     const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
     if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
     const entityId = c.req.param('entityId');
@@ -302,7 +302,7 @@ export function createApp(dependencies: AppDependencies = {}) {
     if (!existing) return missingRecord(c);
     const data = validateRecordData(entity, fields, parsed.data.data, { mode: 'update', existing: existing.data });
     await repo.assertReferences(moduleId, fields.filter((field) => field.type === 'reference'), data);
-    const updated = await repo.updateScopedRecord(moduleId, entityId, c.req.param('recordId'), data, parsed.data.version ?? existing.version, undefined, fields.filter((field) => field.options.unique).map((field) => field.id));
+    const updated = await repo.updateScopedRecord(moduleId, entityId, c.req.param('recordId'), data, parsed.data.version ?? existing.version, principal.userId, fields.filter((field) => field.options.unique).map((field) => field.id));
     return updated ? c.json(redactHidden(updated, fields)) : missingRecord(c);
   }));
   app.delete('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
@@ -341,6 +341,34 @@ export function createApp(dependencies: AppDependencies = {}) {
     if (relation.sourceEntityId !== c.req.param('entityId')) return invalid(c, 'Relation source does not match this entity');
     const link = await tenantRepository(dependencies.db!, createTenantContext(tenantId)).unlinkRelation(moduleId, relation, c.req.param('recordId'), c.req.param('targetRecordId'));
     return link ? c.body(null, 204) : missingRecord(c);
+  }));
+
+  app.get('/modules/:moduleId/entities/:entityId/records/:recordId/activity', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+    const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
+    if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
+    const entityId = c.req.param('entityId');
+    if (!(await defs.getEntity(moduleId, entityId))) return missingDefinition(c, 'Entity');
+    const fields = await defs.listFields(moduleId, entityId);
+    const repo = tenantRepository(dependencies.db!, createTenantContext(tenantId));
+    const record = await repo.getScopedRecord(moduleId, entityId, c.req.param('recordId'));
+    if (!record) return missingRecord(c);
+    const limitParam = Number(c.req.query('limit') ?? '');
+    const activity = await repo.listRecordActivity(entityId, record.id, { limit: Number.isFinite(limitParam) && limitParam > 0 ? limitParam : undefined });
+    const hiddenIds = new Set(fields.filter((field) => field.options.hidden).map((field) => field.id));
+    const actorIds = [...new Set(activity.items.map((entry) => entry.actorId).filter((id): id is string => Boolean(id)))];
+    const actors = await identityRepository(dependencies.db!).listUsersByIds(tenantId, actorIds);
+    const actorNames = new Map(actors.map((user) => [user.id, user.displayName || user.email]));
+    return c.json({
+      items: activity.items.map((entry) => ({
+        id: entry.id,
+        action: entry.action,
+        actorId: entry.actorId,
+        actorName: entry.actorId ? actorNames.get(entry.actorId) ?? 'Unknown user' : 'System',
+        occurredAt: entry.occurredAt,
+        changes: Object.fromEntries(Object.entries(entry.changes ?? {}).map(([key, value]) => [key, hiddenIds.size && key === 'before' || key === 'after' ? Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([fieldId]) => !hiddenIds.has(fieldId))) : value])),
+      })),
+      total: activity.total,
+    });
   }));
 
   return app;

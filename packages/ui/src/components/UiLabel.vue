@@ -5,7 +5,7 @@
 </template>
 
 <script setup lang="ts">
-import { cn } from '../index';
+import { cn } from '../cn';
 
 const props = defineProps<{ for?: string; class?: string }>();
 const forId = props.for;

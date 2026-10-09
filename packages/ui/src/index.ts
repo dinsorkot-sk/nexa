@@ -6,6 +6,9 @@ export interface UiComponentProps {
 }
 
 export { default as UiButton } from './components/UiButton.vue';
+export { default as MetaFieldValue } from './components/MetaFieldValue.vue';
+export { default as MetaFieldInput } from './components/MetaFieldInput.vue';
+export * from './render/format';
 export { default as UiInput } from './components/UiInput.vue';
 export { default as UiTextarea } from './components/UiTextarea.vue';
 export { default as UiLabel } from './components/UiLabel.vue';
