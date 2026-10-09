@@ -1,4 +1,5 @@
 import {
+  ActionDefinitionSchema, WorkflowDefinitionSchema,
   EntityCreateInputSchema, EntityUpdateInputSchema, FieldCreateInputSchema, FieldUpdateInputSchema,
   HealthCheckSchema, ModuleCreateInputSchema, ModuleStatusSchema, ModuleTransitionInputSchema,
   ModuleUpdateInputSchema, RelationCreateInputSchema, RelationUpdateInputSchema,
@@ -14,6 +15,8 @@ import type { DbHandle } from '@nexa/db';
 import { validateRecordData } from '../../../packages/engine/entity/index';
 import { parseQuery } from '../../../packages/engine/query/index';
 import { hasPlatformPermission } from '../../../packages/engine/permission/index';
+import { evaluateTransition } from '../../../packages/engine/workflow/transitions';
+import { planAction } from '../../../packages/engine/workflow/actions';
 import { digestSessionToken, generateSessionToken, hashPassword, verifyPassword } from '../../../packages/auth/src/index';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
@@ -129,7 +132,7 @@ export function createApp(dependencies: AppDependencies = {}) {
     return c.body(null, 204);
   });
 
-  const withTenant = async (c: Context, permissionOrCallback: 'module:read' | 'module:write' | 'definition:read' | 'definition:write' | 'record:read' | 'record:write' | ((db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>): Promise<Response> => {
+  const withTenant = async (c: Context, permissionOrCallback: 'module:read' | 'module:write' | 'definition:read' | 'definition:write' | 'record:read' | 'record:write' | 'workflow:transition' | 'action:execute' | ((db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>): Promise<Response> => {
     const permission = typeof permissionOrCallback === 'function'
       ? (c.req.path.includes('/records') ? (c.req.method === 'GET' ? 'record:read' : 'record:write') : (c.req.method === 'GET' ? 'definition:read' : 'definition:write'))
       : permissionOrCallback;
@@ -155,7 +158,7 @@ export function createApp(dependencies: AppDependencies = {}) {
     const repo = moduleRepository(db, createTenantContext(tenantId));
     return typeof permissionOrCallback === 'function' ? permissionOrCallback(repo, tenantId, principal) : maybeCallback!(repo, tenantId, principal);
   });
-  const withDefinitions = (c: Context, permissionOrCallback: 'definition:read' | 'definition:write' | 'record:read' | 'record:write' | ((repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string, principal: Principal) => Promise<Response>) => withTenant(c, typeof permissionOrCallback === 'function'
+  const withDefinitions = (c: Context, permissionOrCallback: 'definition:read' | 'definition:write' | 'record:read' | 'record:write' | 'workflow:transition' | 'action:execute' | ((repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string, principal: Principal) => Promise<Response>) => withTenant(c, typeof permissionOrCallback === 'function'
     ? (c.req.path.includes('/records') ? (c.req.method === 'GET' ? 'record:read' : 'record:write') : (c.req.method === 'GET' ? 'definition:read' : 'definition:write'))
     : permissionOrCallback, (db, tenantId, principal) => {
       const repo = definitionRepository(db, createTenantContext(tenantId));
@@ -195,6 +198,18 @@ export function createApp(dependencies: AppDependencies = {}) {
 
   app.get('/modules/:moduleId/schema', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.getModuleSchema(moduleId))));
   app.get('/modules/:moduleId/entities', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.listEntities(moduleId))));
+  app.get('/modules/:moduleId/workflows', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.listWorkflows(moduleId))));
+  app.post('/modules/:moduleId/workflows', async (c) => withDefinitions(c, async (repo, moduleId, _tenantId, principal) => {
+    const parsed = WorkflowDefinitionSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    return c.json(await repo.createWorkflow(moduleId, parsed.data, principal.userId), 201);
+  }));
+  app.get('/modules/:moduleId/actions', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.listActions(moduleId))));
+  app.post('/modules/:moduleId/actions', async (c) => withDefinitions(c, async (repo, moduleId, _tenantId, principal) => {
+    const parsed = ActionDefinitionSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    return c.json(await repo.createAction(moduleId, parsed.data, principal.userId), 201);
+  }));
   app.post('/modules/:moduleId/entities', async (c) => withDefinitions(c, async (repo, moduleId) => {
     const parsed = EntityCreateInputSchema.safeParse(await c.req.json().catch(() => undefined));
     if (!parsed.success) return invalid(c, parsed.error.message);
@@ -341,6 +356,70 @@ export function createApp(dependencies: AppDependencies = {}) {
     if (relation.sourceEntityId !== c.req.param('entityId')) return invalid(c, 'Relation source does not match this entity');
     const link = await tenantRepository(dependencies.db!, createTenantContext(tenantId)).unlinkRelation(moduleId, relation, c.req.param('recordId'), c.req.param('targetRecordId'));
     return link ? c.body(null, 204) : missingRecord(c);
+  }));
+
+  app.post('/modules/:moduleId/entities/:entityId/records/:recordId/transitions/:transitionId', async (c) => withDefinitions(c, 'workflow:transition', async (defs, moduleId, tenantId, principal) => {
+    const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
+    if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
+    const entityId = c.req.param('entityId');
+    const entity = await defs.getEntity(moduleId, entityId);
+    if (!entity) return missingDefinition(c, 'Entity');
+    const workflow = (await defs.listWorkflows(moduleId)).find((candidate) => candidate.entityId === entityId);
+    if (!workflow) return missingDefinition(c, 'Workflow');
+    const parsed = RecordUpdateInputSchema.pick({ version: true }).safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    const fields = await defs.listFields(moduleId, entityId);
+    const repo = tenantRepository(dependencies.db!, createTenantContext(tenantId));
+    const existing = await repo.getScopedRecord(moduleId, entityId, c.req.param('recordId'));
+    if (!existing) return missingRecord(c);
+    const currentState = String(existing.data[workflow.stateFieldId] ?? workflow.states.find((state) => state.initial)?.id ?? '');
+    const data = { ...existing.data, [workflow.stateFieldId]: currentState };
+    const decision = evaluateTransition(workflow, c.req.param('transitionId'), currentState, principal.roleIds, data);
+    if (!decision.ok) {
+      const status = decision.rejection.code === 'FORBIDDEN' ? 403 : decision.rejection.code === 'TRANSITION_NOT_FOUND' ? 404 : 409;
+      return c.json(errorResponse(decision.rejection.code, decision.rejection.message, status), status);
+    }
+    const nextData = { ...existing.data, [workflow.stateFieldId]: decision.nextStateId };
+    const updated = await repo.runInTransaction(async (tx) => {
+      const record = await repo.updateScopedRecord(moduleId, entityId, existing.id, nextData, parsed.data.version ?? existing.version, principal.userId, fields.filter((field) => field.options.unique).map((field) => field.id), tx);
+      if (!record) return undefined;
+      await repo.appendEvent({ eventType: 'workflow.transitioned', moduleId, entityId, recordId: record.id, actorId: principal.userId, payload: { workflowId: workflow.id, transitionId: decision.transition.id, from: currentState, to: decision.nextStateId } }, tx);
+      return record;
+    });
+    return updated ? c.json(redactHidden(updated, fields)) : missingRecord(c);
+  }));
+
+  app.post('/modules/:moduleId/entities/:entityId/records/:recordId/actions/:actionId', async (c) => withDefinitions(c, 'action:execute', async (defs, moduleId, tenantId, principal) => {
+    const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
+    if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
+    const entityId = c.req.param('entityId');
+    const entity = await defs.getEntity(moduleId, entityId);
+    if (!entity) return missingDefinition(c, 'Entity');
+    const action = await defs.getAction(moduleId, c.req.param('actionId'));
+    if (!action) return missingDefinition(c, 'Action');
+    const plan = planAction(action.kind, action.config);
+    if (!plan.ok) return c.json(errorResponse(plan.rejection.code, plan.rejection.message, 422), 422);
+    const parsed = RecordUpdateInputSchema.pick({ version: true }).safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    const fields = await defs.listFields(moduleId, entityId);
+    const repo = tenantRepository(dependencies.db!, createTenantContext(tenantId));
+    const existing = await repo.getScopedRecord(moduleId, entityId, c.req.param('recordId'));
+    if (!existing) return missingRecord(c);
+    const result = await repo.runInTransaction(async (tx) => {
+      if (plan.kind === 'updateRecord') {
+        const data = validateRecordData(entity, fields, { ...existing.data, ...plan.set }, { mode: 'update', existing: existing.data });
+        await repo.assertReferences(moduleId, fields.filter((field) => field.type === 'reference'), data);
+        const record = await repo.updateScopedRecord(moduleId, entityId, existing.id, data, parsed.data.version ?? existing.version, principal.userId, fields.filter((field) => field.options.unique).map((field) => field.id), tx);
+        if (!record) return undefined;
+        await repo.appendEvent({ eventType: 'action.executed', moduleId, entityId, recordId: record.id, actorId: principal.userId, payload: { actionId: action.id, kind: plan.kind } }, tx);
+        return record;
+      }
+      const record = await repo.getScopedRecord(moduleId, entityId, existing.id);
+      if (!record) return undefined;
+      await repo.appendEvent({ eventType: plan.eventType, moduleId, entityId, recordId: record.id, actorId: principal.userId, payload: { actionId: action.id, ...plan.payload } }, tx);
+      return record;
+    });
+    return result ? c.json(redactHidden(result, fields)) : missingRecord(c);
   }));
 
   app.get('/modules/:moduleId/entities/:entityId/records/:recordId/activity', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {

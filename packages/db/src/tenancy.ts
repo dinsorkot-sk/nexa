@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, sql, desc, asc, count, type SQL } from 'drizzle-orm';
 import type { DbHandle } from './client';
-import { auditLog, recordLinks, records, tenants } from './schema';
+import { auditLog, eventLog, recordLinks, records, tenants } from './schema';
 import type { FieldDefinition, RelationDefinition } from '@nexa/meta';
 
 function queryValueExpression(field: FieldDefinition) {
@@ -18,6 +18,15 @@ export function createTenantContext(tenantId: string): TenantContext {
 }
 
 export class RecordConflictError extends Error { constructor(message: string) { super(message); this.name = 'RecordConflictError'; } }
+
+/** Drizzle transaction handle passed between repository calls that must commit together. */
+export type TenantTransaction = Parameters<Parameters<DbHandle['db']['transaction']>[0]>[0];
+
+/** Joins the caller's transaction when given; otherwise opens a new one for this call. */
+function withOptionalTransaction<T>(handle: DbHandle, outer: TenantTransaction | undefined, fn: (tx: TenantTransaction) => Promise<T>): Promise<T> {
+  if (outer) return fn(outer);
+  return handle.db.transaction(async (tx) => fn(tx));
+}
 
 export function tenantRepository(handle: DbHandle, context: TenantContext) {
   const tenantId = context.tenantId;
@@ -67,8 +76,27 @@ export function tenantRepository(handle: DbHandle, context: TenantContext) {
       return { items, total: Number(totalRow?.total ?? 0) };
     },
     async getScopedRecord(moduleId: string, entityId: string, recordId: string) { const [record] = await handle.db.select().from(records).where(and(scoped(moduleId, entityId), eq(records.id, recordId), isNull(records.deletedAt))).limit(1); return record; },
-    async createScopedRecord(moduleId: string, entityId: string, data: Record<string, unknown>, createdBy?: string, uniqueFieldIds: string[] = []) {
-      return handle.db.transaction(async (tx) => {
+    async runInTransaction<T>(fn: (tx: TenantTransaction) => Promise<T>): Promise<T> {
+      return handle.db.transaction(async (tx) => fn(tx));
+    },
+    /** Appends one event; tenant comes from the repository context, never from the caller. */
+    async appendEvent(event: { eventType: string; moduleId?: string; entityId?: string; recordId?: string; actorId?: string; correlationId?: string; payload?: Record<string, unknown> }, outer?: TenantTransaction) {
+      return withOptionalTransaction(handle, outer, async (tx) => {
+        const [row] = await tx.insert(eventLog).values({
+          tenantId,
+          eventType: event.eventType,
+          moduleId: event.moduleId,
+          entityId: event.entityId,
+          recordId: event.recordId,
+          actorId: event.actorId,
+          correlationId: event.correlationId,
+          payload: event.payload ?? {},
+        }).returning();
+        return row;
+      });
+    },
+    async createScopedRecord(moduleId: string, entityId: string, data: Record<string, unknown>, createdBy?: string, uniqueFieldIds: string[] = [], outer?: TenantTransaction) {
+      return withOptionalTransaction(handle, outer, async (tx) => {
         const lockValues = uniqueFieldIds.flatMap((fieldId) => {
           const value = data[fieldId];
           return value === undefined || value === null ? [] : [{ fieldId, value }];
@@ -97,8 +125,8 @@ export function tenantRepository(handle: DbHandle, context: TenantContext) {
         if (!target) throw new RecordConflictError(`Reference target for field ${field.id} not found`);
       }
     },
-    async updateScopedRecord(moduleId: string, entityId: string, recordId: string, data: Record<string, unknown>, expectedVersion?: number, actorId?: string, uniqueFieldIds: string[] = []) {
-      return handle.db.transaction(async (tx) => {
+    async updateScopedRecord(moduleId: string, entityId: string, recordId: string, data: Record<string, unknown>, expectedVersion?: number, actorId?: string, uniqueFieldIds: string[] = [], outer?: TenantTransaction) {
+      return withOptionalTransaction(handle, outer, async (tx) => {
         const [before] = await tx.select().from(records).where(and(scoped(moduleId, entityId), eq(records.id, recordId), isNull(records.deletedAt))).limit(1);
         if (!before) return undefined;
         if (expectedVersion !== undefined && before.version !== expectedVersion) throw new RecordConflictError('Record version is stale');

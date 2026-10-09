@@ -177,8 +177,13 @@ export const eventLog = pgTable('nexa_event_log', {
   payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
   correlationId: text('correlation_id'),
   occurredAt: timestamp('occurred_at', { withTimezone: true }).defaultNow().notNull(),
+  moduleId: text('module_id'),
+  entityId: text('entity_id'),
+  recordId: uuid('record_id'),
+  actorId: text('actor_id'),
 }, (table) => [
   index('nexa_event_log_tenant_time_idx').on(table.tenantId, table.occurredAt),
+  index('nexa_event_log_tenant_record_idx').on(table.tenantId, table.recordId, table.occurredAt),
 ]);
 
 export type Tenant = typeof tenants.$inferSelect;

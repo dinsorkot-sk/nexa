@@ -1,8 +1,8 @@
-import type { EntityDefinition, FieldDefinition, RelationDefinition } from '@nexa/meta';
+import type { ActionDefinition, EntityDefinition, FieldDefinition, RelationDefinition, WorkflowDefinition } from '@nexa/meta';
 import { extractFormulaReferences, parseExpression, parseFormulaGraph, topologicalFormulaOrder } from '../../engine/formula/index';
 
 export interface DefinitionValidationIssue {
-  kind: 'entity' | 'field' | 'relation';
+  kind: 'entity' | 'field' | 'relation' | 'workflow' | 'action';
   id: string;
   message: string;
   path?: string[];
@@ -13,8 +13,53 @@ export interface DefinitionValidationIssue {
  * Checks: unique entity/field names, relation endpoints, reference fields, dangling field IDs.
  * Does not access the database.
  */
-export function validateModuleSchema(entities: EntityDefinition[], fields: FieldDefinition[], relations: RelationDefinition[]): DefinitionValidationIssue[] {
+/**
+ * Cross-checks workflows against the module's entities, fields, and actions.
+ * `stateFieldId` must name a select field on the workflow's own entity, and every
+ * workflow transition action must reference an existing action definition.
+ */
+export function validateWorkflowReferences(
+  entities: EntityDefinition[],
+  fields: FieldDefinition[],
+  workflows: WorkflowDefinition[],
+  actions: ActionDefinition[],
+): DefinitionValidationIssue[] {
   const issues: DefinitionValidationIssue[] = [];
+  const actionIds = new Set(actions.map((action) => action.id));
+  const entityIds = new Set(entities.map((entity) => entity.id));
+  for (const workflow of workflows) {
+    if (!entityIds.has(workflow.entityId)) {
+      issues.push({ kind: 'workflow', id: workflow.id, message: `Workflow references unknown entity "${workflow.entityId}"`, path: ['entityId'] });
+      continue;
+    }
+    const stateField = fields.find((field) => field.entityId === workflow.entityId && field.id === workflow.stateFieldId);
+    if (!stateField || stateField.type !== 'select') {
+      issues.push({ kind: 'workflow', id: workflow.id, message: `stateFieldId "${workflow.stateFieldId}" must be a select field on entity "${workflow.entityId}"`, path: ['stateFieldId'] });
+    }
+    workflow.transitions.forEach((transition, index) => {
+      transition.actions.forEach((ref, actionIndex) => {
+        if (!actionIds.has(ref.actionId)) {
+          issues.push({
+            kind: 'workflow',
+            id: workflow.id,
+            message: `Transition "${transition.id}" references unknown action "${ref.actionId}"`,
+            path: ['transitions', String(index), 'actions', String(actionIndex), 'actionId'],
+          });
+        }
+      });
+    });
+  }
+  return issues;
+}
+
+export function validateModuleSchema(
+  entities: EntityDefinition[],
+  fields: FieldDefinition[],
+  relations: RelationDefinition[],
+  workflows: WorkflowDefinition[] = [],
+  actions: ActionDefinition[] = [],
+): DefinitionValidationIssue[] {
+  const issues: DefinitionValidationIssue[] = [...validateWorkflowReferences(entities, fields, workflows, actions)];
   const entityById = new Map(entities.map(e => [e.id, e]));
   const fieldsByEntityId = new Map<string, Map<string, FieldDefinition>>();
 

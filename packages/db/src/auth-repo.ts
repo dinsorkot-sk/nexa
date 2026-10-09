@@ -137,6 +137,13 @@ export function authRepository(handle: DbHandle, context: TenantContext) {
       return rows as RoleRecord[];
     },
 
+    async removeRole(userId: string, roleId: string): Promise<void> {
+      await handle.db.delete(userRoleMemberships).where(and(
+        eq(userRoleMemberships.tenantId, tenantId),
+        eq(userRoleMemberships.userId, userId),
+        eq(userRoleMemberships.roleId, roleId),
+      ));
+    },
     async assignRole(userId: string, roleId: string): Promise<void> {
       try {
         await handle.db.insert(userRoleMemberships).values({ tenantId, userId, roleId }).onConflictDoNothing();

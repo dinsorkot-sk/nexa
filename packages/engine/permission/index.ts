@@ -4,6 +4,7 @@ export const platformPermissions = [
   'module:read', 'module:write',
   'definition:read', 'definition:write',
   'record:read', 'record:write',
+  'workflow:transition', 'action:execute',
 ] as const;
 export type PlatformPermission = typeof platformPermissions[number];
 
@@ -11,8 +12,8 @@ const rolePermissions: Readonly<Record<string, readonly PlatformPermission[]>> =
   admin: platformPermissions,
   administrator: platformPermissions,
   owner: platformPermissions,
-  editor: ['module:read', 'module:write', 'definition:read', 'definition:write', 'record:read', 'record:write'],
-  member: ['module:read', 'definition:read', 'record:read', 'record:write'],
+  editor: ['module:read', 'module:write', 'definition:read', 'definition:write', 'record:read', 'record:write', 'workflow:transition', 'action:execute'],
+  member: ['module:read', 'definition:read', 'record:read', 'record:write', 'workflow:transition', 'action:execute'],
   viewer: ['module:read', 'definition:read', 'record:read'],
 };
 

@@ -161,7 +161,7 @@ describe('@nexa/meta schemas', () => {
 
   it('validates workflow state references and exactly one initial state', () => {
     const valid = {
-      id: 'workflow-1', moduleId: 'fleet', entityId: 'vehicle', name: 'Availability',
+      id: 'workflow-1', moduleId: 'fleet', entityId: 'vehicle', name: 'Availability', stateFieldId: 'status',
       states: [
         { id: 'available', name: 'available', label: 'Available', initial: true },
         { id: 'rented', name: 'rented', label: 'Rented' },
@@ -173,6 +173,25 @@ describe('@nexa/meta schemas', () => {
       ...valid,
       transitions: [{ id: 'broken', from: 'missing', to: 'rented', label: 'Broken' }],
     }).success).toBe(false);
+  });
+
+  it('enforces linear forward-only workflow transitions', () => {
+    const states = [
+      { id: 'draft', name: 'draft', label: 'Draft', initial: true },
+      { id: 'review', name: 'review', label: 'Review' },
+      { id: 'done', name: 'done', label: 'Done', terminal: true },
+    ];
+    const base = { id: 'wf', moduleId: 'fleet', entityId: 'vehicle', name: 'Lifecycle', stateFieldId: 'status', states };
+    const forward = [
+      { id: 't1', from: 'draft', to: 'review', label: 'Submit' },
+      { id: 't2', from: 'review', to: 'done', label: 'Approve' },
+    ];
+    expect(WorkflowDefinitionSchema.safeParse({ ...base, transitions: forward }).success).toBe(true);
+    expect(WorkflowDefinitionSchema.safeParse({ ...base, transitions: [{ id: 'back', from: 'review', to: 'draft', label: 'Back' }] }).success).toBe(false);
+    expect(WorkflowDefinitionSchema.safeParse({ ...base, transitions: [{ id: 'skip', from: 'draft', to: 'done', label: 'Skip' }] }).success).toBe(false);
+    expect(WorkflowDefinitionSchema.safeParse({ ...base, transitions: [...forward, { id: 'branch', from: 'draft', to: 'done', label: 'Branch' }] }).success).toBe(false);
+    expect(WorkflowDefinitionSchema.safeParse({ ...base, transitions: [{ id: 'leave', from: 'done', to: 'draft', label: 'Leave' }] }).success).toBe(false);
+    expect(WorkflowDefinitionSchema.safeParse({ ...base, stateFieldId: undefined, transitions: forward }).success).toBe(false);
   });
 
   it('requires module packages to align manifest and module identity/version', () => {

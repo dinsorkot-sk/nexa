@@ -9,6 +9,10 @@ import {
   RelationCreateInputSchema,
   RelationDefinitionSchema,
   RelationUpdateInputSchema,
+  ActionDefinitionSchema,
+  WorkflowDefinitionSchema,
+  type ActionDefinition,
+  type WorkflowDefinition,
   type EntityDefinition,
   type FieldDefinition,
   type RelationDefinition,
@@ -19,12 +23,14 @@ import type { DbHandle } from './client';
 import type { TenantContext } from './tenancy';
 import { auditLog, metadataDefinitions, modules, records } from './schema';
 
-export type DefinitionKind = 'entity' | 'field' | 'relation';
+export type DefinitionKind = 'entity' | 'field' | 'relation' | 'workflow' | 'action';
 
 export interface ModuleSchema {
   entities: EntityDefinition[];
   fields: FieldDefinition[];
   relations: RelationDefinition[];
+  workflows: WorkflowDefinition[];
+  actions: ActionDefinition[];
 }
 
 export class DefinitionNotFoundError extends Error {
@@ -45,6 +51,8 @@ const schemas: Record<DefinitionKind, z.ZodTypeAny> = {
   entity: EntityDefinitionSchema,
   field: FieldDefinitionSchema,
   relation: RelationDefinitionSchema,
+  workflow: WorkflowDefinitionSchema,
+  action: ActionDefinitionSchema,
 };
 
 function isUniqueViolation(error: unknown): boolean {
@@ -74,6 +82,8 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
       entities: await readAll<EntityDefinition>(db, moduleId, 'entity'),
       fields: await readAll<FieldDefinition>(db, moduleId, 'field'),
       relations: await readAll<RelationDefinition>(db, moduleId, 'relation'),
+      workflows: await readAll<WorkflowDefinition>(db, moduleId, 'workflow'),
+      actions: await readAll<ActionDefinition>(db, moduleId, 'action'),
     };
   }
 
@@ -82,7 +92,7 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
     moduleId: string,
     action: string,
     actorId: string | undefined,
-    change: (tx: Tx, current: ModuleSchema) => Promise<{ next: ModuleSchema; result: R; audit: Record<string, unknown>; entityId: string }>,
+    change: (tx: Tx, current: ModuleSchema) => Promise<{ next: ModuleSchema; result: R; audit: Record<string, unknown>; entityId: string | null }>,
   ): Promise<R> {
     return handle.db.transaction(async (tx) => {
       const locked = await tx.execute(sql`
@@ -95,7 +105,7 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
       }
       const current = await loadSchema(tx, moduleId);
       const { next, result, audit, entityId } = await change(tx, current);
-      const issues = validateModuleSchema(next.entities, next.fields, next.relations);
+      const issues = validateModuleSchema(next.entities, next.fields, next.relations, next.workflows, next.actions);
       if (issues.length > 0) {
         throw new DefinitionConflictError(`Invalid module schema: ${issues.map((issue) => issue.message).join('; ')}`);
       }
@@ -137,6 +147,37 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
 
     listEntities: (moduleId: string) => readAll<EntityDefinition>(handle.db, moduleId, 'entity'),
     getEntity: (moduleId: string, id: string) => getOne<EntityDefinition>(moduleId, 'entity', id),
+
+    listWorkflows: (moduleId: string) => readAll<WorkflowDefinition>(handle.db, moduleId, 'workflow'),
+    getWorkflow: (moduleId: string, id: string) => getOne<WorkflowDefinition>(moduleId, 'workflow', id),
+    listActions: (moduleId: string) => readAll<ActionDefinition>(handle.db, moduleId, 'action'),
+    getAction: (moduleId: string, id: string) => getOne<ActionDefinition>(moduleId, 'action', id),
+
+    async createWorkflow(moduleId: string, definition: WorkflowDefinition, actorId?: string): Promise<WorkflowDefinition> {
+      const parsed = WorkflowDefinitionSchema.parse({ ...definition, moduleId });
+      return mutate(moduleId, 'workflow.created', actorId, async (tx, current) => {
+        await insertDefinition(tx, moduleId, 'workflow', parsed);
+        return {
+          next: { ...current, workflows: [...current.workflows, parsed] },
+          result: parsed,
+          audit: { kind: 'workflow', after: parsed },
+          entityId: parsed.entityId,
+        };
+      });
+    },
+
+    async createAction(moduleId: string, definition: ActionDefinition, actorId?: string): Promise<ActionDefinition> {
+      const parsed = ActionDefinitionSchema.parse({ ...definition, moduleId });
+      return mutate(moduleId, 'action.created', actorId, async (tx, current) => {
+        await insertDefinition(tx, moduleId, 'action', parsed);
+        return {
+          next: { ...current, actions: [...current.actions, parsed] },
+          result: parsed,
+          audit: { kind: 'action', after: parsed },
+          entityId: parsed.entityId ?? null,
+        };
+      });
+    },
 
     async createEntity(moduleId: string, input: z.input<typeof EntityCreateInputSchema>, actorId?: string): Promise<EntityDefinition> {
       const parsed = EntityCreateInputSchema.parse(input);
