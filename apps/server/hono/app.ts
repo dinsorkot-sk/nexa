@@ -550,7 +550,25 @@ export function createApp(dependencies: AppDependencies = {}) {
       await repo.appendEvent({ eventType: 'workflow.transitioned', moduleId, entityId, recordId: record.id, actorId: principal.userId, payload: { workflowId: workflow.id, transitionId: decision.transition.id, from: currentState, to: decision.nextStateId } }, tx);
       return record;
     });
-    if (updated) await dispatchAutomations(tenantId, moduleId, { type: 'workflow', entityId, recordId: updated.id, workflowId: workflow.id, transitionId: decision.transition.id, payload: { from: currentState, to: decision.nextStateId } }, principal.userId);
+    if (updated) {
+      // Execute the transition's actions after the commit; delivery failures never fail the transition.
+      const allActions = await defs.listActions(moduleId);
+      for (const ref of decision.transition.actions) {
+        const action = allActions.find((candidate) => candidate.id === ref.actionId);
+        if (!action) continue;
+        try {
+          if (action.kind === 'webhook') {
+            await deliverWebhook(WebhookActionConfigSchema.parse(action.config), { event: 'workflow.transitioned', transitionId: decision.transition.id, recordId: updated.id }, dependencies.webhookTransport);
+          } else if (action.kind === 'notification') {
+            await sendNotification(NotificationActionConfigSchema.parse(action.config), dependencies.emailTransport);
+          }
+          // Other kinds are handled by their own surfaces until their phase.
+        } catch (error) {
+          console.error(`Transition action "${action.id}" failed:`, error);
+        }
+      }
+      await dispatchAutomations(tenantId, moduleId, { type: 'workflow', entityId, recordId: updated.id, workflowId: workflow.id, transitionId: decision.transition.id, payload: { from: currentState, to: decision.nextStateId } }, principal.userId);
+    }
     return updated ? c.json(redactHidden(updated, fields)) : missingRecord(c);
   }));
 
