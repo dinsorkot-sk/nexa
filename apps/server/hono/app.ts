@@ -1,5 +1,5 @@
 import {
-  ActionDefinitionSchema, AutomationDefinitionSchema, WorkflowDefinitionSchema,
+  ActionDefinitionSchema, AutomationDefinitionSchema, DashboardDefinitionSchema, ReportDefinitionSchema, WorkflowDefinitionSchema,
   NotificationActionConfigSchema, WebhookActionConfigSchema,
   EntityCreateInputSchema, EntityUpdateInputSchema, FieldCreateInputSchema, FieldUpdateInputSchema,
   HealthCheckSchema, ModuleCreateInputSchema, ModuleStatusSchema, ModuleTransitionInputSchema,
@@ -19,6 +19,7 @@ import { hasPlatformPermission } from '../../../packages/engine/permission/index
 import { evaluateTransition } from '../../../packages/engine/workflow/transitions';
 import { planAction } from '../../../packages/engine/workflow/actions';
 import { selectAutomations } from '../../../packages/engine/automation/index';
+import { runReport } from '../../../packages/engine/report/index';
 import { deliverWebhook } from '../../../integrations/webhook/src/index';
 import { sendNotification } from '../../../integrations/email/src/index';
 import { digestSessionToken, generateSessionToken, hashPassword, verifyPassword } from '../../../packages/auth/src/index';
@@ -185,7 +186,7 @@ export function createApp(dependencies: AppDependencies = {}) {
     return c.body(null, 204);
   });
 
-  const withTenant = async (c: Context, permissionOrCallback: 'module:read' | 'module:write' | 'definition:read' | 'definition:write' | 'record:read' | 'record:write' | 'workflow:transition' | 'action:execute' | 'automation:manage' | ((db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>): Promise<Response> => {
+  const withTenant = async (c: Context, permissionOrCallback: 'module:read' | 'module:write' | 'definition:read' | 'definition:write' | 'record:read' | 'record:write' | 'workflow:transition' | 'action:execute' | 'automation:manage' | 'report:read' | 'report:manage' | ((db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>): Promise<Response> => {
     const permission = typeof permissionOrCallback === 'function'
       ? (c.req.path.includes('/records') ? (c.req.method === 'GET' ? 'record:read' : 'record:write') : (c.req.method === 'GET' ? 'definition:read' : 'definition:write'))
       : permissionOrCallback;
@@ -211,7 +212,7 @@ export function createApp(dependencies: AppDependencies = {}) {
     const repo = moduleRepository(db, createTenantContext(tenantId));
     return typeof permissionOrCallback === 'function' ? permissionOrCallback(repo, tenantId, principal) : maybeCallback!(repo, tenantId, principal);
   });
-  const withDefinitions = (c: Context, permissionOrCallback: 'definition:read' | 'definition:write' | 'record:read' | 'record:write' | 'workflow:transition' | 'action:execute' | 'automation:manage' | ((repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string, principal: Principal) => Promise<Response>) => withTenant(c, typeof permissionOrCallback === 'function'
+  const withDefinitions = (c: Context, permissionOrCallback: 'definition:read' | 'definition:write' | 'record:read' | 'record:write' | 'workflow:transition' | 'action:execute' | 'automation:manage' | 'report:read' | 'report:manage' | ((repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string, principal: Principal) => Promise<Response>) => withTenant(c, typeof permissionOrCallback === 'function'
     ? (c.req.path.includes('/records') ? (c.req.method === 'GET' ? 'record:read' : 'record:write') : (c.req.method === 'GET' ? 'definition:read' : 'definition:write'))
     : permissionOrCallback, (db, tenantId, principal) => {
       const repo = definitionRepository(db, createTenantContext(tenantId));
@@ -275,6 +276,61 @@ export function createApp(dependencies: AppDependencies = {}) {
   }));
   app.delete('/modules/:moduleId/automations/:id', async (c) => withDefinitions(c, 'automation:manage', async (repo, moduleId, _tenantId, principal) => {
     await repo.deleteAutomation(moduleId, c.req.param('id'), principal.userId);
+    return c.body(null, 204);
+  }));
+  app.get('/modules/:moduleId/reports', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.listReports(moduleId))));
+  app.post('/modules/:moduleId/reports', async (c) => withDefinitions(c, 'report:manage', async (repo, moduleId, _tenantId, principal) => {
+    const parsed = ReportDefinitionSchema.safeParse({ ...(await c.req.json().catch(() => undefined)), moduleId });
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    return c.json(await repo.createReport(moduleId, parsed.data, principal.userId), 201);
+  }));
+  app.post('/modules/:moduleId/reports/:id/run', async (c) => withDefinitions(c, 'report:read', async (defs, moduleId, tenantId) => {
+    const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
+    if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
+    const report = await defs.getReport(moduleId, c.req.param('id'));
+    if (!report) return missingDefinition(c, 'Report');
+    const fields = await defs.listFields(moduleId, report.entityId);
+    const repo = tenantRepository(dependencies.db!, createTenantContext(tenantId));
+    // Pull up to 1000 rows through the bounded, tenant-scoped record query.
+    const pages: Array<{ id: string; data: Record<string, unknown> }> = [];
+    for (let offset = 0; offset < 1000; offset += 100) {
+      const page = await repo.listScopedRecords(moduleId, report.entityId, { limit: 100, offset, fields });
+      pages.push(...page.items.map((item) => ({ id: item.id, data: item.data })));
+      if (page.items.length < 100) break;
+    }
+    const groups = runReport(report, pages);
+    return c.json({
+      reportId: report.id,
+      rowCount: pages.length,
+      groups: groups.map((group) => ({ key: group.key, rowCount: group.rowCount, aggregates: group.aggregates })),
+    });
+  }));
+  app.patch('/modules/:moduleId/reports/:id', async (c) => withDefinitions(c, 'report:manage', async (repo, moduleId, _tenantId, principal) => {
+    const parsed = await c.req.json().catch(() => undefined);
+    if (!parsed) return invalid(c, 'Body required');
+    return c.json(await repo.updateReport(moduleId, c.req.param('id'), parsed as Record<string, unknown>, principal.userId));
+  }));
+  app.delete('/modules/:moduleId/reports/:id', async (c) => withDefinitions(c, 'report:manage', async (repo, moduleId, _tenantId, principal) => {
+    await repo.deleteReport(moduleId, c.req.param('id'), principal.userId);
+    return c.body(null, 204);
+  }));
+  app.get('/modules/:moduleId/dashboards', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.listDashboards(moduleId))));
+  app.get('/modules/:moduleId/dashboards/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
+    const dashboard = await repo.getDashboard(moduleId, c.req.param('id'));
+    return dashboard ? c.json(dashboard) : missingDefinition(c, 'Dashboard');
+  }));
+  app.post('/modules/:moduleId/dashboards', async (c) => withDefinitions(c, 'report:manage', async (repo, moduleId, _tenantId, principal) => {
+    const parsed = DashboardDefinitionSchema.safeParse({ ...(await c.req.json().catch(() => undefined)), moduleId });
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    return c.json(await repo.createDashboard(moduleId, parsed.data, principal.userId), 201);
+  }));
+  app.patch('/modules/:moduleId/dashboards/:id', async (c) => withDefinitions(c, 'report:manage', async (repo, moduleId, _tenantId, principal) => {
+    const parsed = await c.req.json().catch(() => undefined);
+    if (!parsed) return invalid(c, 'Body required');
+    return c.json(await repo.updateDashboard(moduleId, c.req.param('id'), parsed as Record<string, unknown>, principal.userId));
+  }));
+  app.delete('/modules/:moduleId/dashboards/:id', async (c) => withDefinitions(c, 'report:manage', async (repo, moduleId, _tenantId, principal) => {
+    await repo.deleteDashboard(moduleId, c.req.param('id'), principal.userId);
     return c.body(null, 204);
   }));
   app.post('/modules/:moduleId/actions', async (c) => withDefinitions(c, async (repo, moduleId, _tenantId, principal) => {

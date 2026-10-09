@@ -1,8 +1,8 @@
-import type { ActionDefinition, AutomationDefinition, EntityDefinition, FieldDefinition, RelationDefinition, WorkflowDefinition } from '@nexa/meta';
+import type { ActionDefinition, AutomationDefinition, DashboardDefinition, EntityDefinition, FieldDefinition, RelationDefinition, ReportDefinition, WorkflowDefinition } from '@nexa/meta';
 import { extractFormulaReferences, parseExpression, parseFormulaGraph, topologicalFormulaOrder } from '../../engine/formula/index';
 
 export interface DefinitionValidationIssue {
-  kind: 'entity' | 'field' | 'relation' | 'workflow' | 'action' | 'automation';
+  kind: 'entity' | 'field' | 'relation' | 'workflow' | 'action' | 'automation' | 'report' | 'dashboard';
   id: string;
   message: string;
   path?: string[];
@@ -30,6 +30,47 @@ export function validateAutomationReferences(
         issues.push({ kind: 'automation', id: automation.id, message: `Automation references unknown action "${ref.actionId}"`, path: ['actions', String(index), 'actionId'] });
       }
     });
+  }
+  return issues;
+}
+
+/**
+ * Cross-checks reports and dashboards against the module's entities and fields.
+ */
+export function validateReportReferences(
+  entities: EntityDefinition[],
+  fields: FieldDefinition[],
+  reports: ReportDefinition[],
+  dashboards: DashboardDefinition[],
+): DefinitionValidationIssue[] {
+  const issues: DefinitionValidationIssue[] = [];
+  const entityIds = new Set(entities.map((entity) => entity.id));
+  const fieldsByEntity = new Map<string, Set<string>>();
+  for (const field of fields) {
+    const group = fieldsByEntity.get(field.entityId) ?? new Set<string>();
+    group.add(field.id);
+    fieldsByEntity.set(field.entityId, group);
+  }
+  for (const report of reports) {
+    if (!entityIds.has(report.entityId)) {
+      issues.push({ kind: 'report', id: report.id, message: `Report references unknown entity "${report.entityId}"`, path: ['entityId'] });
+      continue;
+    }
+    const entityFields = fieldsByEntity.get(report.entityId) ?? new Set<string>();
+    for (const fieldId of [...report.fieldIds, ...report.groupBy, ...report.aggregations.filter((agg) => agg.fieldId).map((agg) => agg.fieldId!), ...report.sort.map((sort) => sort.fieldId)]) {
+      if (!entityFields.has(fieldId)) {
+        issues.push({ kind: 'report', id: report.id, message: `Report references unknown field "${fieldId}" on entity "${report.entityId}"`, path: ['fieldIds'] });
+        break;
+      }
+    }
+  }
+  const reportIds = new Set(reports.map((report) => report.id));
+  for (const dashboard of dashboards) {
+    for (const widget of dashboard.widgets) {
+      if (widget.reportId && !reportIds.has(widget.reportId)) {
+        issues.push({ kind: 'dashboard', id: dashboard.id, message: `Widget "${widget.id}" references unknown report "${widget.reportId}"`, path: ['widgets'] });
+      }
+    }
   }
   return issues;
 }
@@ -85,10 +126,13 @@ export function validateModuleSchema(
   workflows: WorkflowDefinition[] = [],
   actions: ActionDefinition[] = [],
   automations: AutomationDefinition[] = [],
+  reports: ReportDefinition[] = [],
+  dashboards: DashboardDefinition[] = [],
 ): DefinitionValidationIssue[] {
   const issues: DefinitionValidationIssue[] = [
     ...validateWorkflowReferences(entities, fields, workflows, actions),
     ...validateAutomationReferences(entities, automations, actions),
+    ...validateReportReferences(entities, fields, reports, dashboards),
   ];
   const entityById = new Map(entities.map(e => [e.id, e]));
   const fieldsByEntityId = new Map<string, Map<string, FieldDefinition>>();

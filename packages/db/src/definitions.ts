@@ -11,9 +11,13 @@ import {
   RelationUpdateInputSchema,
   ActionDefinitionSchema,
   AutomationDefinitionSchema,
+  DashboardDefinitionSchema,
+  ReportDefinitionSchema,
   WorkflowDefinitionSchema,
   type ActionDefinition,
   type AutomationDefinition,
+  type DashboardDefinition,
+  type ReportDefinition,
   type WorkflowDefinition,
   type EntityDefinition,
   type FieldDefinition,
@@ -25,7 +29,7 @@ import type { DbHandle } from './client';
 import type { TenantContext } from './tenancy';
 import { auditLog, metadataDefinitions, modules, records } from './schema';
 
-export type DefinitionKind = 'entity' | 'field' | 'relation' | 'workflow' | 'action' | 'automation';
+export type DefinitionKind = 'entity' | 'field' | 'relation' | 'workflow' | 'action' | 'automation' | 'report' | 'dashboard';
 
 export interface ModuleSchema {
   entities: EntityDefinition[];
@@ -34,6 +38,8 @@ export interface ModuleSchema {
   workflows: WorkflowDefinition[];
   actions: ActionDefinition[];
   automations: AutomationDefinition[];
+  reports: ReportDefinition[];
+  dashboards: DashboardDefinition[];
 }
 
 export class DefinitionNotFoundError extends Error {
@@ -57,6 +63,8 @@ const schemas: Record<DefinitionKind, z.ZodTypeAny> = {
   workflow: WorkflowDefinitionSchema,
   action: ActionDefinitionSchema,
   automation: AutomationDefinitionSchema,
+  report: ReportDefinitionSchema,
+  dashboard: DashboardDefinitionSchema,
 };
 
 function isUniqueViolation(error: unknown): boolean {
@@ -89,6 +97,8 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
       workflows: await readAll<WorkflowDefinition>(db, moduleId, 'workflow'),
       actions: await readAll<ActionDefinition>(db, moduleId, 'action'),
       automations: await readAll<AutomationDefinition>(db, moduleId, 'automation'),
+      reports: await readAll<ReportDefinition>(db, moduleId, 'report'),
+      dashboards: await readAll<DashboardDefinition>(db, moduleId, 'dashboard'),
     };
   }
 
@@ -110,7 +120,7 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
       }
       const current = await loadSchema(tx, moduleId);
       const { next, result, audit, entityId } = await change(tx, current);
-      const issues = validateModuleSchema(next.entities, next.fields, next.relations, next.workflows, next.actions, next.automations);
+      const issues = validateModuleSchema(next.entities, next.fields, next.relations, next.workflows, next.actions, next.automations, next.reports, next.dashboards);
       if (issues.length > 0) {
         throw new DefinitionConflictError(`Invalid module schema: ${issues.map((issue) => issue.message).join('; ')}`);
       }
@@ -158,6 +168,97 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
     listActions: (moduleId: string) => readAll<ActionDefinition>(handle.db, moduleId, 'action'),
     getAction: (moduleId: string, id: string) => getOne<ActionDefinition>(moduleId, 'action', id),
     listAutomations: (moduleId: string) => readAll<AutomationDefinition>(handle.db, moduleId, 'automation'),
+    listReports: (moduleId: string) => readAll<ReportDefinition>(handle.db, moduleId, 'report'),
+    getReport: (moduleId: string, id: string) => getOne<ReportDefinition>(moduleId, 'report', id),
+    listDashboards: (moduleId: string) => readAll<DashboardDefinition>(handle.db, moduleId, 'dashboard'),
+    getDashboard: (moduleId: string, id: string) => getOne<DashboardDefinition>(moduleId, 'dashboard', id),
+
+    async createReport(moduleId: string, definition: ReportDefinition, actorId?: string): Promise<ReportDefinition> {
+      const parsed = ReportDefinitionSchema.parse({ ...definition, moduleId });
+      return mutate(moduleId, 'report.created', actorId, async (tx, current) => {
+        await insertDefinition(tx, moduleId, 'report', parsed);
+        return {
+          next: { ...current, reports: [...current.reports, parsed] },
+          result: parsed,
+          audit: { kind: 'report', after: parsed },
+          entityId: parsed.entityId,
+        };
+      });
+    },
+
+    async updateReport(moduleId: string, id: string, patch: Partial<ReportDefinition>, actorId?: string): Promise<ReportDefinition> {
+      return mutate(moduleId, 'report.updated', actorId, async (tx, current) => {
+        const before = current.reports.find((report) => report.id === id);
+        if (!before) throw new DefinitionNotFoundError('Report', id);
+        const after = ReportDefinitionSchema.parse({ ...before, ...patch, moduleId });
+        await writeDefinition(tx, moduleId, 'report', after);
+        return {
+          next: { ...current, reports: current.reports.map((report) => (report.id === id ? after : report)) },
+          result: after,
+          audit: { kind: 'report', before, after },
+          entityId: after.entityId,
+        };
+      });
+    },
+
+    async deleteReport(moduleId: string, id: string, actorId?: string): Promise<void> {
+      await mutate(moduleId, 'report.deleted', actorId, async (tx, current) => {
+        const before = current.reports.find((report) => report.id === id);
+        if (!before) throw new DefinitionNotFoundError('Report', id);
+        if (current.dashboards.some((dashboard) => dashboard.widgets.some((widget) => widget.reportId === id))) {
+          throw new DefinitionConflictError(`Report ${id} is used by a dashboard and cannot be deleted`);
+        }
+        await removeDefinitions(tx, moduleId, 'report', [id]);
+        return {
+          next: { ...current, reports: current.reports.filter((report) => report.id !== id) },
+          result: undefined,
+          audit: { kind: 'report', before },
+          entityId: null,
+        };
+      });
+    },
+
+    async createDashboard(moduleId: string, definition: DashboardDefinition, actorId?: string): Promise<DashboardDefinition> {
+      const parsed = DashboardDefinitionSchema.parse({ ...definition, moduleId });
+      return mutate(moduleId, 'dashboard.created', actorId, async (tx, current) => {
+        await insertDefinition(tx, moduleId, 'dashboard', parsed);
+        return {
+          next: { ...current, dashboards: [...current.dashboards, parsed] },
+          result: parsed,
+          audit: { kind: 'dashboard', after: parsed },
+          entityId: null,
+        };
+      });
+    },
+
+    async updateDashboard(moduleId: string, id: string, patch: Partial<DashboardDefinition>, actorId?: string): Promise<DashboardDefinition> {
+      return mutate(moduleId, 'dashboard.updated', actorId, async (tx, current) => {
+        const before = current.dashboards.find((dashboard) => dashboard.id === id);
+        if (!before) throw new DefinitionNotFoundError('Dashboard', id);
+        const after = DashboardDefinitionSchema.parse({ ...before, ...patch, moduleId });
+        await writeDefinition(tx, moduleId, 'dashboard', after);
+        return {
+          next: { ...current, dashboards: current.dashboards.map((dashboard) => (dashboard.id === id ? after : dashboard)) },
+          result: after,
+          audit: { kind: 'dashboard', before, after },
+          entityId: null,
+        };
+      });
+    },
+
+    async deleteDashboard(moduleId: string, id: string, actorId?: string): Promise<void> {
+      await mutate(moduleId, 'dashboard.deleted', actorId, async (tx, current) => {
+        const before = current.dashboards.find((dashboard) => dashboard.id === id);
+        if (!before) throw new DefinitionNotFoundError('Dashboard', id);
+        await removeDefinitions(tx, moduleId, 'dashboard', [id]);
+        return {
+          next: { ...current, dashboards: current.dashboards.filter((dashboard) => dashboard.id !== id) },
+          result: undefined,
+          audit: { kind: 'dashboard', before },
+          entityId: null,
+        };
+      });
+    },
     getAutomation: (moduleId: string, id: string) => getOne<AutomationDefinition>(moduleId, 'automation', id),
 
     async createAutomation(moduleId: string, definition: AutomationDefinition, actorId?: string): Promise<AutomationDefinition> {
