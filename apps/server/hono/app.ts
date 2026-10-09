@@ -9,7 +9,7 @@ import {
 } from '@nexa/meta';
 import {
   createDb, createTenantContext, SYSTEM_TENANT_ID, DefinitionConflictError, DefinitionNotFoundError,
-  RecordConflictError, tenantRepository, definitionRepository, automationRepository, ModuleConflictError,
+  RecordConflictError, tenantRepository, definitionRepository, automationRepository, packageRepository, ModuleConflictError,
   ModuleNotFoundError, moduleRepository, authRepository, identityRepository, AuthConflictError,
 } from '@nexa/db';
 import type { DbHandle } from '@nexa/db';
@@ -20,6 +20,7 @@ import { evaluateTransition } from '../../../packages/engine/workflow/transition
 import { planAction } from '../../../packages/engine/workflow/actions';
 import { selectAutomations } from '../../../packages/engine/automation/index';
 import { runReport } from '../../../packages/engine/report/index';
+import { isUpgrade } from '../../../packages/engine/pkg/index';
 import { deliverWebhook } from '../../../integrations/webhook/src/index';
 import { sendNotification } from '../../../integrations/email/src/index';
 import { digestSessionToken, generateSessionToken, hashPassword, verifyPassword } from '../../../packages/auth/src/index';
@@ -37,7 +38,7 @@ export interface AppDependencies {
 }
 type Principal = { userId: string; tenantId: string; name: string | null; roleIds: string[]; sessionId: string };
 const sessionCookie = 'nexa_session';
-function errorResponse(code: string, message: string, status: 400 | 401 | 403 | 404 | 409 | 422 | 503, details?: unknown) {
+function errorResponse(code: string, message: string, status: 400 | 401 | 403 | 404 | 409 | 422 | 500 | 503, details?: unknown) {
   return { error: { code, message, status, ...(details === undefined ? {} : { details }) } };
 }
 
@@ -332,6 +333,39 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.delete('/modules/:moduleId/dashboards/:id', async (c) => withDefinitions(c, 'report:manage', async (repo, moduleId, _tenantId, principal) => {
     await repo.deleteDashboard(moduleId, c.req.param('id'), principal.userId);
     return c.body(null, 204);
+  }));
+  app.get('/modules/:moduleId/package', async (c) => withDefinitions(c, async (_repo, moduleId, tenantId) => {
+    try {
+      return c.json(await packageRepository(dependencies.db!, createTenantContext(tenantId)).exportPackage(moduleId));
+    } catch (error) {
+      return error instanceof ModuleNotFoundError || (error instanceof Error && error.message.startsWith('Module not found'))
+        ? c.json(errorResponse('MODULE_NOT_FOUND', error.message, 404), 404)
+        : c.json(errorResponse('EXPORT_FAILED', error instanceof Error ? error.message : 'Export failed', 500), 500);
+    }
+  }));
+  app.post('/modules/:moduleId/package/upgrade', async (c) => withTenant(c, 'module:write', async (db, tenantId, principal) => {
+    const body = await c.req.json().catch(() => undefined);
+    if (!body || typeof body !== 'object') return invalid(c, 'Package payload required');
+    const pkgPkgs = await import('@nexa/meta');
+    const parsed = pkgPkgs.ModulePackageSchema.safeParse(body);
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    const pkg = parsed.data;
+    if (pkg.manifest.moduleId !== c.req.param('moduleId')) return invalid(c, 'Package moduleId does not match the URL');
+    const modulesRepo = moduleRepository(db, createTenantContext(tenantId));
+    const current = await modulesRepo.get(pkg.manifest.moduleId);
+    if (!current) return c.json(errorResponse('MODULE_NOT_FOUND', `Module not found: ${pkg.manifest.moduleId}`, 404), 404);
+    if (!isUpgrade(current.version, pkg.manifest.version)) {
+      return c.json(errorResponse('VERSION_NOT_UPGRADE', `Incoming version ${pkg.manifest.version} must be greater than current ${current.version}`, 409), 409);
+    }
+    const repo = packageRepository(db, createTenantContext(tenantId));
+    try {
+      const updated = await repo.upgradePackage(pkg, principal.userId);
+      return c.json({ upgraded: true, module: updated }, 200);
+    } catch (error) {
+      if (error instanceof DefinitionConflictError) return c.json(errorResponse('PACKAGE_CONFLICT', error.message, 409), 409);
+      if (error instanceof ModuleConflictError) return c.json(errorResponse('MODULE_CONFLICT', error.message, 409), 409);
+      throw error;
+    }
   }));
   app.post('/modules/:moduleId/actions', async (c) => withDefinitions(c, async (repo, moduleId, _tenantId, principal) => {
     const parsed = ActionDefinitionSchema.safeParse(await c.req.json().catch(() => undefined));
