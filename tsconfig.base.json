@@ -14,7 +14,9 @@
       "@nexa/ui": ["./packages/ui/src/index.ts"],
       "@nexa/auth": ["./packages/auth/src/index.ts"],
       "@nexa/sdk": ["./packages/sdk/src/index.ts"],
-      "@nexa/server": ["./apps/server/hono/app.ts"]
+      "@nexa/server": ["./apps/server/hono/app.ts"],
+      "@nexa/integration-webhook": ["./integrations/webhook/src/index.ts"],
+      "@nexa/integration-email": ["./integrations/email/src/index.ts"]
     }
   }
 }

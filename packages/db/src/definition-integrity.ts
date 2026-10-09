@@ -1,11 +1,37 @@
-import type { ActionDefinition, EntityDefinition, FieldDefinition, RelationDefinition, WorkflowDefinition } from '@nexa/meta';
+import type { ActionDefinition, AutomationDefinition, EntityDefinition, FieldDefinition, RelationDefinition, WorkflowDefinition } from '@nexa/meta';
 import { extractFormulaReferences, parseExpression, parseFormulaGraph, topologicalFormulaOrder } from '../../engine/formula/index';
 
 export interface DefinitionValidationIssue {
-  kind: 'entity' | 'field' | 'relation' | 'workflow' | 'action';
+  kind: 'entity' | 'field' | 'relation' | 'workflow' | 'action' | 'automation';
   id: string;
   message: string;
   path?: string[];
+}
+
+/**
+ * Cross-checks automations against the module's entities and actions.
+ * A record trigger must name an existing entity, and every automation action
+ * must reference an existing action definition.
+ */
+export function validateAutomationReferences(
+  entities: EntityDefinition[],
+  automations: AutomationDefinition[],
+  actions: ActionDefinition[],
+): DefinitionValidationIssue[] {
+  const issues: DefinitionValidationIssue[] = [];
+  const actionIds = new Set(actions.map((action) => action.id));
+  const entityIds = new Set(entities.map((entity) => entity.id));
+  for (const automation of automations) {
+    if (automation.trigger.type === 'record' && !entityIds.has(automation.trigger.entityId)) {
+      issues.push({ kind: 'automation', id: automation.id, message: `Automation references unknown entity "${automation.trigger.entityId}"`, path: ['trigger', 'entityId'] });
+    }
+    automation.actions.forEach((ref, index) => {
+      if (!actionIds.has(ref.actionId)) {
+        issues.push({ kind: 'automation', id: automation.id, message: `Automation references unknown action "${ref.actionId}"`, path: ['actions', String(index), 'actionId'] });
+      }
+    });
+  }
+  return issues;
 }
 
 /**
@@ -58,8 +84,12 @@ export function validateModuleSchema(
   relations: RelationDefinition[],
   workflows: WorkflowDefinition[] = [],
   actions: ActionDefinition[] = [],
+  automations: AutomationDefinition[] = [],
 ): DefinitionValidationIssue[] {
-  const issues: DefinitionValidationIssue[] = [...validateWorkflowReferences(entities, fields, workflows, actions)];
+  const issues: DefinitionValidationIssue[] = [
+    ...validateWorkflowReferences(entities, fields, workflows, actions),
+    ...validateAutomationReferences(entities, automations, actions),
+  ];
   const entityById = new Map(entities.map(e => [e.id, e]));
   const fieldsByEntityId = new Map<string, Map<string, FieldDefinition>>();
 

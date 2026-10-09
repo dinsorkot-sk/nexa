@@ -8,3 +8,4 @@ export * from './seed';
 export * from './check';
 export * from './auth-repo';
 export * from './cli';
+export * from './automation-repo';

@@ -10,8 +10,10 @@ import {
   RelationDefinitionSchema,
   RelationUpdateInputSchema,
   ActionDefinitionSchema,
+  AutomationDefinitionSchema,
   WorkflowDefinitionSchema,
   type ActionDefinition,
+  type AutomationDefinition,
   type WorkflowDefinition,
   type EntityDefinition,
   type FieldDefinition,
@@ -23,7 +25,7 @@ import type { DbHandle } from './client';
 import type { TenantContext } from './tenancy';
 import { auditLog, metadataDefinitions, modules, records } from './schema';
 
-export type DefinitionKind = 'entity' | 'field' | 'relation' | 'workflow' | 'action';
+export type DefinitionKind = 'entity' | 'field' | 'relation' | 'workflow' | 'action' | 'automation';
 
 export interface ModuleSchema {
   entities: EntityDefinition[];
@@ -31,6 +33,7 @@ export interface ModuleSchema {
   relations: RelationDefinition[];
   workflows: WorkflowDefinition[];
   actions: ActionDefinition[];
+  automations: AutomationDefinition[];
 }
 
 export class DefinitionNotFoundError extends Error {
@@ -53,6 +56,7 @@ const schemas: Record<DefinitionKind, z.ZodTypeAny> = {
   relation: RelationDefinitionSchema,
   workflow: WorkflowDefinitionSchema,
   action: ActionDefinitionSchema,
+  automation: AutomationDefinitionSchema,
 };
 
 function isUniqueViolation(error: unknown): boolean {
@@ -84,6 +88,7 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
       relations: await readAll<RelationDefinition>(db, moduleId, 'relation'),
       workflows: await readAll<WorkflowDefinition>(db, moduleId, 'workflow'),
       actions: await readAll<ActionDefinition>(db, moduleId, 'action'),
+      automations: await readAll<AutomationDefinition>(db, moduleId, 'automation'),
     };
   }
 
@@ -105,7 +110,7 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
       }
       const current = await loadSchema(tx, moduleId);
       const { next, result, audit, entityId } = await change(tx, current);
-      const issues = validateModuleSchema(next.entities, next.fields, next.relations, next.workflows, next.actions);
+      const issues = validateModuleSchema(next.entities, next.fields, next.relations, next.workflows, next.actions, next.automations);
       if (issues.length > 0) {
         throw new DefinitionConflictError(`Invalid module schema: ${issues.map((issue) => issue.message).join('; ')}`);
       }
@@ -152,6 +157,50 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
     getWorkflow: (moduleId: string, id: string) => getOne<WorkflowDefinition>(moduleId, 'workflow', id),
     listActions: (moduleId: string) => readAll<ActionDefinition>(handle.db, moduleId, 'action'),
     getAction: (moduleId: string, id: string) => getOne<ActionDefinition>(moduleId, 'action', id),
+    listAutomations: (moduleId: string) => readAll<AutomationDefinition>(handle.db, moduleId, 'automation'),
+    getAutomation: (moduleId: string, id: string) => getOne<AutomationDefinition>(moduleId, 'automation', id),
+
+    async createAutomation(moduleId: string, definition: AutomationDefinition, actorId?: string): Promise<AutomationDefinition> {
+      const parsed = AutomationDefinitionSchema.parse({ ...definition, moduleId });
+      return mutate(moduleId, 'automation.created', actorId, async (tx, current) => {
+        await insertDefinition(tx, moduleId, 'automation', parsed);
+        return {
+          next: { ...current, automations: [...current.automations, parsed] },
+          result: parsed,
+          audit: { kind: 'automation', after: parsed },
+          entityId: null,
+        };
+      });
+    },
+
+    async updateAutomation(moduleId: string, id: string, patch: Partial<AutomationDefinition>, actorId?: string): Promise<AutomationDefinition> {
+      return mutate(moduleId, 'automation.updated', actorId, async (tx, current) => {
+        const before = current.automations.find((automation) => automation.id === id);
+        if (!before) throw new DefinitionNotFoundError('Automation', id);
+        const after = AutomationDefinitionSchema.parse({ ...before, ...patch, moduleId });
+        await writeDefinition(tx, moduleId, 'automation', after);
+        return {
+          next: { ...current, automations: current.automations.map((automation) => (automation.id === id ? after : automation)) },
+          result: after,
+          audit: { kind: 'automation', before, after },
+          entityId: null,
+        };
+      });
+    },
+
+    async deleteAutomation(moduleId: string, id: string, actorId?: string): Promise<void> {
+      await mutate(moduleId, 'automation.deleted', actorId, async (tx, current) => {
+        const before = current.automations.find((automation) => automation.id === id);
+        if (!before) throw new DefinitionNotFoundError('Automation', id);
+        await removeDefinitions(tx, moduleId, 'automation', [id]);
+        return {
+          next: { ...current, automations: current.automations.filter((automation) => automation.id !== id) },
+          result: undefined,
+          audit: { kind: 'automation', before },
+          entityId: null,
+        };
+      });
+    },
 
     async createWorkflow(moduleId: string, definition: WorkflowDefinition, actorId?: string): Promise<WorkflowDefinition> {
       const parsed = WorkflowDefinitionSchema.parse({ ...definition, moduleId });

@@ -200,8 +200,28 @@ export type RecordLink = typeof recordLinks.$inferSelect;
 export type NewRecordLink = typeof recordLinks.$inferInsert;
 export type AuditLogEntry = typeof auditLog.$inferSelect;
 export type NewAuditLogEntry = typeof auditLog.$inferInsert;
+export const automationRuns = pgTable('nexa_automation_runs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  moduleId: text('module_id').notNull(),
+  automationId: text('automation_id').notNull(),
+  triggerType: text('trigger_type').notNull(),
+  status: text('status').notNull(),
+  attempts: integer('attempts').notNull().default(0),
+  lastError: text('last_error'),
+  correlationId: text('correlation_id'),
+  recordId: uuid('record_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index('nexa_automation_runs_tenant_time_idx').on(table.tenantId, table.createdAt),
+  index('nexa_automation_runs_tenant_auto_idx').on(table.tenantId, table.automationId, table.createdAt),
+]);
+
 export type EventLogEntry = typeof eventLog.$inferSelect;
 export type NewEventLogEntry = typeof eventLog.$inferInsert;
+export type AutomationRun = typeof automationRuns.$inferSelect;
+export type NewAutomationRun = typeof automationRuns.$inferInsert;
 export type UserRow = typeof users.$inferSelect;
 export type NewUserRow = typeof users.$inferInsert;
 export type RoleAssignmentRow = typeof roleAssignments.$inferSelect;

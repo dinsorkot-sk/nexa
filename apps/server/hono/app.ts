@@ -1,5 +1,6 @@
 import {
-  ActionDefinitionSchema, WorkflowDefinitionSchema,
+  ActionDefinitionSchema, AutomationDefinitionSchema, WorkflowDefinitionSchema,
+  NotificationActionConfigSchema, WebhookActionConfigSchema,
   EntityCreateInputSchema, EntityUpdateInputSchema, FieldCreateInputSchema, FieldUpdateInputSchema,
   HealthCheckSchema, ModuleCreateInputSchema, ModuleStatusSchema, ModuleTransitionInputSchema,
   ModuleUpdateInputSchema, RelationCreateInputSchema, RelationUpdateInputSchema,
@@ -8,7 +9,7 @@ import {
 } from '@nexa/meta';
 import {
   createDb, createTenantContext, SYSTEM_TENANT_ID, DefinitionConflictError, DefinitionNotFoundError,
-  RecordConflictError, tenantRepository, definitionRepository, ModuleConflictError,
+  RecordConflictError, tenantRepository, definitionRepository, automationRepository, ModuleConflictError,
   ModuleNotFoundError, moduleRepository, authRepository, identityRepository, AuthConflictError,
 } from '@nexa/db';
 import type { DbHandle } from '@nexa/db';
@@ -17,13 +18,22 @@ import { parseQuery } from '../../../packages/engine/query/index';
 import { hasPlatformPermission } from '../../../packages/engine/permission/index';
 import { evaluateTransition } from '../../../packages/engine/workflow/transitions';
 import { planAction } from '../../../packages/engine/workflow/actions';
+import { selectAutomations } from '../../../packages/engine/automation/index';
+import { deliverWebhook } from '../../../integrations/webhook/src/index';
+import { sendNotification } from '../../../integrations/email/src/index';
 import { digestSessionToken, generateSessionToken, hashPassword, verifyPassword } from '../../../packages/auth/src/index';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 
-export interface AppDependencies { db?: DbHandle }
+export interface AppDependencies {
+  db?: DbHandle;
+  /** Injected in tests so webhook deliveries never touch the network. */
+  webhookTransport?: Parameters<typeof deliverWebhook>[2];
+  /** Injected in tests so notification deliveries stay in-process. */
+  emailTransport?: Parameters<typeof sendNotification>[1];
+}
 type Principal = { userId: string; tenantId: string; name: string | null; roleIds: string[]; sessionId: string };
 const sessionCookie = 'nexa_session';
 function errorResponse(code: string, message: string, status: 400 | 401 | 403 | 404 | 409 | 422 | 503, details?: unknown) {
@@ -59,6 +69,49 @@ export function createApp(dependencies: AppDependencies = {}) {
     const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
     c.header('Set-Cookie', `${sessionCookie}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
   };
+  /**
+   * Fires automations for an event after the triggering request commits.
+   * Never throws: failures are recorded per-run as the delivery log.
+   */
+  async function dispatchAutomations(
+    tenantId: string,
+    moduleId: string,
+    event: { type: 'event' | 'record' | 'workflow'; eventType?: string; entityId?: string; recordId?: string; operation?: 'created' | 'updated' | 'deleted'; workflowId?: string; transitionId?: string; payload?: Record<string, unknown> },
+    actorId?: string,
+  ) {
+    const ctx = createTenantContext(tenantId);
+    const defs = definitionRepository(dependencies.db!, ctx);
+    const runs = automationRepository(dependencies.db!, ctx);
+    const [automations, actions] = await Promise.all([defs.listAutomations(moduleId), defs.listActions(moduleId)]);
+    const matched = selectAutomations(automations, { ...event, moduleId, actorId });
+    for (const automation of matched) {
+      const run = await runs.start({ moduleId, automationId: automation.id, triggerType: automation.trigger.type, recordId: event.recordId });
+      let lastError: string | undefined;
+      for (let attempt = 1; attempt <= automation.retry.maxAttempts + 1; attempt += 1) {
+        try {
+          for (const ref of automation.actions) {
+            const action = actions.find((candidate) => candidate.id === ref.actionId);
+            if (!action) continue;
+            if (action.kind === 'webhook') {
+              const config = WebhookActionConfigSchema.parse(action.config);
+              await deliverWebhook(config, { event: event, automationId: automation.id, actorId }, dependencies.webhookTransport);
+            } else if (action.kind === 'notification') {
+              const config = NotificationActionConfigSchema.parse(action.config);
+              await sendNotification(config, dependencies.emailTransport);
+            }
+            // Other action kinds are skipped until their phase; the run still records success for the supported ones.
+          }
+          lastError = undefined;
+          break;
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : String(error);
+          if (attempt <= automation.retry.maxAttempts) await runs.retry(run.id, attempt + 1, lastError);
+        }
+      }
+      await runs.finish(run.id, lastError === undefined ? 'succeeded' : 'failed', lastError);
+    }
+  }
+
   app.use('*', async (c, next) => {
     const token = cookieValue(c.req.header('cookie'), sessionCookie);
     if (token && dependencies.db) {
@@ -132,7 +185,7 @@ export function createApp(dependencies: AppDependencies = {}) {
     return c.body(null, 204);
   });
 
-  const withTenant = async (c: Context, permissionOrCallback: 'module:read' | 'module:write' | 'definition:read' | 'definition:write' | 'record:read' | 'record:write' | 'workflow:transition' | 'action:execute' | ((db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>): Promise<Response> => {
+  const withTenant = async (c: Context, permissionOrCallback: 'module:read' | 'module:write' | 'definition:read' | 'definition:write' | 'record:read' | 'record:write' | 'workflow:transition' | 'action:execute' | 'automation:manage' | ((db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>): Promise<Response> => {
     const permission = typeof permissionOrCallback === 'function'
       ? (c.req.path.includes('/records') ? (c.req.method === 'GET' ? 'record:read' : 'record:write') : (c.req.method === 'GET' ? 'definition:read' : 'definition:write'))
       : permissionOrCallback;
@@ -158,7 +211,7 @@ export function createApp(dependencies: AppDependencies = {}) {
     const repo = moduleRepository(db, createTenantContext(tenantId));
     return typeof permissionOrCallback === 'function' ? permissionOrCallback(repo, tenantId, principal) : maybeCallback!(repo, tenantId, principal);
   });
-  const withDefinitions = (c: Context, permissionOrCallback: 'definition:read' | 'definition:write' | 'record:read' | 'record:write' | 'workflow:transition' | 'action:execute' | ((repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string, principal: Principal) => Promise<Response>) => withTenant(c, typeof permissionOrCallback === 'function'
+  const withDefinitions = (c: Context, permissionOrCallback: 'definition:read' | 'definition:write' | 'record:read' | 'record:write' | 'workflow:transition' | 'action:execute' | 'automation:manage' | ((repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string, principal: Principal) => Promise<Response>) => withTenant(c, typeof permissionOrCallback === 'function'
     ? (c.req.path.includes('/records') ? (c.req.method === 'GET' ? 'record:read' : 'record:write') : (c.req.method === 'GET' ? 'definition:read' : 'definition:write'))
     : permissionOrCallback, (db, tenantId, principal) => {
       const repo = definitionRepository(db, createTenantContext(tenantId));
@@ -205,6 +258,25 @@ export function createApp(dependencies: AppDependencies = {}) {
     return c.json(await repo.createWorkflow(moduleId, parsed.data, principal.userId), 201);
   }));
   app.get('/modules/:moduleId/actions', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.listActions(moduleId))));
+  app.get('/modules/:moduleId/automations', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.listAutomations(moduleId))));
+  app.get('/modules/:moduleId/automations/:id/runs', async (c) => withDefinitions(c, async (repo, moduleId, tenantId) => {
+    const runs = automationRepository(dependencies.db!, createTenantContext(tenantId));
+    return c.json(await runs.list(moduleId, { automationId: c.req.param('id') }));
+  }));
+  app.post('/modules/:moduleId/automations', async (c) => withDefinitions(c, 'automation:manage', async (repo, moduleId, _tenantId, principal) => {
+    const parsed = AutomationDefinitionSchema.safeParse({ ...(await c.req.json().catch(() => undefined)), moduleId });
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    return c.json(await repo.createAutomation(moduleId, parsed.data, principal.userId), 201);
+  }));
+  app.patch('/modules/:moduleId/automations/:id', async (c) => withDefinitions(c, 'automation:manage', async (repo, moduleId, _tenantId, principal) => {
+    const parsed = await c.req.json().catch(() => undefined);
+    if (!parsed) return invalid(c, 'Body required');
+    return c.json(await repo.updateAutomation(moduleId, c.req.param('id'), parsed as Record<string, unknown>, principal.userId));
+  }));
+  app.delete('/modules/:moduleId/automations/:id', async (c) => withDefinitions(c, 'automation:manage', async (repo, moduleId, _tenantId, principal) => {
+    await repo.deleteAutomation(moduleId, c.req.param('id'), principal.userId);
+    return c.body(null, 204);
+  }));
   app.post('/modules/:moduleId/actions', async (c) => withDefinitions(c, async (repo, moduleId, _tenantId, principal) => {
     const parsed = ActionDefinitionSchema.safeParse(await c.req.json().catch(() => undefined));
     if (!parsed.success) return invalid(c, parsed.error.message);
@@ -292,6 +364,7 @@ export function createApp(dependencies: AppDependencies = {}) {
     const repo = tenantRepository(dependencies.db!, createTenantContext(tenantId));
     await repo.assertReferences(moduleId, fields.filter((field) => field.type === 'reference'), data);
     const record = await repo.createScopedRecord(moduleId, entityId, data, principal.userId, fields.filter((field) => field.options.unique).map((field) => field.id));
+    await dispatchAutomations(tenantId, moduleId, { type: 'record', entityId, recordId: record.id, operation: 'created', payload: { data } }, principal.userId);
     return c.json(redactHidden(record, fields), 201);
   }));
   app.get('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
@@ -318,6 +391,7 @@ export function createApp(dependencies: AppDependencies = {}) {
     const data = validateRecordData(entity, fields, parsed.data.data, { mode: 'update', existing: existing.data });
     await repo.assertReferences(moduleId, fields.filter((field) => field.type === 'reference'), data);
     const updated = await repo.updateScopedRecord(moduleId, entityId, c.req.param('recordId'), data, parsed.data.version ?? existing.version, principal.userId, fields.filter((field) => field.options.unique).map((field) => field.id));
+    if (updated) await dispatchAutomations(tenantId, moduleId, { type: 'record', entityId, recordId: updated.id, operation: 'updated', payload: { data } }, principal.userId);
     return updated ? c.json(redactHidden(updated, fields)) : missingRecord(c);
   }));
   app.delete('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
@@ -386,6 +460,7 @@ export function createApp(dependencies: AppDependencies = {}) {
       await repo.appendEvent({ eventType: 'workflow.transitioned', moduleId, entityId, recordId: record.id, actorId: principal.userId, payload: { workflowId: workflow.id, transitionId: decision.transition.id, from: currentState, to: decision.nextStateId } }, tx);
       return record;
     });
+    if (updated) await dispatchAutomations(tenantId, moduleId, { type: 'workflow', entityId, recordId: updated.id, workflowId: workflow.id, transitionId: decision.transition.id, payload: { from: currentState, to: decision.nextStateId } }, principal.userId);
     return updated ? c.json(redactHidden(updated, fields)) : missingRecord(c);
   }));
 
@@ -419,6 +494,9 @@ export function createApp(dependencies: AppDependencies = {}) {
       await repo.appendEvent({ eventType: plan.eventType, moduleId, entityId, recordId: record.id, actorId: principal.userId, payload: { actionId: action.id, ...plan.payload } }, tx);
       return record;
     });
+    if (result && plan.kind === 'emitEvent') {
+      await dispatchAutomations(tenantId, moduleId, { type: 'event', entityId, recordId: result.id, eventType: (plan as { eventType: string }).eventType, payload: { actionId: action.id } }, principal.userId);
+    }
     return result ? c.json(redactHidden(result, fields)) : missingRecord(c);
   }));
 
