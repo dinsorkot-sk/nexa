@@ -27,7 +27,7 @@ export function sessionMiddleware(dependencies: AppDependencies) {
         if (user?.status === 'active') {
           const roleIds = await identity.listRoleIds(session.tenantId, session.userId);
           principals.set(c, { userId: user.id, tenantId: user.tenantId, name: user.displayName || null, roleIds, sessionId: session.id });
-          void authRepository(dependencies.db, createTenantContext(session.tenantId)).touchSession(session.id).catch(() => {});
+          await authRepository(dependencies.db, createTenantContext(session.tenantId)).touchSession(session.id);
         }
       }
     }

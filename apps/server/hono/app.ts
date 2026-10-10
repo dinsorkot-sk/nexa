@@ -1,5 +1,4 @@
 import { HealthCheckSchema } from '@nexa/meta';
-import { createDb } from '@nexa/db';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
@@ -49,8 +48,8 @@ export function createApp(dependencies: AppDependencies = {}) {
   return app;
 }
 
-const productionDb = createDb();
-export const app = createApp({ db: productionDb });
+// Dependency-free default for imports (health/status only). Runtime wiring with a database lives in src/index.ts.
+export const app = createApp();
 export const routes = app;
 export type AppType = typeof routes;
 export default app;
