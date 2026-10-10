@@ -10,6 +10,7 @@ import {
   uuid,
   integer,
   unique,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 export const tenants = pgTable('nexa_tenants', {
@@ -106,7 +107,6 @@ export const auditLog = pgTable('nexa_audit_log', {
 ]);
 
 export const users = pgTable('nexa_users', {
-  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
   id: uuid('id').defaultRandom().notNull(),
   email: text('email').notNull(),
   passwordHash: text('password_hash').notNull(),
@@ -114,8 +114,8 @@ export const users = pgTable('nexa_users', {
   status: text('status').notNull().default('active'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
-  primaryKey({ columns: [table.tenantId, table.id] }),
-  index('nexa_users_tenant_email_idx').on(table.tenantId, table.email),
+  primaryKey({ columns: [table.id] }),
+  uniqueIndex('nexa_users_email_uq').on(sql`lower(${table.email})`),
 ]);
 
 export const roleAssignments = pgTable('nexa_role_assignments', {
@@ -130,6 +130,16 @@ export const roleAssignments = pgTable('nexa_role_assignments', {
   index('nexa_role_assignments_tenant_name_idx').on(table.tenantId, table.name),
 ]);
 
+export const organizationMemberships = pgTable('nexa_organization_memberships', {
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('active'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.tenantId, table.userId] }),
+  index('nexa_organization_memberships_user_idx').on(table.userId, table.createdAt),
+]);
+
 export const userRoleMemberships = pgTable('nexa_user_role_memberships', {
   tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
   userId: uuid('user_id').notNull(),
@@ -138,9 +148,9 @@ export const userRoleMemberships = pgTable('nexa_user_role_memberships', {
 }, (table) => [
   primaryKey({ columns: [table.tenantId, table.userId, table.roleId] }),
   foreignKey({
-    name: 'nexa_user_role_memberships_user_fk',
+    name: 'nexa_user_role_memberships_membership_fk',
     columns: [table.tenantId, table.userId],
-    foreignColumns: [users.tenantId, users.id],
+    foreignColumns: [organizationMemberships.tenantId, organizationMemberships.userId],
   }).onDelete('cascade'),
   foreignKey({
     name: 'nexa_user_role_memberships_role_fk',
@@ -163,9 +173,9 @@ export const sessions = pgTable('nexa_sessions', {
   primaryKey({ columns: [table.tenantId, table.id] }),
   unique('nexa_sessions_token_digest_uq').on(table.tokenDigest),
   foreignKey({
-    name: 'nexa_sessions_user_fk',
+    name: 'nexa_sessions_membership_fk',
     columns: [table.tenantId, table.userId],
-    foreignColumns: [users.tenantId, users.id],
+    foreignColumns: [organizationMemberships.tenantId, organizationMemberships.userId],
   }).onDelete('cascade'),
   index('nexa_sessions_user_idx').on(table.tenantId, table.userId),
 ]);
@@ -226,6 +236,8 @@ export type UserRow = typeof users.$inferSelect;
 export type NewUserRow = typeof users.$inferInsert;
 export type RoleAssignmentRow = typeof roleAssignments.$inferSelect;
 export type NewRoleAssignmentRow = typeof roleAssignments.$inferInsert;
+export type OrganizationMembershipRow = typeof organizationMemberships.$inferSelect;
+export type NewOrganizationMembershipRow = typeof organizationMemberships.$inferInsert;
 export type UserRoleMembershipRow = typeof userRoleMemberships.$inferSelect;
 export type NewUserRoleMembershipRow = typeof userRoleMemberships.$inferInsert;
 export type SessionRow = typeof sessions.$inferSelect;

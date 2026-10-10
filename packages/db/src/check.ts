@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import type { DbHandle } from './client';
-import { auditLog, eventLog, metadataDefinitions, modules, recordLinks, records, roleAssignments, sessions, systemSettings, tenants, userRoleMemberships, users } from './schema';
+import { auditLog, eventLog, metadataDefinitions, modules, organizationMemberships, recordLinks, records, roleAssignments, sessions, systemSettings, tenants, userRoleMemberships, users } from './schema';
 
 export interface DatabaseCheck {
   ok: boolean;
@@ -17,6 +17,7 @@ const expectedTables = [
   'nexa_audit_log',
   'nexa_event_log',
   'nexa_users',
+  'nexa_organization_memberships',
   'nexa_role_assignments',
   'nexa_user_role_memberships',
   'nexa_sessions',
@@ -26,10 +27,13 @@ const requiredConstraints = [
   'nexa_audit_log_tenant_record_fk',
   'nexa_record_links_from_record_fk',
   'nexa_record_links_to_record_fk',
+  'nexa_organization_memberships_user_fk',
+  'nexa_user_role_memberships_membership_fk',
+  'nexa_sessions_membership_fk',
 ] as const;
 
-const requiredMigrations = 6;
-const tables = [tenants, systemSettings, modules, metadataDefinitions, records, recordLinks, auditLog, eventLog, users, roleAssignments, userRoleMemberships, sessions];
+const requiredMigrations = 10;
+const tables = [tenants, systemSettings, modules, metadataDefinitions, records, recordLinks, auditLog, eventLog, users, organizationMemberships, roleAssignments, userRoleMemberships, sessions];
 
 export async function checkDatabase(handle: DbHandle): Promise<DatabaseCheck> {
   const checks: DatabaseCheck['checks'] = [];

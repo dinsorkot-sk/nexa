@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createDb, runMigrations, SYSTEM_TENANT_ID, tenants } from '@nexa/db';
+import { authRepository, createDb, createTenantContext, identityRepository, organizationRepository, runMigrations, SYSTEM_TENANT_ID, tenants } from '@nexa/db';
 import type { DbHandle } from '@nexa/db';
 import { app, createApp } from '../hono/app';
 
@@ -23,7 +23,12 @@ const jsonHeaders = { 'content-type': 'application/json' };
 /** Signs a user up and returns the session cookie plus the created user. */
 async function signup(api: Api, email: string, password = 'long-password') {
   const response = await api.request('/v1/auth/signup', {
-    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ email, password, displayName: email }),
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({
+      email,
+      password,
+      displayName: email,
+      organization: { name: `${email} organization`, slug: email.split('@')[0]!.toLowerCase().replace(/[^a-z0-9]+/g, '-') },
+    }),
   });
   const cookie = /nexa_session=([0-9a-f]{64})/.exec(response.headers.get('set-cookie') ?? '')?.[1];
   return { response, cookie: cookie ? `nexa_session=${cookie}` : undefined };
@@ -68,7 +73,7 @@ describe('Hono API (/v1)', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       service: 'nexa-platform',
-      framework: 'Nuxt + Hono',
+      framework: 'Hono',
     });
   });
 
@@ -82,13 +87,36 @@ describe('Hono API (/v1)', () => {
     const { response: signupResponse, cookie } = await signup(api, 'admin@example.com');
     expect(signupResponse.status).toBe(201);
     expect(cookie).toBeDefined();
-    await expect(signupResponse.json()).resolves.toMatchObject({
-      user: { email: 'admin@example.com', tenantId: SYSTEM_TENANT_ID, status: 'active' },
+    const signupBody = await signupResponse.json() as { user: { id: string; tenantId: string }; organization: { slug: string; roleIds: string[] } };
+    expect(signupBody).toMatchObject({
+      user: { email: 'admin@example.com', tenantId: expect.any(String), status: 'active' },
+      organization: { slug: 'admin', roleIds: ['owner'] },
     });
 
     const me = await api.request('/v1/auth/me', { headers: { cookie: cookie! } });
     expect(me.status).toBe(200);
-    await expect(me.json()).resolves.toMatchObject({ tenantId: SYSTEM_TENANT_ID, roleIds: ['admin'] });
+    await expect(me.json()).resolves.toMatchObject({ tenantId: signupBody.user.tenantId, roleIds: ['owner'] });
+
+    const organizationsRepo = organizationRepository(handles.at(-1)!);
+    const { response: secondSignup } = await signup(api, 'other-owner@example.com');
+    const secondOwner = await secondSignup.json() as { user: { tenantId: string } };
+    await organizationsRepo.addMember(secondOwner.user.tenantId, signupBody.user.id, 'member');
+
+    const organizations = await api.request('/v1/auth/organizations', { headers: { cookie: cookie! } });
+    await expect(organizations.json()).resolves.toMatchObject([
+      { id: signupBody.user.tenantId, slug: 'admin', roleIds: ['owner'] },
+      { id: secondOwner.user.tenantId, slug: 'other-owner', roleIds: ['member'] },
+    ]);
+    const switched = await api.request('/v1/auth/organizations/select', {
+      method: 'POST', headers: authHeaders(cookie!), body: JSON.stringify({ tenantId: secondOwner.user.tenantId }),
+    });
+    expect(switched.status).toBe(200);
+    await expect((await api.request('/v1/auth/me', { headers: { cookie: cookie! } })).json())
+      .resolves.toMatchObject({ tenantId: secondOwner.user.tenantId, roleIds: ['member'] });
+    const forbiddenSelection = await api.request('/v1/auth/organizations/select', {
+      method: 'POST', headers: authHeaders(cookie!), body: JSON.stringify({ tenantId: SYSTEM_TENANT_ID }),
+    });
+    expect(forbiddenSelection.status).toBe(403);
 
     const duplicate = await signup(api, 'admin@example.com');
     expect(duplicate.response.status).toBe(409);
@@ -105,8 +133,18 @@ describe('Hono API (/v1)', () => {
     expect(badLogin.status).toBe(401);
     await expect(badLogin.json()).resolves.toMatchObject({ error: { code: 'INVALID_CREDENTIALS' } });
 
+    const organizationRequired = await api.request('/v1/auth/login', {
+      method: 'POST', headers: jsonHeaders, body: JSON.stringify({ email: 'admin@example.com', password: 'long-password' }),
+    });
+    expect(organizationRequired.status).toBe(409);
+    await expect(organizationRequired.json()).resolves.toMatchObject({ error: { code: 'ORGANIZATION_REQUIRED' } });
+
     const login = await api.request('/v1/auth/login', {
-      method: 'POST', headers: jsonHeaders, body: JSON.stringify({ email: 'ADMIN@example.com', password: 'long-password' }),
+      method: 'POST', headers: jsonHeaders, body: JSON.stringify({
+        email: 'ADMIN@example.com',
+        password: 'long-password',
+        organizationId: signupBody.user.tenantId,
+      }),
     });
     expect(login.status).toBe(200);
 
@@ -115,6 +153,28 @@ describe('Hono API (/v1)', () => {
     const afterLogout = await api.request('/v1/auth/me', { headers: { cookie: cookie! } });
     expect(afterLogout.status).toBe(401);
   }, 30000);
+
+  it('disables public organization signup in production until verification is available', async () => {
+    const api = await createTestApp();
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const response = await api.request('/v1/auth/signup', {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          email: 'production@example.com',
+          password: 'long-password',
+          organization: { name: 'Production Org', slug: 'production-org' },
+        }),
+      });
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: 'SIGNUP_DISABLED' } });
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+    }
+  });
 
   it('requires authentication and enforces role-based permissions', async () => {
     const api = await createTestApp();
@@ -131,6 +191,11 @@ describe('Hono API (/v1)', () => {
     expect(created.status).toBe(201);
 
     const { cookie: memberCookie } = await signup(api, 'member@example.com');
+    const db = handles.at(-1)!;
+    const memberUser = (await identityRepository(db).findUserByEmail('member@example.com'))[0]!;
+    const memberAuth = authRepository(db, createTenantContext(memberUser.tenantId));
+    await memberAuth.removeRole(memberUser.id, 'owner');
+    await memberAuth.assignRole(memberUser.id, 'member');
     const member = { ...jsonHeaders, cookie: memberCookie! };
 
     const memberReads = await api.request('/v1/modules', { headers: member });
@@ -168,7 +233,7 @@ describe('Hono API (/v1)', () => {
       method: 'POST', headers, body: JSON.stringify(input),
     });
     expect(created.status).toBe(201);
-    await expect(created.json()).resolves.toMatchObject({ id: 'fleet', status: 'draft', tenantId: SYSTEM_TENANT_ID });
+    await expect(created.json()).resolves.toMatchObject({ id: 'fleet', status: 'draft', tenantId: expect.any(String) });
 
     const listed = await api.request('/v1/modules?status=draft', { headers });
     expect(listed.status).toBe(200);

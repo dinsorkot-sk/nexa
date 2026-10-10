@@ -210,7 +210,11 @@ describe('@nexa/meta schemas', () => {
 
   it('validates authentication inputs and prevents password hash exposure', () => {
     expect(LoginInputSchema.safeParse({ email: 'user@example.com', password: 'long-password' }).success).toBe(true);
-    expect(SignupInputSchema.safeParse({ email: 'user@example.com', password: 'long-password' }).success).toBe(true);
+    expect(SignupInputSchema.safeParse({
+      email: 'user@example.com',
+      password: 'long-password',
+      organization: { name: 'User Organization', slug: 'user-organization' },
+    }).success).toBe(true);
     expect(SessionTokenSchema.safeParse('a'.repeat(64)).success).toBe(true);
     expect(PrincipalSchema.safeParse({ userId: 'u', tenantId: 't', name: null, roleIds: [] }).success).toBe(true);
     expect(UserPublicSchema.safeParse({ id: 'u', tenantId: 't', email: 'user@example.com', displayName: '', status: 'active', createdAt: new Date().toISOString() }).success).toBe(true);

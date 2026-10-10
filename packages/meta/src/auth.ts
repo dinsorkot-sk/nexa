@@ -5,16 +5,28 @@ import { IdSchema } from './common';
 export const LoginInputSchema = z.object({
   email: z.string().trim().email().max(254),
   password: z.string().min(8).max(128),
+  organizationId: z.string().uuid().optional(),
 }).strict();
 export type LoginInput = z.infer<typeof LoginInputSchema>;
 
-/** Signup input for first-admin bootstrap. */
+export const OrganizationSignupSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  slug: z.string().trim().min(3).max(50).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+}).strict();
+
+/** Signup creates a global identity and its first organization. */
 export const SignupInputSchema = z.object({
   email: z.string().trim().email().max(254),
   password: z.string().min(8).max(128),
   displayName: z.string().trim().max(200).optional(),
+  organization: OrganizationSignupSchema,
 }).strict();
 export type SignupInput = z.infer<typeof SignupInputSchema>;
+
+export const OrganizationSelectInputSchema = z.object({
+  tenantId: z.string().uuid(),
+}).strict();
+export type OrganizationSelectInput = z.infer<typeof OrganizationSelectInputSchema>;
 
 /** Session stored in DB; client receives only the opaque token. */
 export const SessionTokenSchema = z.string().regex(/^[0-9a-f]{64}$/i, 'Session token must be 64 hexadecimal characters');
@@ -31,7 +43,6 @@ export type Principal = z.infer<typeof PrincipalSchema>;
 
 /** User model — password hash stored server-side only. */
 export const UserCreateInputSchema = z.object({
-  tenantId: IdSchema,
   email: z.string().trim().email().max(254),
   passwordHash: z.string().min(1),
   displayName: z.string().trim().max(200).default(''),

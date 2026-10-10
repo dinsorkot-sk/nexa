@@ -18,7 +18,12 @@ const jsonHeaders = { 'content-type': 'application/json' };
 
 async function signup(api: Api, email: string) {
   const response = await api.request('/v1/auth/signup', {
-    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ email, password: 'long-password', displayName: email }),
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({
+      email,
+      password: 'long-password',
+      displayName: email,
+      organization: { name: `${email} organization`, slug: email.split('@')[0]!.toLowerCase().replace(/[^a-z0-9]+/g, '-') },
+    }),
   });
   const cookie = /nexa_session=([0-9a-f]{64})/.exec(response.headers.get('set-cookie') ?? '')?.[1];
   return `nexa_session=${cookie}`;
@@ -109,11 +114,10 @@ describe('automation HTTP surface', () => {
     const api = createApp({ db });
     const adminCookie = await signup(api, 'admin@example.com');
     const viewerCookie = await signup(api, 'viewer@example.com');
-    const auth = authRepository(db, createTenantContext(SYSTEM_TENANT_ID));
-    const viewer = await (await import('@nexa/db')).identityRepository(db).findUserByEmail('viewer@example.com');
-    await auth.createRole({ id: 'viewer', name: 'Viewer', isSystemRole: true });
-    await auth.removeRole(viewer[0]!.id, 'member');
-    await auth.assignRole(viewer[0]!.id, 'viewer');
+    const viewer = (await (await import('@nexa/db')).identityRepository(db).findUserByEmail('viewer@example.com'))[0]!;
+    const auth = authRepository(db, createTenantContext(viewer.tenantId));
+    await auth.removeRole(viewer.id, 'owner');
+    await auth.assignRole(viewer.id, 'viewer');
     const adminHeaders = { ...jsonHeaders, cookie: adminCookie };
     await api.request('/v1/modules', { method: 'POST', headers: adminHeaders, body: JSON.stringify({ id: 'fleet', owner: { id: 'user-1', type: 'user' }, name: 'Fleet', version: '1.0.0' }) });
     const response = await api.request('/v1/modules/fleet/automations', {

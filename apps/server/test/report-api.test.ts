@@ -18,7 +18,12 @@ const jsonHeaders = { 'content-type': 'application/json' };
 
 async function signup(api: Api, email: string) {
   const response = await api.request('/v1/auth/signup', {
-    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ email, password: 'long-password', displayName: email }),
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({
+      email,
+      password: 'long-password',
+      displayName: email,
+      organization: { name: `${email} organization`, slug: email.split('@')[0]!.toLowerCase().replace(/[^a-z0-9]+/g, '-') },
+    }),
   });
   const cookie = /nexa_session=([0-9a-f]{64})/.exec(response.headers.get('set-cookie') ?? '')?.[1];
   return `nexa_session=${cookie}`;

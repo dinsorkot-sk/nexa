@@ -1,7 +1,7 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { DbHandle } from './client';
 import type { TenantContext } from './tenancy';
-import { roleAssignments, sessions, userRoleMemberships, users } from './schema';
+import { organizationMemberships, roleAssignments, sessions, tenants, userRoleMemberships, users } from './schema';
 
 export class AuthNotFoundError extends Error {
   constructor(message: string) {
@@ -24,6 +24,15 @@ function isUniqueViolation(error: unknown): boolean {
 export interface UserRecord {
   id: string;
   tenantId: string;
+  email: string;
+  passwordHash: string;
+  displayName: string;
+  status: string;
+  createdAt: Date;
+}
+
+export interface IdentityRecord {
+  id: string;
   email: string;
   passwordHash: string;
   displayName: string;
@@ -54,9 +63,25 @@ export interface SessionRecord {
 /** Read-only helpers used by the auth middleware before a principal is established. */
 export function identityRepository(handle: DbHandle) {
   return {
-    /** Looks up a user across tenants by email (login is tenant-agnostic until membership is resolved). */
+    /** Resolves one global identity before its organization memberships are selected. */
+    async findIdentityByEmail(email: string): Promise<IdentityRecord | undefined> {
+      const [row] = await handle.db.select().from(users)
+        .where(sql`lower(${users.email}) = ${email.trim().toLowerCase()}`).limit(1);
+      return row as IdentityRecord | undefined;
+    },
+    /** Looks up the organizations associated with an email for internal/test tooling. */
     async findUserByEmail(email: string): Promise<UserRecord[]> {
-      const rows = await handle.db.select().from(users).where(sql`lower(${users.email}) = ${email.trim().toLowerCase()}`);
+      const rows = await handle.db.select({
+        id: users.id,
+        tenantId: organizationMemberships.tenantId,
+        email: users.email,
+        passwordHash: users.passwordHash,
+        displayName: users.displayName,
+        status: users.status,
+        createdAt: users.createdAt,
+      }).from(users).innerJoin(organizationMemberships, eq(users.id, organizationMemberships.userId))
+        .innerJoin(tenants, eq(organizationMemberships.tenantId, tenants.id))
+        .where(and(sql`lower(${users.email}) = ${email.trim().toLowerCase()}`, eq(organizationMemberships.status, 'active'), eq(tenants.status, 'active')));
       return rows as UserRecord[];
     },
     async getActiveSession(tokenDigest: string): Promise<SessionRecord | undefined> {
@@ -68,14 +93,32 @@ export function identityRepository(handle: DbHandle) {
       return row as SessionRecord | undefined;
     },
     async getUser(tenantId: string, userId: string): Promise<UserRecord | undefined> {
-      const [row] = await handle.db.select().from(users)
-        .where(and(eq(users.tenantId, tenantId), eq(users.id, userId))).limit(1);
+      const [row] = await handle.db.select({
+        id: users.id,
+        tenantId: organizationMemberships.tenantId,
+        email: users.email,
+        passwordHash: users.passwordHash,
+        displayName: users.displayName,
+        status: users.status,
+        createdAt: users.createdAt,
+      }).from(users).innerJoin(organizationMemberships, eq(users.id, organizationMemberships.userId))
+        .innerJoin(tenants, eq(organizationMemberships.tenantId, tenants.id))
+        .where(and(eq(organizationMemberships.tenantId, tenantId), eq(users.id, userId), eq(organizationMemberships.status, 'active'), eq(tenants.status, 'active'))).limit(1);
       return row as UserRecord | undefined;
     },
     async listUsersByIds(tenantId: string, userIds: string[]): Promise<UserRecord[]> {
       if (!userIds.length) return [];
-      const rows = await handle.db.select().from(users)
-        .where(and(eq(users.tenantId, tenantId), inArray(users.id, userIds)));
+      const rows = await handle.db.select({
+        id: users.id,
+        tenantId: organizationMemberships.tenantId,
+        email: users.email,
+        passwordHash: users.passwordHash,
+        displayName: users.displayName,
+        status: users.status,
+        createdAt: users.createdAt,
+      }).from(users).innerJoin(organizationMemberships, eq(users.id, organizationMemberships.userId))
+        .innerJoin(tenants, eq(organizationMemberships.tenantId, tenants.id))
+        .where(and(eq(organizationMemberships.tenantId, tenantId), inArray(users.id, userIds), eq(organizationMemberships.status, 'active'), eq(tenants.status, 'active')));
       return rows as UserRecord[];
     },
     async listRoleIds(tenantId: string, userId: string): Promise<string[]> {
@@ -99,16 +142,17 @@ export function authRepository(handle: DbHandle, context: TenantContext) {
   const tenantId = context.tenantId;
   return {
     async createUser(input: { email: string; passwordHash: string; displayName?: string }): Promise<UserRecord> {
-      const row = {
-        tenantId,
-        email: input.email.trim().toLowerCase(),
-        passwordHash: input.passwordHash,
-        displayName: input.displayName ?? '',
-        status: 'active',
-      };
       try {
-        const [created] = await handle.db.insert(users).values(row).returning();
-        return created as UserRecord;
+        return await handle.db.transaction(async (tx) => {
+          const [created] = await tx.insert(users).values({
+            email: input.email.trim().toLowerCase(),
+            passwordHash: input.passwordHash,
+            displayName: input.displayName ?? '',
+            status: 'active',
+          }).returning();
+          await tx.insert(organizationMemberships).values({ tenantId, userId: created.id });
+          return { ...created, tenantId } as UserRecord;
+        });
       } catch (error) {
         if (isUniqueViolation(error)) throw new AuthConflictError('Email already registered');
         throw error;
