@@ -78,3 +78,32 @@ export const UserRoleMembershipSchema = z.object({
   tenantId: IdSchema,
 });
 export type UserRoleMembership = z.infer<typeof UserRoleMembershipSchema>;
+
+/** The four system roles every organization is seeded with. */
+export const SystemRoleIdSchema = z.enum(['owner', 'admin', 'member', 'viewer']);
+export type SystemRoleId = z.infer<typeof SystemRoleIdSchema>;
+
+/** Roles an invitation may grant. Owner is excluded so invitations cannot escalate privilege. */
+export const InvitableRoleIdSchema = z.enum(['admin', 'member', 'viewer']);
+export type InvitableRoleId = z.infer<typeof InvitableRoleIdSchema>;
+
+export const OrganizationCreateInputSchema = OrganizationSignupSchema;
+export type OrganizationCreateInput = z.infer<typeof OrganizationCreateInputSchema>;
+
+export const MemberRoleUpdateInputSchema = z.object({
+  roleId: SystemRoleIdSchema,
+}).strict();
+export type MemberRoleUpdateInput = z.infer<typeof MemberRoleUpdateInputSchema>;
+
+export const InvitationCreateInputSchema = z.object({
+  email: z.string().trim().email().max(254),
+  roleId: InvitableRoleIdSchema,
+}).strict();
+export type InvitationCreateInput = z.infer<typeof InvitationCreateInputSchema>;
+
+/** Accepting needs the organization id as well as the token, because the caller's session may belong to another organization. */
+export const InvitationAcceptInputSchema = z.object({
+  token: z.string().regex(/^[0-9a-f]{64}$/, 'Invitation token must be 64 hexadecimal characters'),
+  tenantId: z.string().uuid(),
+}).strict();
+export type InvitationAcceptInput = z.infer<typeof InvitationAcceptInputSchema>;

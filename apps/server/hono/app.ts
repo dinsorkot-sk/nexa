@@ -7,7 +7,10 @@ import { auditRoutes } from './routes/audit';
 import { authRoutes } from './routes/auth';
 import { automationRoutes } from './routes/automations';
 import { definitionRoutes } from './routes/definitions';
+import { invitationRoutes } from './routes/invitations';
+import { memberRoutes } from './routes/members';
 import { moduleRoutes } from './routes/modules';
+import { organizationRoutes } from './routes/organizations';
 import { recordRoutes } from './routes/records';
 import { reportRoutes } from './routes/reports';
 import { workflowRoutes } from './routes/workflows';
@@ -44,6 +47,9 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.route('/', automationRoutes(dependencies));
   app.route('/', reportRoutes(dependencies));
   app.route('/', auditRoutes(dependencies));
+  app.route('/', organizationRoutes(dependencies));
+  app.route('/', memberRoutes(dependencies));
+  app.route('/', invitationRoutes(dependencies));
 
   return app;
 }

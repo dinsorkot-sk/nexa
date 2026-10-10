@@ -8,7 +8,7 @@ import {
 import type { DbHandle } from '@nexa/db';
 import { dispatchAutomations as dispatchAutomationEvent } from '../../../packages/engine/automation/dispatch';
 import type { AutomationEvent } from '../../../packages/engine/automation/index';
-import { hasPlatformPermission } from '../../../packages/engine/permission/index';
+import { hasPlatformPermission, type PlatformPermission } from '../../../packages/engine/permission/index';
 import { deliverWebhook } from '../../../integrations/webhook/src/index';
 import { sendNotification } from '../../../integrations/email/src/index';
 import { NotificationActionConfigSchema, WebhookActionConfigSchema } from '@nexa/meta';
@@ -38,7 +38,7 @@ export const requireEnabled = async (repo: ReturnType<typeof moduleRepository>, 
 
 /** Creates the tenant-scoped request wrappers used by every module route. */
 export function createHelpers(dependencies: AppDependencies) {
-  const withTenant = async (c: Context, permissionOrCallback: 'module:read' | 'module:write' | 'definition:read' | 'definition:write' | 'record:read' | 'record:write' | 'workflow:transition' | 'action:execute' | 'automation:manage' | 'report:read' | 'report:manage' | ((db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>): Promise<Response> => {
+  const withTenant = async (c: Context, permissionOrCallback: PlatformPermission | ((db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>), maybeCallback?: (db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>): Promise<Response> => {
     const permission = typeof permissionOrCallback === 'function'
       ? (c.req.path.includes('/records') ? (c.req.method === 'GET' ? 'record:read' : 'record:write') : (c.req.method === 'GET' ? 'definition:read' : 'definition:write'))
       : permissionOrCallback;

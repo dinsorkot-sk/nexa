@@ -43,9 +43,9 @@ describe('membership repository: invitations', () => {
     expect(JSON.stringify(stored)).not.toContain(invite.token);
 
     const [invitee] = await handle.db.insert(users).values({ email: 'new@acme.test', passwordHash: 'h', displayName: '', status: 'active' }).returning();
-    const { roleId } = await repo.acceptInvitation({ token: invite.token, userId: invitee!.id, userEmail: 'new@acme.test' });
+    const { roleId } = await repo.acceptInvitation({ token: invite.token, userId: invitee!.id });
     expect(roleId).toBe('member');
-    await expect(repo.acceptInvitation({ token: invite.token, userId: invitee!.id, userEmail: 'new@acme.test' })).rejects.toThrow(InvitationError);
+    await expect(repo.acceptInvitation({ token: invite.token, userId: invitee!.id })).rejects.toThrow(InvitationError);
   });
 
   it('rejects owner invitations and admin invitations of owner', async () => {
@@ -65,16 +65,16 @@ describe('membership repository: invitations', () => {
     const past = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
     const expired = await repo.createInvitation({ actorUserId: ownerId, actorRoleIds: ['owner'], email: 'e@acme.test', roleId: 'member', now: past });
     const eUser = await addUser(handle, tenantId, 'e@acme.test', 'viewer');
-    await expect(repo.acceptInvitation({ token: expired.token, userId: eUser, userEmail: 'e@acme.test' })).rejects.toThrow(InvitationError);
+    await expect(repo.acceptInvitation({ token: expired.token, userId: eUser })).rejects.toThrow(InvitationError);
 
     const revoked = await repo.createInvitation({ actorUserId: ownerId, actorRoleIds: ['owner'], email: 'r@acme.test', roleId: 'member' });
     expect(await repo.revokeInvitation(revoked.id)).toBe(true);
     const rUser = await addUser(handle, tenantId, 'r@acme.test', 'viewer');
-    await expect(repo.acceptInvitation({ token: revoked.token, userId: rUser, userEmail: 'r@acme.test' })).rejects.toThrow(InvitationError);
+    await expect(repo.acceptInvitation({ token: revoked.token, userId: rUser })).rejects.toThrow(InvitationError);
 
     const mismatch = await repo.createInvitation({ actorUserId: ownerId, actorRoleIds: ['owner'], email: 'bound@acme.test', roleId: 'member' });
     const wrong = await addUser(handle, tenantId, 'wrong@acme.test', 'viewer');
-    await expect(repo.acceptInvitation({ token: mismatch.token, userId: wrong, userEmail: 'wrong@acme.test' })).rejects.toThrow(InvitationError);
+    await expect(repo.acceptInvitation({ token: mismatch.token, userId: wrong })).rejects.toThrow(InvitationError);
   });
 
   it('does not reveal invitations from another tenant', async () => {
@@ -82,7 +82,7 @@ describe('membership repository: invitations', () => {
     const otherRepo = membershipRepository(handle, createTenantContext(otherTenantId));
     const invite = await repo.createInvitation({ actorUserId: ownerId, actorRoleIds: ['owner'], email: 'iso@acme.test', roleId: 'member' });
     const user = await addUser(handle, otherTenantId, 'iso@acme.test', 'viewer');
-    await expect(otherRepo.acceptInvitation({ token: invite.token, userId: user, userEmail: 'iso@acme.test' })).rejects.toThrow(InvitationError);
+    await expect(otherRepo.acceptInvitation({ token: invite.token, userId: user })).rejects.toThrow(InvitationError);
     expect(await otherRepo.listInvitations()).toHaveLength(0);
   });
 
@@ -90,7 +90,7 @@ describe('membership repository: invitations', () => {
     const { handle, repo, ownerId } = await setup();
     const invite = await repo.createInvitation({ actorUserId: ownerId, actorRoleIds: ['owner'], email: 'ok@acme.test', roleId: 'member' });
     const [invitee] = await handle.db.insert(users).values({ email: 'ok@acme.test', passwordHash: 'h', displayName: '', status: 'active' }).returning();
-    await repo.acceptInvitation({ token: invite.token, userId: invitee!.id, userEmail: 'ok@acme.test' });
+    await repo.acceptInvitation({ token: invite.token, userId: invitee!.id });
     expect(await repo.revokeInvitation(invite.id)).toBe(false);
 
     const pending = await repo.createInvitation({ actorUserId: ownerId, actorRoleIds: ['owner'], email: 'p@acme.test', roleId: 'member' });

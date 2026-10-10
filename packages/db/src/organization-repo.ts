@@ -30,6 +30,16 @@ const organizationRoles = [
   { id: 'viewer', name: 'Viewer' },
 ] as const;
 
+/** Seeds the four system roles for a new organization. Shared by signup and organization creation. */
+async function seedOrganizationRoles(tx: { insert: DbHandle['db']['insert'] }, tenantId: string) {
+  await tx.insert(roleAssignments).values(organizationRoles.map((role) => ({
+    tenantId,
+    ...role,
+    description: '',
+    isSystemRole: 'true',
+  })));
+}
+
 export function organizationRepository(handle: DbHandle) {
   return {
     async provisionForOwner(input: {
@@ -53,12 +63,7 @@ export function organizationRepository(handle: DbHandle) {
             status: 'active',
           }).returning();
           const [tenant] = await tx.insert(tenants).values({ id: randomUUID(), slug: input.slug, name: input.name }).returning();
-          await tx.insert(roleAssignments).values(organizationRoles.map((role) => ({
-            tenantId: tenant.id,
-            ...role,
-            description: '',
-            isSystemRole: 'true',
-          })));
+          await seedOrganizationRoles(tx, tenant.id);
           await tx.insert(organizationMemberships).values({ tenantId: tenant.id, userId: user.id });
           await tx.insert(userRoleMemberships).values({ tenantId: tenant.id, userId: user.id, roleId: 'owner' });
           const [session] = await tx.insert(sessions).values({
@@ -73,6 +78,22 @@ export function organizationRepository(handle: DbHandle) {
         const constraint = uniqueConstraint(error);
         if (constraint === 'nexa_users_email_uq') throw new AuthConflictError('Email already registered');
         if (constraint === 'nexa_tenants_slug_unique') throw new OrganizationConflictError('Organization slug already exists');
+        throw error;
+      }
+    },
+
+    /** Creates an organization owned by an existing user. The creator becomes its only owner. */
+    async createForUser(input: { userId: string; name: string; slug: string }) {
+      try {
+        return await handle.db.transaction(async (tx) => {
+          const [tenant] = await tx.insert(tenants).values({ id: randomUUID(), slug: input.slug, name: input.name }).returning();
+          await seedOrganizationRoles(tx, tenant.id);
+          await tx.insert(organizationMemberships).values({ tenantId: tenant.id, userId: input.userId });
+          await tx.insert(userRoleMemberships).values({ tenantId: tenant.id, userId: input.userId, roleId: 'owner' });
+          return tenant;
+        });
+      } catch (error) {
+        if (uniqueConstraint(error) === 'nexa_tenants_slug_unique') throw new OrganizationConflictError('Organization slug already exists');
         throw error;
       }
     },

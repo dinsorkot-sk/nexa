@@ -3,6 +3,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import type { DbHandle } from './client';
 import type { TenantContext } from './tenancy';
 import { invitations, organizationMemberships, roleAssignments, userRoleMemberships, users } from './schema';
+import { InvitableRoleIdSchema, type InvitableRoleId } from '@nexa/meta';
 
 export class MembershipNotFoundError extends Error {
   constructor(message: string) {
@@ -25,9 +26,8 @@ export class InvitationError extends Error {
   }
 }
 
-/** Roles an invitation may grant. Owner is excluded so invitations cannot escalate privilege. */
-export const invitableRoleIds = ['admin', 'member', 'viewer'] as const;
-export type InvitableRoleId = typeof invitableRoleIds[number];
+/** Roles an invitation may grant. Owner is excluded so invitations cannot escalate privilege. Source of truth: meta. */
+export const invitableRoleIds = InvitableRoleIdSchema.options;
 
 /** Owners may assign any role; admins may assign only non-owner roles. */
 const assignableByAdmin = invitableRoleIds;
@@ -196,17 +196,20 @@ export function membershipRepository(handle: DbHandle, context: TenantContext) {
      * Accepts an invitation for a signed-in user. Every failure throws the same InvitationError so
      * the response does not reveal which check failed.
      */
-    async acceptInvitation(input: { token: string; userId: string; userEmail: string; now?: Date }): Promise<{ roleId: string }> {
+    async acceptInvitation(input: { token: string; userId: string; now?: Date }): Promise<{ roleId: string }> {
       const now = input.now ?? new Date();
       const tokenHash = hashInvitationToken(input.token);
       return handle.db.transaction(async (tx) => {
+        // The email comes from the account, never from the caller, so a token cannot be redeemed by a different address.
+        const [account] = await tx.select({ email: users.email }).from(users).where(eq(users.id, input.userId)).limit(1);
+        if (!account) throw new InvitationError();
         const [invitation] = await tx.select().from(invitations)
           .where(and(eq(invitations.tenantId, tenantId), eq(invitations.tokenHash, tokenHash)))
           .for('update')
           .limit(1);
         if (!invitation) throw new InvitationError();
         if (invitation.acceptedAt || invitation.revokedAt || invitation.expiresAt <= now) throw new InvitationError();
-        if (invitation.email !== input.userEmail.trim().toLowerCase()) throw new InvitationError();
+        if (invitation.email !== account.email.trim().toLowerCase()) throw new InvitationError();
         if (!isInvitableRole(invitation.roleId)) throw new InvitationError();
 
         const [existing] = await tx.select({ userId: organizationMemberships.userId }).from(organizationMemberships)
