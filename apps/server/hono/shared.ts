@@ -15,6 +15,8 @@ import { NotificationActionConfigSchema, WebhookActionConfigSchema } from '@nexa
 
 export interface AppDependencies {
   db?: DbHandle;
+  /** Largest accepted request body in bytes. Defaults to 1 MiB in app.ts. */
+  maxBodyBytes?: number;
   /** Injected in tests so webhook deliveries never touch the network. */
   webhookTransport?: Parameters<typeof deliverWebhook>[2];
   /** Injected in tests so notification deliveries stay in-process. */
@@ -26,7 +28,7 @@ export type Principal = { userId: string; tenantId: string; name: string | null;
 /** Principals are keyed by the request context, so sub-apps see what the session middleware set. */
 export const principals = new WeakMap<object, Principal>();
 
-export function errorResponse(code: string, message: string, status: 400 | 401 | 403 | 404 | 409 | 422 | 500 | 503, details?: unknown) {
+export function errorResponse(code: string, message: string, status: 400 | 401 | 403 | 404 | 409 | 413 | 415 | 422 | 429 | 500 | 503, details?: unknown) {
   return { error: { code, message, status, ...(details === undefined ? {} : { details }) } };
 }
 

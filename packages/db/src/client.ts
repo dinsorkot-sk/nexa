@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { drizzle as drizzlePgLite } from 'drizzle-orm/pglite';
 import { drizzle as drizzleNodePg } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
@@ -46,6 +47,12 @@ export function createDb(config: DbConfig = {}): DbHandle {
     db: drizzlePgLite(client, { schema }),
     close: () => client.close(),
   };
+}
+
+/** Round-trips a trivial query. Used by the readiness probe; throws when the database is unreachable. */
+export async function pingDatabase(handle: DbHandle): Promise<boolean> {
+  await handle.db.execute(sql`select 1`);
+  return true;
 }
 
 export function createDbClient(config: DbConfig = {}): NexaDb {

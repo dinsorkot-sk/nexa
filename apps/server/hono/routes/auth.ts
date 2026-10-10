@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { OrganizationSelectInputSchema, LoginInputSchema, SignupInputSchema } from '@nexa/meta';
 import { authRepository, createTenantContext, identityRepository, OrganizationConflictError, organizationRepository, AuthConflictError } from '@nexa/db';
 import { digestSessionToken, generateSessionToken, hashPassword, verifyPassword } from '../../../../packages/auth/src/index';
-import { cookieValue, clearSessionCookie, sessionCookie, setSessionCookie } from '../middleware/session';
+import { cookieValue, clearSessionCookie, sessionCookieName, setSessionCookie } from '../middleware/session';
 import { errorResponse, principals, type AppDependencies } from '../shared';
 
 export function authRoutes(dependencies: AppDependencies) {
@@ -93,7 +93,7 @@ export function authRoutes(dependencies: AppDependencies) {
   });
   app.post('/auth/logout', async (c) => {
     const principal = principals.get(c);
-    const token = cookieValue(c.req.header('cookie'), sessionCookie);
+    const token = cookieValue(c.req.header('cookie'), sessionCookieName());
     if (principal && token && dependencies.db) await authRepository(dependencies.db, createTenantContext(principal.tenantId)).revokeSession(digestSessionToken(token));
     clearSessionCookie(c);
     return c.body(null, 204);

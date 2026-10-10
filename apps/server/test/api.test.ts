@@ -18,7 +18,7 @@ async function createTestApp() {
 }
 
 type Api = ReturnType<typeof createApp>;
-const jsonHeaders = { 'content-type': 'application/json' };
+const jsonHeaders = { 'content-type': 'application/json', origin: 'http://localhost:3000' };
 
 /** Signs a user up and returns the session cookie plus the created user. */
 async function signup(api: Api, email: string, password = 'long-password') {
@@ -148,7 +148,7 @@ describe('Hono API (/v1)', () => {
     });
     expect(login.status).toBe(200);
 
-    const logout = await api.request('/v1/auth/logout', { method: 'POST', headers: { cookie: cookie! } });
+    const logout = await api.request('/v1/auth/logout', { method: 'POST', headers: { cookie: cookie!, origin: 'http://localhost:3000' } });
     expect(logout.status).toBe(204);
     const afterLogout = await api.request('/v1/auth/me', { headers: { cookie: cookie! } });
     expect(afterLogout.status).toBe(401);

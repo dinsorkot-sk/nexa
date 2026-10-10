@@ -15,7 +15,7 @@ async function createTestApp() {
 }
 
 type Api = ReturnType<typeof createApp>;
-const jsonHeaders = { 'content-type': 'application/json' };
+const jsonHeaders = { 'content-type': 'application/json', origin: 'http://localhost:3000' };
 
 async function signup(api: Api, email: string, orgSlug: string) {
   const response = await api.request('/v1/auth/signup', {
@@ -160,7 +160,7 @@ describe('membership HTTP surface (Phase 17, Step E)', () => {
       method: 'POST', headers: { ...jsonHeaders, cookie: owner.cookie }, body: JSON.stringify({ email: 'gone@acme.test', roleId: 'member' }),
     });
     const { id, token } = await invite.json() as { id: string; token: string };
-    expect((await api.request(`/v1/invitations/${id}/revoke`, { method: 'POST', headers: { cookie: owner.cookie } })).status).toBe(204);
+    expect((await api.request(`/v1/invitations/${id}/revoke`, { method: 'POST', headers: { cookie: owner.cookie, origin: 'http://localhost:3000' } })).status).toBe(204);
 
     const invitee = await signup(api, 'gone@acme.test', 'gonecorp');
     const accept = await api.request('/v1/invitations/accept', {

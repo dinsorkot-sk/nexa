@@ -14,7 +14,7 @@ async function createTestApp() {
 }
 
 type Api = ReturnType<typeof createApp>;
-const jsonHeaders = { 'content-type': 'application/json' };
+const jsonHeaders = { 'content-type': 'application/json', origin: 'http://localhost:3000' };
 
 async function signup(api: Api, email: string) {
   const response = await api.request('/v1/auth/signup', {
