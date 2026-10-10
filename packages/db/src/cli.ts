@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { checkDatabase } from './check';
 import { createDb } from './client';
 import { runMigrations } from './migrate';
@@ -62,4 +63,17 @@ export function parseDbArgs(args: string[]): { command?: string; options: CliOpt
 
 function isCommand(command: string): command is DbCommand {
   return command === 'migrate' || command === 'seed' || command === 'check';
+}
+
+const isEntryPoint = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isEntryPoint) {
+  try {
+    const { command, options } = parseDbArgs(process.argv.slice(2));
+    runDbCommand(command ?? '', options).then((code) => {
+      process.exitCode = code;
+    });
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 2;
+  }
 }
