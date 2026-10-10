@@ -3,6 +3,7 @@ import { createDb, runMigrations, SYSTEM_TENANT_ID, tenants } from '@nexa/db';
 import type { DbHandle } from '@nexa/db';
 import type { ModulePackage } from '@nexa/meta';
 import { createApp } from '../hono/app';
+import { runWorkerOnce } from '../hono/worker';
 
 const handles: DbHandle[] = [];
 
@@ -11,7 +12,10 @@ async function createTestApp(overrides: Parameters<typeof createApp>[0] = {}) {
   handles.push(db);
   await runMigrations(db);
   await db.db.insert(tenants).values({ id: SYSTEM_TENANT_ID, slug: 'system', name: 'System' });
-  return createApp({ db, ...overrides });
+  const deps = { db, ...overrides };
+  // Automation jobs are delivered by the worker. Tests drain the queue explicitly instead of sleeping.
+  const drain = async () => { for (let pass = 0; pass < 10 && (await runWorkerOnce(db, deps)) > 0; pass += 1); };
+  return Object.assign(createApp(deps), { drain });
 }
 
 type Api = ReturnType<typeof createApp>;
@@ -86,7 +90,7 @@ describe('acceptance: vehicle management end to end', () => {
     // 3. Workflow transition drives the action; automation fires on record create.
     const transitioned = await (await call(`/entities/vehicle/records/${created.id}/transitions/to-maintenance`, 'POST', { version: created.version })).json() as { data: Record<string, unknown> };
     expect(transitioned.data.status).toBe('maintenance');
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await api.drain();
     expect(deliveries.length).toBe(3); // two record-create automations + the transition's notification action
 
     // 4. Report aggregates.

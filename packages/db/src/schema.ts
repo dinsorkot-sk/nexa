@@ -203,6 +203,27 @@ export const invitations = pgTable('nexa_invitations', {
   index('nexa_invitations_tenant_email_idx').on(table.tenantId, table.email),
 ]);
 
+/** Durable work queue. Rows are written in the same transaction as the change that produced them. */
+export const outbox = pgTable('nexa_outbox', {
+  id: uuid('id').defaultRandom().notNull(),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  kind: text('kind').notNull(),
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+  dedupeKey: text('dedupe_key').notNull(),
+  status: text('status').notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  maxAttempts: integer('max_attempts').notNull().default(5),
+  availableAt: timestamp('available_at', { withTimezone: true }).defaultNow().notNull(),
+  lockedUntil: timestamp('locked_until', { withTimezone: true }),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.tenantId, table.id] }),
+  unique('nexa_outbox_dedupe_uq').on(table.tenantId, table.dedupeKey),
+  index('nexa_outbox_ready_idx').on(table.status, table.availableAt),
+]);
+
 export const eventLog = pgTable('nexa_event_log', {
   id: uuid('id').defaultRandom().primaryKey(),
   tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
@@ -264,6 +285,8 @@ export type NewOrganizationMembershipRow = typeof organizationMemberships.$infer
 export type UserRoleMembershipRow = typeof userRoleMemberships.$inferSelect;
 export type NewUserRoleMembershipRow = typeof userRoleMemberships.$inferInsert;
 export type SessionRow = typeof sessions.$inferSelect;
+export type OutboxRow = typeof outbox.$inferSelect;
+export type NewOutboxRow = typeof outbox.$inferInsert;
 export type InvitationRow = typeof invitations.$inferSelect;
 export type NewInvitationRow = typeof invitations.$inferInsert;
 export type NewSessionRow = typeof sessions.$inferInsert;

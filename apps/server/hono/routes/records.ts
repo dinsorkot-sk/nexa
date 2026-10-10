@@ -8,7 +8,7 @@ import { createHelpers, errorResponse, invalid, missingDefinition, missingRecord
 /** Record CRUD, relation links, and record activity. Business rules live in engine/db; this file parses, calls, and maps. */
 export function recordRoutes(dependencies: AppDependencies) {
   const app = new Hono();
-  const { withDefinitions, dispatchAutomations } = createHelpers(dependencies);
+  const { withDefinitions, enqueueAutomations } = createHelpers(dependencies);
 
   app.get('/modules/:moduleId/entities/:entityId/records', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
     const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
@@ -34,8 +34,13 @@ export function recordRoutes(dependencies: AppDependencies) {
     const data = validateRecordData(entity, fields, parsed.data.data, { mode: 'create' });
     const repo = tenantRepository(dependencies.db!, createTenantContext(tenantId));
     await repo.assertReferences(moduleId, fields.filter((field) => field.type === 'reference'), data);
-    const record = await repo.createScopedRecord(moduleId, entityId, data, principal.userId, fields.filter((field) => field.options.unique).map((field) => field.id));
-    await dispatchAutomations(tenantId, moduleId, { type: 'record', entityId, recordId: record.id, operation: 'created', payload: { data } }, principal.userId);
+    const uniqueFieldIds = fields.filter((field) => field.options.unique).map((field) => field.id);
+    // Record and automation job commit together: a crash cannot keep one without the other.
+    const record = await repo.runInTransaction(async (tx) => {
+      const created = await repo.createScopedRecord(moduleId, entityId, data, principal.userId, uniqueFieldIds, tx);
+      await enqueueAutomations(tx, tenantId, moduleId, { type: 'record', entityId, recordId: created.id, operation: 'created', payload: { data } }, principal.userId);
+      return created;
+    });
     return c.json(redactHidden(record, fields), 201);
   }));
   app.get('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
@@ -61,8 +66,12 @@ export function recordRoutes(dependencies: AppDependencies) {
     if (!existing) return missingRecord(c);
     const data = validateRecordData(entity, fields, parsed.data.data, { mode: 'update', existing: existing.data });
     await repo.assertReferences(moduleId, fields.filter((field) => field.type === 'reference'), data);
-    const updated = await repo.updateScopedRecord(moduleId, entityId, c.req.param('recordId'), data, parsed.data.version ?? existing.version, principal.userId, fields.filter((field) => field.options.unique).map((field) => field.id));
-    if (updated) await dispatchAutomations(tenantId, moduleId, { type: 'record', entityId, recordId: updated.id, operation: 'updated', payload: { data } }, principal.userId);
+    const uniqueFieldIds = fields.filter((field) => field.options.unique).map((field) => field.id);
+    const updated = await repo.runInTransaction(async (tx) => {
+      const written = await repo.updateScopedRecord(moduleId, entityId, c.req.param('recordId'), data, parsed.data.version ?? existing.version, principal.userId, uniqueFieldIds, tx);
+      if (written) await enqueueAutomations(tx, tenantId, moduleId, { type: 'record', entityId, recordId: written.id, operation: 'updated', payload: { data } }, principal.userId);
+      return written;
+    });
     return updated ? c.json(redactHidden(updated, fields)) : missingRecord(c);
   }));
   app.delete('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {

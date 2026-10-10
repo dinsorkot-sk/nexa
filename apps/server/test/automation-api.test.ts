@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { authRepository, createDb, createTenantContext, runMigrations, SYSTEM_TENANT_ID, tenants } from '@nexa/db';
 import type { DbHandle } from '@nexa/db';
 import { createApp } from '../hono/app';
+import { runWorkerOnce } from '../hono/worker';
 
 const handles: DbHandle[] = [];
 
@@ -10,7 +11,11 @@ async function createTestApp(overrides: Parameters<typeof createApp>[0] = {}) {
   handles.push(db);
   await runMigrations(db);
   await db.db.insert(tenants).values({ id: SYSTEM_TENANT_ID, slug: 'system', name: 'System' });
-  return createApp({ db, ...overrides });
+  const deps = { db, ...overrides };
+  const api = createApp(deps);
+  // Automation jobs are delivered by the worker. Tests drain the queue explicitly instead of sleeping.
+  const drain = async () => { for (let pass = 0; pass < 10 && (await runWorkerOnce(db, deps)) > 0; pass += 1); };
+  return Object.assign(api, { drain });
 }
 
 type Api = ReturnType<typeof createApp>;
@@ -62,7 +67,7 @@ describe('automation HTTP surface', () => {
     await call('/transition', 'POST', { to: 'enabled' });
 
     await call('/entities/vehicle/records', 'POST', { data: {} });
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await api.drain();
     expect(deliveries.map((d) => d.url)).toEqual(['https://example.com/hook', 'mailto:ops@example.com']);
 
     const runs = await call('/automations/on-create/runs', 'GET');
@@ -97,7 +102,7 @@ describe('automation HTTP surface', () => {
     await call('/transition', 'POST', { to: 'enabled' });
 
     await call('/entities/vehicle/records', 'POST', { data: {} });
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await api.drain();
     expect(attempts).toBe(3); // initial + 2 retries
 
     const runs = await call('/automations/on-create/runs', 'GET');

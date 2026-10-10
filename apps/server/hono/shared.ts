@@ -5,7 +5,10 @@ import {
   RecordConflictError, definitionRepository, automationRepository, ModuleConflictError,
   ModuleNotFoundError, moduleRepository,
 } from '@nexa/db';
-import type { DbHandle } from '@nexa/db';
+import type { DbHandle, TenantTransaction } from '@nexa/db';
+import { outboxRepository } from '@nexa/db';
+import { randomUUID } from 'node:crypto';
+import { automationJobKind, type AutomationJobPayload } from './jobs';
 import { dispatchAutomations as dispatchAutomationEvent } from '../../../packages/engine/automation/dispatch';
 import type { AutomationEvent } from '../../../packages/engine/automation/index';
 import { hasPlatformPermission, type PlatformPermission } from '../../../packages/engine/permission/index';
@@ -96,5 +99,19 @@ export function createHelpers(dependencies: AppDependencies) {
     }, moduleId, event, actorId);
   };
 
-  return { withTenant, withModules, withDefinitions, dispatchAutomations };
+  /**
+   * Queues automation dispatch in the caller's transaction. The job commits with the change that produced
+   * it, so a crash cannot leave a committed record without its automation job, or the reverse.
+   */
+  const enqueueAutomations = async (tx: TenantTransaction, tenantId: string, moduleId: string, event: AutomationEvent, actorId?: string, dedupeKey?: string) => {
+    const job: AutomationJobPayload = { tenantId, moduleId, event, actorId };
+    await outboxRepository(dependencies.db!).enqueue(tx, {
+      tenantId,
+      kind: automationJobKind,
+      payload: job as unknown as Record<string, unknown>,
+      dedupeKey: dedupeKey ?? randomUUID(),
+    });
+  };
+
+  return { withTenant, withModules, withDefinitions, dispatchAutomations, enqueueAutomations };
 }
