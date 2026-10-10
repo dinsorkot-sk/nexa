@@ -50,9 +50,9 @@ export const UserCreateInputSchema = z.object({
 });
 export type UserCreateInput = z.infer<typeof UserCreateInputSchema>;
 
+/** Global identity as exposed to clients. Organization context is carried by the session, not the user. */
 export const UserPublicSchema = z.object({
   id: IdSchema,
-  tenantId: IdSchema,
   email: z.string().trim().email().max(254),
   displayName: z.string(),
   status: z.enum(['active', 'disabled']),

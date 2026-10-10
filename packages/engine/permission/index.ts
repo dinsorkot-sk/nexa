@@ -5,14 +5,17 @@ export const platformPermissions = [
   'definition:read', 'definition:write',
   'record:read', 'record:write',
   'workflow:transition', 'action:execute', 'automation:manage', 'report:read', 'report:manage',
+  'member:manage', 'org:manage',
 ] as const;
 export type PlatformPermission = typeof platformPermissions[number];
 
+/** Owner-only: organization settings. Admin receives everything else. */
+const ownerOnlyPermissions: readonly PlatformPermission[] = ['org:manage'];
+const adminPermissions = platformPermissions.filter((permission) => !ownerOnlyPermissions.includes(permission));
+
 const rolePermissions: Readonly<Record<string, readonly PlatformPermission[]>> = {
-  admin: platformPermissions,
-  administrator: platformPermissions,
   owner: platformPermissions,
-  editor: ['module:read', 'module:write', 'definition:read', 'definition:write', 'record:read', 'record:write', 'workflow:transition', 'action:execute', 'automation:manage', 'report:read', 'report:manage'],
+  admin: adminPermissions,
   member: ['module:read', 'definition:read', 'record:read', 'record:write', 'workflow:transition', 'action:execute', 'automation:manage', 'report:read', 'report:manage'],
   viewer: ['module:read', 'definition:read', 'record:read'],
 };

@@ -217,7 +217,7 @@ describe('@nexa/meta schemas', () => {
     }).success).toBe(true);
     expect(SessionTokenSchema.safeParse('a'.repeat(64)).success).toBe(true);
     expect(PrincipalSchema.safeParse({ userId: 'u', tenantId: 't', name: null, roleIds: [] }).success).toBe(true);
-    expect(UserPublicSchema.safeParse({ id: 'u', tenantId: 't', email: 'user@example.com', displayName: '', status: 'active', createdAt: new Date().toISOString() }).success).toBe(true);
+    expect(UserPublicSchema.safeParse({ id: 'u', email: 'user@example.com', displayName: '', status: 'active', createdAt: new Date().toISOString() }).success).toBe(true);
     expect(UserRoleMembershipSchema.safeParse({ userId: 'u', roleId: 'admin', tenantId: 't' }).success).toBe(true);
     expect(RoleAssignmentSchema.safeParse({ id: 'admin', tenantId: 't', name: 'Administrator', createdAt: new Date().toISOString() }).success).toBe(true);
   });
