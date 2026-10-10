@@ -72,7 +72,7 @@ export const records = pgTable('nexa_records', {
 ]);
 
 export const recordLinks = pgTable('nexa_record_links', {
-  tenantId: uuid('tenant_id').notNull(),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
   relationId: text('relation_id').notNull(),
   fromRecordId: uuid('from_record_id').notNull(),
   toRecordId: uuid('to_record_id').notNull(),
@@ -180,6 +180,29 @@ export const sessions = pgTable('nexa_sessions', {
   index('nexa_sessions_user_idx').on(table.tenantId, table.userId),
 ]);
 
+/** Email invitations. Only the token hash is stored; role is limited to non-owner roles by a CHECK in migration 0010. */
+export const invitations = pgTable('nexa_invitations', {
+  id: uuid('id').defaultRandom().notNull(),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  roleId: text('role_id').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdBy: uuid('created_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.tenantId, table.id] }),
+  unique('nexa_invitations_token_hash_uq').on(table.tokenHash),
+  foreignKey({
+    name: 'nexa_invitations_creator_membership_fk',
+    columns: [table.tenantId, table.createdBy],
+    foreignColumns: [organizationMemberships.tenantId, organizationMemberships.userId],
+  }).onDelete('cascade'),
+  index('nexa_invitations_tenant_email_idx').on(table.tenantId, table.email),
+]);
+
 export const eventLog = pgTable('nexa_event_log', {
   id: uuid('id').defaultRandom().primaryKey(),
   tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
@@ -241,4 +264,6 @@ export type NewOrganizationMembershipRow = typeof organizationMemberships.$infer
 export type UserRoleMembershipRow = typeof userRoleMemberships.$inferSelect;
 export type NewUserRoleMembershipRow = typeof userRoleMemberships.$inferInsert;
 export type SessionRow = typeof sessions.$inferSelect;
+export type InvitationRow = typeof invitations.$inferSelect;
+export type NewInvitationRow = typeof invitations.$inferInsert;
 export type NewSessionRow = typeof sessions.$inferInsert;

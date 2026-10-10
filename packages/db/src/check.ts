@@ -21,6 +21,7 @@ const expectedTables = [
   'nexa_role_assignments',
   'nexa_user_role_memberships',
   'nexa_sessions',
+  'nexa_invitations',
 ] as const;
 
 const requiredConstraints = [
@@ -30,6 +31,8 @@ const requiredConstraints = [
   'nexa_organization_memberships_user_fk',
   'nexa_user_role_memberships_membership_fk',
   'nexa_sessions_membership_fk',
+  'nexa_invitations_creator_membership_fk',
+  'nexa_record_links_tenant_fk',
 ] as const;
 
 const requiredMigrations = 10;
