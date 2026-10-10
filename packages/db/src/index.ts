@@ -8,6 +8,7 @@ export * from './seed';
 export * from './check';
 export * from './auth-repo';
 export * from './organization-repo';
+export * from './membership-repo';
 export * from './cli';
 export * from './automation-repo';
 export * from './package-repo';
