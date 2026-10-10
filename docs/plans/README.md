@@ -2,6 +2,7 @@
 
 Product: metadata-driven business app platform based on the supplied LOGHOLIZON SRS, adapted to Nexa's TypeScript stack.
 Stack: Nuxt 4 in `apps/web`; standalone Hono API in `apps/server` under `/v1`; shadcn-vue; PostgreSQL + Drizzle (PGlite in dev).
+Current working tree (2026-10-09): `apps/web` and `apps/cli` were intentionally removed while backend hardening is prioritized. The database commands now run from `packages/db`; reassembly of the UI and CLI is deferred. The phase entries below are historical records and remain unchanged.
 Rule: one phase per version branch (`v0.0.1`, `v0.0.2`, ...), in order. Phase 0 uses `v0.0.1`; each later phase increments the patch version once. Do not begin a subsequent phase or create its branch until explicitly requested.
 
 | Phase | Branch | Scope | Status |

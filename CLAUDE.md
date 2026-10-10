@@ -4,15 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working in this
 
 ## Status
 
-Nexa is a metadata-driven app platform. The initial monorepo foundation is in place; product runtimes and metadata schemas remain to be implemented. Verify current code before assuming a package has functionality.
+Nexa is a metadata-driven app platform. Backend hardening is the current focus. `apps/web` and `apps/cli` were intentionally removed on 2026-10-09 and may be reassembled after the backend is ready; do not assume those workspaces exist.
 
 ## Architecture
 
-- `apps/web`: Nuxt 4 app for the Builder and end-user Runtime.
-- `apps/server`: standalone Hono API server, versioned under `/v1`; `hono/app.ts` exports the app type for Hono RPC clients. It is run separately from Nuxt. Module endpoints temporarily require `x-tenant-id`; it is caller-supplied, spoofable, and not authentication—do not expose these endpoints publicly before Phase 6 auth/RBAC. Definition endpoints live under `/v1/modules/:moduleId/{schema,entities,fields,relations}`. Enabled modules expose metadata-validated record CRUD at `/v1/modules/:moduleId/entities/:entityId/records`, including bounded filtering, sorting, search and relation links; hidden fields are omitted from responses and stale/unique/cardinality conflicts return 409.
+- `apps/server`: standalone Hono API server, versioned under `/v1`; `hono/app.ts` exports the app type for Hono RPC clients. Module endpoints require an authenticated session; tenant scope comes from that session, not a caller-supplied header. Signup currently assigns users to the system tenant, so this is not yet production multi-tenant isolation. Definition endpoints live under `/v1/modules/:moduleId/{schema,entities,fields,relations}`. Enabled modules expose metadata-validated record CRUD at `/v1/modules/:moduleId/entities/:entityId/records`, including bounded filtering, sorting, search and relation links; hidden fields are omitted from responses and stale/unique/cardinality conflicts return 409.
 - `packages/meta`: source of truth for Zod schemas and TS types for modules, entities, fields, views, workflows, permissions, and related metadata.
 - `packages/engine`: server-side domain core, organised as plain subfolders (not a separate package): entity, query, permission, workflow, hooks.
-- `packages/db`: Drizzle on PostgreSQL; PGlite is the local development default when `DATABASE_URL` is unset. Shared-schema tenancy scopes generic JSONB-backed records, metadata, and module definitions; use `tenantRepository` for tenant record/link access, `moduleRepository` for module lifecycle operations, and `definitionRepository` for a module's entity/field/relation definitions (stored in `nexa_metadata_definitions`, editable only while the module is draft/review, validated by `definition-integrity.ts` on every write). Migrations are forward-only under `packages/db/migrations`.
+- `packages/db`: Drizzle on PostgreSQL; PGlite is the local development default when `DATABASE_URL` is unset. It also owns the `db:migrate`, `db:seed`, and `db:check` commands, replacing the removed CLI workspace. Shared-schema tenancy scopes generic JSONB-backed records, metadata, and module definitions; use `tenantRepository` for tenant record/link access, `moduleRepository` for module lifecycle operations, and `definitionRepository` for a module's entity/field/relation definitions (stored in `nexa_metadata_definitions`, editable only while the module is draft/review, validated by `definition-integrity.ts` on every write). Migrations are forward-only under `packages/db/migrations`.
 - `packages/ui`: shadcn-vue + Tailwind primitives and metadata-driven field/view renderers; keep those layers separate.
 - `packages/auth` and `packages/sdk`: authentication utilities and typed API client.
 - `templates/{inventory,crm,hr}`: metadata packages, not built-in domain logic. `integrations/*` provide workflow actions.
@@ -25,7 +24,7 @@ Use pnpm 9.15.4 and Node.js `^22.21.0` (Nuxt 4 requirement).
 
 ```bash
 pnpm install
-pnpm dev          # Nuxt app
+pnpm dev          # Hono API server
 pnpm dev:api      # Hono API server
 pnpm db:migrate   # Apply forward-only DB migrations
 pnpm db:seed      # Seed system tenant/settings

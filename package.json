@@ -3,16 +3,16 @@
   "private": true,
   "packageManager": "pnpm@9.15.4",
   "scripts": {
-    "dev": "pnpm --filter @nexa/web dev",
-    "dev:api": "pnpm --filter @nexa/server dev",
-    "db:migrate": "pnpm --filter @nexa/cli exec tsx src/index.ts migrate",
-    "db:seed": "pnpm --filter @nexa/cli exec tsx src/index.ts seed",
-    "db:check": "pnpm --filter @nexa/cli exec tsx src/index.ts check",
-    "build": "pnpm -r --if-present build",
-    "typecheck": "pnpm -r --if-present typecheck",
+    "dev": "turbo run dev --filter=@nexa/server",
+    "dev:api": "turbo run dev --filter=@nexa/server",
+    "db:migrate": "pnpm --filter @nexa/db db:migrate",
+    "db:seed": "pnpm --filter @nexa/db db:seed",
+    "db:check": "pnpm --filter @nexa/db db:check",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
     "test": "vitest run",
     "lint": "eslint .",
-    "clean": "pnpm -r --if-present clean"
+    "clean": "turbo run clean"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.25.0",
