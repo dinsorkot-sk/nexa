@@ -44,6 +44,7 @@
   --nx-surface: var(--palette-white);
   --nx-surface-muted: var(--palette-slate-100);
   --nx-border: var(--palette-slate-400);
+  --nx-border-strong: var(--palette-slate-500);
   --nx-foreground: var(--palette-slate-900);
   --nx-foreground-muted: var(--palette-slate-600);
   --nx-foreground-subtle: var(--palette-slate-500);
@@ -90,6 +91,7 @@
   --nx-surface: var(--palette-slate-900);
   --nx-surface-muted: var(--palette-slate-800);
   --nx-border: var(--palette-slate-700);
+  --nx-border-strong: var(--palette-slate-400);
   --nx-foreground: var(--palette-slate-100);
   --nx-foreground-muted: var(--palette-slate-300);
   --nx-foreground-subtle: var(--palette-slate-400);

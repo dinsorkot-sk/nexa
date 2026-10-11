@@ -8,6 +8,15 @@ const th: Messages = {
     yes: 'ใช่',
     no: 'ไม่ใช่',
     select: 'เลือก',
+    required: 'จำเป็น',
+    noResults: 'ไม่พบผลลัพธ์',
+  },
+  combobox: {
+    loading: 'กำลังค้นหา…',
+    error: 'โหลดตัวเลือกไม่สำเร็จ',
+    retry: 'ลองอีกครั้ง',
+    toggle: 'แสดงตัวเลือก',
+    remove: 'ลบ {label}',
   },
   dialog: {
     close: 'ปิดหน้าต่าง',

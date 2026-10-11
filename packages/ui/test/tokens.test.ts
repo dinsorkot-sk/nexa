@@ -90,6 +90,8 @@ const pairs: Array<[string, string, number]> = [
   ['--nx-foreground-muted', '--nx-surface-muted', 4.5],
   ['--nx-ring', '--nx-surface', 3],
   ['--nx-border', '--nx-surface', 1.5],
+  ['--nx-border-strong', '--nx-surface', 3],
+  ['--nx-border-strong', '--nx-background', 3],
 ];
 
 describe('WCAG contrast of semantic tokens', () => {

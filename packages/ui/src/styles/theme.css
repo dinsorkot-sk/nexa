@@ -16,6 +16,7 @@
   --color-surface: var(--nx-surface);
   --color-surface-muted: var(--nx-surface-muted);
   --color-border: var(--nx-border);
+  --color-border-strong: var(--nx-border-strong);
   --color-foreground: var(--nx-foreground);
   --color-foreground-muted: var(--nx-foreground-muted);
   --color-foreground-subtle: var(--nx-foreground-subtle);
