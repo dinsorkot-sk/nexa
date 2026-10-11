@@ -18,6 +18,11 @@ const th: Messages = {
     toggle: 'แสดงตัวเลือก',
     remove: 'ลบ {label}',
   },
+  datepicker: {
+    open: 'เปิดปฏิทิน',
+    prev: 'เดือนก่อนหน้า',
+    next: 'เดือนถัดไป',
+  },
   dialog: {
     close: 'ปิดหน้าต่าง',
   },

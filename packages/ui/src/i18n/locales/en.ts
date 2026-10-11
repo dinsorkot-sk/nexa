@@ -16,6 +16,11 @@ const en = {
     toggle: 'Show options',
     remove: 'Remove {label}',
   },
+  datepicker: {
+    open: 'Open calendar',
+    prev: 'Previous month',
+    next: 'Next month',
+  },
   dialog: {
     close: 'Close dialog',
   },
