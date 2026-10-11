@@ -13,6 +13,8 @@ export * from './render/display';
 export * from './render/field-kinds';
 export * from './render/safe-url';
 export { default as UiLinkField } from './components/UiLinkField.vue';
+export { default as UiPopover } from './components/UiPopover.vue';
+export { default as UiTooltip } from './components/UiTooltip.vue';
 export { default as UiInput } from './components/UiInput.vue';
 export { default as UiTextarea } from './components/UiTextarea.vue';
 export { default as UiLabel } from './components/UiLabel.vue';

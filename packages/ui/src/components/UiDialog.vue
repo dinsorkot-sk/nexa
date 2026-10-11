@@ -30,15 +30,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { DialogClose, DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle, DialogTrigger } from 'radix-vue';
 
-const props = defineProps<{ modelValue?: boolean }>();
+/** `modelValue` is optional: without it the dialog keeps its own open state, so the `trigger` slot alone can open it. */
+const props = withDefaults(defineProps<{ modelValue?: boolean }>(), {
+  // Vue turns an absent boolean prop into false; undefined is what lets the component tell "not controlled" from "closed".
+  modelValue: undefined,
+});
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>();
 const { t } = useI18n();
+const inner = ref(false);
 const open = computed({
-  get: () => props.modelValue ?? false,
-  set: (value: boolean) => emit('update:modelValue', value),
+  get: () => props.modelValue ?? inner.value,
+  set: (value: boolean) => {
+    inner.value = value;
+    emit('update:modelValue', value);
+  },
 });
 </script>

@@ -128,3 +128,24 @@ describe('UiDialog', () => {
     wrapper.unmount();
   });
 });
+
+describe('UiDialog without v-model', () => {
+  it('opens from its trigger slot and closes with its own close button', async () => {
+    const wrapper = mountWithI18n(UiDialog, {
+      slots: { trigger: '<button type="button" id="open-dialog">Open</button>', title: 'Title', default: 'Content' },
+      attachTo: document.body,
+    }, 'en');
+    expect(document.body.textContent).not.toContain('Content');
+    (document.body.querySelector('#open-dialog') as HTMLButtonElement).click();
+    await nextTick();
+    await nextTick();
+    expect(document.body.textContent).toContain('Content');
+    (document.body.querySelector('[aria-label="Close dialog"]') as HTMLElement).click();
+    // Radix keeps the content mounted for a moment while it leaves.
+    for (let i = 0; i < 6; i += 1) await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.body.textContent).not.toContain('Content');
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+});

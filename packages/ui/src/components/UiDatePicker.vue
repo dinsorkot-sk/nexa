@@ -53,7 +53,9 @@
           >
             ‹
           </DatePickerPrev>
-          <DatePickerHeading class="text-sm font-medium" />
+          <DatePickerHeading class="text-sm font-medium">
+            {{ headingText(grid[0]?.value) }}
+          </DatePickerHeading>
           <DatePickerNext
             class="rounded px-2 py-1 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             :aria-label="t('datepicker.next')"
@@ -137,6 +139,19 @@ const calendarLocale = computed(() => (locale.value === 'th' ? 'th-TH' : 'en-US'
 const calendarValue = computed(() => isoToCalendarDate(props.modelValue));
 const minDate = computed(() => isoToCalendarDate(props.min));
 const maxDate = computed(() => isoToCalendarDate(props.max));
+
+/**
+ * Month and year for the calendar heading, in the display language. radix formats it from the value's own calendar,
+ * which is always Gregorian here, so it would say 2026 next to a field showing 2569. Formatting it with the same
+ * locale as the field keeps the two the same. Only the text changes; the grid and the stored value are untouched.
+ */
+function headingText(month: DateValue | undefined): string {
+  // Known limit: radix renders a second, visually hidden heading for screen readers ("Event Date, <month> <year>")
+  // from its own English label and the Gregorian year. DatePickerRoot does not expose that label, so it cannot be
+  // localised without replacing radix's calendar. The heading users see is the one formatted here.
+  if (!month) return '';
+  return new Intl.DateTimeFormat(calendarLocale.value, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(month.toDate('UTC'));
+}
 
 function onPick(value: DateValue | undefined) {
   emit('update:modelValue', calendarDateToIso(value));

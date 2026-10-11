@@ -129,3 +129,30 @@ describe('UiDatePicker interaction', () => {
     wrapper.unmount();
   });
 });
+
+describe('UiDatePicker heading follows the display language', () => {
+  /** An element whose entire text is exactly this string, so radix's longer hidden "Event Date, ..." heading cannot match. */
+  const hasExactText = (text: string) => [...document.body.querySelectorAll('*')].some((node) => node.children.length === 0 && node.textContent?.trim() === text);
+
+  async function openCalendar(locale: 'th' | 'en') {
+    const wrapper = mountPicker(locale, { modelValue: '2026-10-11' });
+    await nextTick();
+    const label = locale === 'th' ? 'เปิดปฏิทิน' : 'Open calendar';
+    (document.body.querySelector(`button[aria-label="${label}"]`) as HTMLButtonElement).click();
+    await nextTick(); await flushPromises();
+    return wrapper;
+  }
+
+  it('shows the Buddhist Era year in the visible heading under Thai, matching the field', async () => {
+    const wrapper = await openCalendar('th');
+    expect(hasExactText('ตุลาคม 2569')).toBe(true);
+    expect(hasExactText('ตุลาคม 2026')).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('shows the Gregorian year in the visible heading under English', async () => {
+    const wrapper = await openCalendar('en');
+    expect(hasExactText('October 2026')).toBe(true);
+    wrapper.unmount();
+  });
+});
