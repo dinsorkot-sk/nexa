@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createDb, runMigrations, SYSTEM_TENANT_ID, createTenantContext, authRepository, identityRepository, AuthConflictError, tenants } from '../src/index';
+import { createDb, runMigrations, SYSTEM_TENANT_ID, createTenantContext, authRepository, identityRepository, organizationRepository, AuthConflictError, OrganizationConflictError, tenants } from '../src/index';
 
 const handles: Array<ReturnType<typeof createDb>> = [];
 
@@ -69,4 +69,69 @@ describe('@nexa/db auth repository', () => {
     const s3 = await auth.createSession(user.id, 'd'.repeat(64), new Date(Date.now() + 120_000));
     await auth.touchSession(s3.id);
   }, 15000);
+
+  it('supports one identity in multiple organizations with tenant-scoped roles and sessions', async () => {
+    const handle = createTestDb();
+    await runMigrations(handle);
+    const organizations = organizationRepository(handle);
+    const first = await organizations.provisionForOwner({
+      name: 'First Organization',
+      slug: 'first-org',
+      email: 'owner@example.com',
+      passwordHash: 'hash',
+      sessionDigest: 'a'.repeat(64),
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const second = await organizations.provisionForOwner({
+      name: 'Second Organization',
+      slug: 'second-org',
+      email: 'second-owner@example.com',
+      passwordHash: 'hash',
+      sessionDigest: 'b'.repeat(64),
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    await organizations.addMember(second.tenant.id, first.user.id, 'member');
+    const memberships = await organizations.listForUser(first.user.id);
+    expect(memberships).toHaveLength(2);
+    expect(memberships.map(({ slug, roleIds }) => ({ slug, roleIds }))).toEqual([
+      { slug: 'first-org', roleIds: ['owner'] },
+      { slug: 'second-org', roleIds: ['member'] },
+    ]);
+
+    expect(await organizations.selectForSession({
+      sessionId: first.session.id,
+      userId: first.user.id,
+      currentTenantId: first.tenant.id,
+      tenantId: second.tenant.id,
+    })).toBe(true);
+    await expect(identityRepository(handle).getActiveSession('a'.repeat(64))).resolves.toMatchObject({ tenantId: second.tenant.id });
+
+    expect(await organizations.selectForSession({
+      sessionId: first.session.id,
+      userId: first.user.id,
+      currentTenantId: second.tenant.id,
+      tenantId: SYSTEM_TENANT_ID,
+    })).toBe(false);
+    await expect(organizations.provisionForOwner({
+      name: 'Duplicate Email Organization',
+      slug: 'duplicate-email-org',
+      email: 'OWNER@example.com',
+      passwordHash: 'hash',
+      sessionDigest: 'c'.repeat(64),
+      expiresAt: new Date(Date.now() + 60_000),
+    })).rejects.toBeInstanceOf(AuthConflictError);
+    await expect(organizations.provisionForOwner({
+      name: 'Duplicate Slug Organization',
+      slug: 'first-org',
+      email: 'different-owner@example.com',
+      passwordHash: 'hash',
+      sessionDigest: 'd'.repeat(64),
+      expiresAt: new Date(Date.now() + 60_000),
+    })).rejects.toBeInstanceOf(OrganizationConflictError);
+    await expect(authRepository(handle, createTenantContext(first.tenant.id)).createUser({
+      email: 'owner@example.com',
+      passwordHash: 'hash',
+    })).rejects.toBeInstanceOf(AuthConflictError);
+  });
 });
