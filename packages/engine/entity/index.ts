@@ -19,6 +19,12 @@ export class RecordValidationError extends Error {
 const numericTypes = new Set(['number', 'integer', 'decimal', 'currency', 'percentage']);
 const stringTypes = new Set(['text', 'longText', 'email', 'phone', 'url', 'file', 'image']);
 
+/**
+ * A `time` field holds a time of day, not a timestamp: `HH:mm` or `HH:mm:ss` on a 24-hour clock, which is what
+ * <input type="time"> produces. It carries no date and no timezone, and is stored exactly as given.
+ */
+const timeOfDay = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+
 function validateValue(field: FieldDefinition, value: unknown): string | undefined {
   const { type, options } = field;
   if (value === null || value === undefined) return options.required ? 'A value is required' : undefined;
@@ -39,7 +45,10 @@ function validateValue(field: FieldDefinition, value: unknown): string | undefin
     return undefined;
   }
   if (type === 'boolean') return typeof value === 'boolean' ? undefined : 'Expected a boolean';
-  if (['date', 'datetime', 'time'].includes(type)) {
+  if (type === 'time') {
+    return typeof value === 'string' && timeOfDay.test(value) ? undefined : 'Expected a time of day such as 14:30 or 14:30:00';
+  }
+  if (type === 'date' || type === 'datetime') {
     if (typeof value !== 'string' || Number.isNaN(Date.parse(type === 'date' ? `${value}T00:00:00Z` : value))) return 'Expected a valid date/time string';
     return undefined;
   }
@@ -58,6 +67,10 @@ function validateValue(field: FieldDefinition, value: unknown): string | undefin
   // autoNumber is deferred (not writable yet).
   if (['formula', 'computed', 'autoNumber'].includes(type)) return 'This field is not writable';
   return undefined;
+}
+
+function isLegacyTimeValue(value: unknown): boolean {
+  return typeof value === 'string' && !timeOfDay.test(value) && !Number.isNaN(Date.parse(value));
 }
 
 export function validateRecordData(
@@ -90,6 +103,9 @@ export function validateRecordData(
     // formula/computed fields are never validated as input; they are
     // computed server-side below after all writable fields validate.
     if (field.type === 'formula' || field.type === 'computed') continue;
+    // Before the time-of-day rule, `time` accepted any Date.parse-able string, so a stored value may be a full
+    // timestamp. Leave such a value alone while it is unchanged, so it cannot block unrelated edits to the record.
+    if (field.type === 'time' && options.existing && merged[field.id] === options.existing[field.id] && isLegacyTimeValue(merged[field.id])) continue;
     const issue = validateValue(field, merged[field.id]);
     if (issue) issues.push({ fieldId: field.id, message: issue });
   }
