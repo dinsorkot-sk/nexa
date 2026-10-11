@@ -8,6 +8,11 @@ export interface UiComponentProps {
 export { default as UiButton } from './components/UiButton.vue';
 export { default as MetaFieldValue } from './components/MetaFieldValue.vue';
 export { default as MetaFieldInput } from './components/MetaFieldInput.vue';
+export { default as MetaTable } from './components/MetaTable.vue';
+export * from './components/table';
+export { default as UiPagination } from './components/UiPagination.vue';
+export { default as MetaForm } from './components/MetaForm.vue';
+export * from './components/form';
 export * from './render/format';
 export * from './render/display';
 export * from './render/field-kinds';

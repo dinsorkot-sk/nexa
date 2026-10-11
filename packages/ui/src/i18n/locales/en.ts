@@ -35,6 +35,38 @@ const en = {
   field: {
     computed: 'Calculated automatically',
   },
+  table: {
+    sortBy: 'Sort by {field} — {direction}',
+    sortAsc: 'ascending',
+    sortDesc: 'descending',
+    sortClear: 'clear sorting',
+    emptyTitle: 'No records yet',
+    emptyDescription: 'Records will appear here once they are created.',
+    retry: 'Retry',
+  },
+  form: {
+    save: 'Save',
+    cancel: 'Cancel',
+    readonly: 'Read-only: you can view but not change this record.',
+    conflict: 'This record was changed by someone else. Reload and try again.',
+    invalid: 'Some values are invalid. Check the highlighted fields.',
+  },
+  detail: {
+    fields: 'Fields',
+    relations: 'Related records',
+    activity: 'Activity',
+    noLinks: 'No linked records',
+    noActivity: 'No activity yet',
+  },
+  pagination: {
+    label: 'Pagination',
+    range: '{from}–{to} of {total} (page {page} of {pages})',
+    empty: 'No records',
+    perPage: 'Rows per page',
+    perPageOption: '{n} rows',
+    prev: 'Previous page',
+    next: 'Next page',
+  },
   dialog: {
     close: 'Close dialog',
   },
