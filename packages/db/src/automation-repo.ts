@@ -36,6 +36,22 @@ export function automationRepository(handle: DbHandle, context: TenantContext) {
   return {
     start,
     finish,
+    /**
+     * Closes runs left `running` by an earlier worker that died mid-job. Scoped to one job id, which the
+     * run stores as its correlation id, so unrelated runs are untouched. Returns how many runs were closed.
+     */
+    async closeOrphans(jobId: string, reason: string): Promise<number> {
+      const rows = await db.update(automationRuns).set({
+        status: 'failed',
+        lastError: reason,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(automationRuns.tenantId, tenantId),
+        eq(automationRuns.correlationId, jobId),
+        eq(automationRuns.status, 'running'),
+      )).returning();
+      return rows.length;
+    },
     /** Records a retry attempt against the same run row. */
     async retry(id: string, attempt: number, lastError?: string) {
       const [row] = await db.update(automationRuns).set({

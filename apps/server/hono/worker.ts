@@ -22,6 +22,10 @@ export async function processOutboxRow(db: DbHandle, row: OutboxRow, deps: AppDe
     const ctx = createTenantContext(job.tenantId);
     const defs = definitionRepository(db, ctx);
     const runs = automationRepository(db, ctx);
+    // A reclaimed job means an earlier worker died mid-dispatch. Its open runs can never finish, so close them
+    // as failed before dispatching again. The new attempt records its own runs, tagged with this job's id.
+    const closed = await runs.closeOrphans(row.id, 'Worker stopped before this run finished; job was reclaimed');
+    if (closed > 0) console.warn(`Closed ${closed} orphaned automation run(s) for job ${row.id}`);
     await dispatchAutomations({
       listAutomations: (moduleId) => defs.listAutomations(moduleId),
       listActions: (moduleId) => defs.listActions(moduleId),
@@ -40,7 +44,7 @@ export async function processOutboxRow(db: DbHandle, row: OutboxRow, deps: AppDe
           await sendNotification(NotificationActionConfigSchema.parse(action.config), deps.emailTransport);
         }
       },
-    }, job.moduleId, job.event, job.actorId);
+    }, job.moduleId, job.event, job.actorId, row.id);
 
     await outbox.complete({ tenantId: row.tenantId, id: row.id });
     return 'done';

@@ -6,7 +6,7 @@ export interface DispatchPorts {
   listAutomations(moduleId: string): Promise<AutomationDefinition[]>;
   listActions(moduleId: string): Promise<ActionDefinition[]>;
   runs: {
-    start(input: { moduleId: string; automationId: string; triggerType: string; recordId?: string }): Promise<{ id: string }>;
+    start(input: { moduleId: string; automationId: string; triggerType: string; recordId?: string; correlationId?: string }): Promise<{ id: string }>;
     retry(id: string, attempt: number, lastError?: string): Promise<unknown>;
     finish(id: string, status: 'succeeded' | 'failed', lastError?: string): Promise<unknown>;
   };
@@ -17,11 +17,11 @@ export interface DispatchPorts {
  * Fires automations for an event. Each matched automation is one run; failed deliveries
  * are retried up to `retry.maxAttempts` and recorded. Never throws.
  */
-export async function dispatchAutomations(ports: DispatchPorts, moduleId: string, event: AutomationEvent, actorId?: string) {
+export async function dispatchAutomations(ports: DispatchPorts, moduleId: string, event: AutomationEvent, actorId?: string, jobId?: string) {
   const [automations, actions] = await Promise.all([ports.listAutomations(moduleId), ports.listActions(moduleId)]);
   const matched = selectAutomations(automations, { ...event, moduleId, actorId });
   for (const automation of matched) {
-    const run = await ports.runs.start({ moduleId, automationId: automation.id, triggerType: automation.trigger.type, recordId: event.recordId });
+    const run = await ports.runs.start({ moduleId, automationId: automation.id, triggerType: automation.trigger.type, recordId: event.recordId, correlationId: jobId });
     let lastError: string | undefined;
     for (let attempt = 1; attempt <= automation.retry.maxAttempts + 1; attempt += 1) {
       try {
