@@ -75,7 +75,11 @@ importers:
 
   integrations/pdf: {}
 
-  integrations/webhook: {}
+  integrations/webhook:
+    dependencies:
+      '@nexa/meta':
+        specifier: workspace:*
+        version: link:../../packages/meta
 
   packages/auth:
     devDependencies:

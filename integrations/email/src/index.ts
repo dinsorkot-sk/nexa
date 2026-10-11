@@ -3,9 +3,9 @@ export interface EmailTransport {
 }
 
 /**
- * Recording transport: the automation run row is the delivery source of truth,
- * so the default transport resolves without touching an external provider.
- * Production deployments inject a real transport (SMTP, SES, ...) per tenant.
+ * Recording transport for development and tests: the automation run row is the delivery record, so it
+ * resolves without touching an external provider. It must never be the production default, because it
+ * would drop notifications silently.
  */
 export const recordingTransport: EmailTransport = {
   async send() {
@@ -13,15 +13,25 @@ export const recordingTransport: EmailTransport = {
   },
 };
 
+/**
+ * Sends a notification. In production, an injected transport is required: without one this throws instead
+ * of pretending the mail was sent. Callers record the failure on the run; nothing is dropped silently.
+ */
 export async function sendNotification(
   config: { to: string; subject: string; body: string },
-  transport: EmailTransport = recordingTransport,
+  transport?: EmailTransport,
 ): Promise<{ id?: string }> {
+  if (!transport) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Email transport is not configured; refusing to drop the notification');
+    }
+    return recordingTransport.send(config);
+  }
   return transport.send(config);
 }
 
 export const emailIntegration = {
   name: 'email',
-  version: '0.0.2',
+  version: '0.0.3',
   sendNotification,
 };

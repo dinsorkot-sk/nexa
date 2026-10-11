@@ -36,8 +36,11 @@ export const NotificationActionConfigSchema = z.object({
 }).strict();
 
 /** `webhook` POSTs the payload to the target URL; the delivery row records the outcome. */
+/** Only https targets are accepted. Plain http, file:, and other schemes are rejected at save time. */
 export const WebhookActionConfigSchema = z.object({
-  url: z.string().url().max(2000),
+  url: z.string().url().max(2000).refine((value) => {
+    try { return new URL(value).protocol === 'https:'; } catch { return false; }
+  }, 'Webhook URL must use https'),
   method: z.enum(['POST', 'PUT', 'PATCH']).default('POST'),
   headers: z.record(z.string().min(1).max(120), z.string().max(1000)).default({}),
 }).strict();
