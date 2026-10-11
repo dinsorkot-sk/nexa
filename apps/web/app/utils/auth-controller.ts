@@ -8,11 +8,19 @@ export interface Principal {
   roleIds: string[];
 }
 
+/** Organization option surfaced by the 409 ORGANIZATION_REQUIRED login flow. */
+export interface LoginOrganization {
+  id: string;
+  slug: string;
+  name: string;
+  roleIds: string[];
+}
+
 /** Minimal auth surface the controller needs — implemented by the API client. */
 export interface AuthApi {
   me(): Promise<Response>;
   signup(input: { email: string; password: string; displayName?: string }): Promise<Response>;
-  login(input: { email: string; password: string }): Promise<Response>;
+  login(input: { email: string; password: string; organizationId?: string }): Promise<Response>;
   logout(): Promise<Response>;
 }
 
@@ -73,8 +81,10 @@ export function createAuthController(api: AuthApi) {
       return resolved ?? user;
     },
 
-    /** POST /login, then resolve the canonical principal via /me. */
-    async login(input: { email: string; password: string }): Promise<PrincipalState> {
+    /** POST /login, then resolve the canonical principal via /me. Throws the
+     *  normalized 409 (with `organizations` in details) when the user belongs
+     *  to more than one organization and none was selected. */
+    async login(input: { email: string; password: string; organizationId?: string }): Promise<PrincipalState> {
       const response = await api.login(input);
       if (!response.ok) throw await parseError(response);
       const body = (await response.json()) as { user: unknown };

@@ -25,8 +25,8 @@ export function useAuth() {
     }
   }
 
-  async function login(email: string, password: string) {
-    const next = await controller.login({ email, password });
+  async function login(email: string, password: string, organizationId?: string) {
+    const next = await controller.login({ email, password, organizationId });
     principal.value = next;
     loaded.value = true;
   }
