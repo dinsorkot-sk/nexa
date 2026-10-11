@@ -156,3 +156,32 @@ describe('UiDatePicker heading follows the display language', () => {
     wrapper.unmount();
   });
 });
+
+describe('UiDatePicker closes after a day is chosen', () => {
+  async function open() {
+    const wrapper = mountPicker('en', { modelValue: '2026-10-11' });
+    await nextTick();
+    (document.body.querySelector('button[aria-label="Open calendar"]') as HTMLButtonElement).click();
+    await nextTick(); await flushPromises();
+    return wrapper;
+  }
+
+  it('closes the calendar and emits the chosen Gregorian date when a day is clicked', async () => {
+    const wrapper = await open();
+    expect(document.body.querySelector('[role="grid"]')).not.toBeNull();
+    const cell = [...document.body.querySelectorAll('[data-radix-vue-calendar-cell-trigger]')]
+      .find((node) => node.getAttribute('data-value') === '2026-10-20') as HTMLElement;
+    cell.click();
+    await nextTick(); await flushPromises();
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['2026-10-20']);
+    expect(document.body.querySelector('[role="grid"]')).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('keeps the calendar open while the user only moves around it', async () => {
+    const wrapper = await open();
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+    expect(document.body.querySelector('[role="grid"]')).not.toBeNull();
+    wrapper.unmount();
+  });
+});

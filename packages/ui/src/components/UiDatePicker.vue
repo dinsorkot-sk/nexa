@@ -1,5 +1,6 @@
 <template>
   <DatePickerRoot
+    v-model:open="open"
     :model-value="calendarValue"
     :locale="calendarLocale"
     :disabled="disabled"
@@ -106,7 +107,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   DatePickerCalendar, DatePickerCell, DatePickerCellTrigger, DatePickerContent, DatePickerField, DatePickerGrid, DatePickerGridBody,
@@ -153,7 +154,12 @@ function headingText(month: DateValue | undefined): string {
   return new Intl.DateTimeFormat(calendarLocale.value, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(month.toDate('UTC'));
 }
 
+/** Controlled so the calendar can close once a day is chosen; radix leaves it open. */
+const open = ref(false);
+
 function onPick(value: DateValue | undefined) {
   emit('update:modelValue', calendarDateToIso(value));
+  // A chosen day closes the calendar and focus returns to the trigger, by mouse or keyboard alike.
+  if (value) open.value = false;
 }
 </script>
