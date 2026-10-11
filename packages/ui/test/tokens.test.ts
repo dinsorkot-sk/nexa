@@ -42,9 +42,10 @@ describe('no hardcoded colors outside the token file', () => {
 /* ---- WCAG contrast ---- */
 
 function parseTokens(css: string, selector: string): Map<string, string> {
+  const darkSelector = "[data-theme='dark'],\nhtml.dark,\nhtml.htw-dark {";
   const block = selector === ':root'
-    ? css.slice(css.indexOf(':root'), css.indexOf("[data-theme='dark']"))
-    : css.slice(css.indexOf("[data-theme='dark']"));
+    ? css.slice(css.indexOf(':root'), css.indexOf(darkSelector))
+    : css.slice(css.indexOf(darkSelector));
   return new Map([...block.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()] as const));
 }
 
@@ -69,6 +70,7 @@ function contrast(a: string, b: string): number {
 
 const light = parseTokens(tokensCss, ':root');
 const dark = parseTokens(tokensCss, 'dark');
+const css2 = tokensCss;
 
 /** [foreground token, background token, minimum ratio]. 4.5 is WCAG AA for normal text, 3 for large text and UI. */
 const pairs: Array<[string, string, number]> = [
@@ -107,6 +109,12 @@ describe('WCAG contrast of semantic tokens', () => {
   it('every semantic token exists in both themes', () => {
     const semantic = [...light.keys()].filter((key) => key.startsWith('--nx-'));
     for (const key of semantic) expect(dark.has(key), `dark theme is missing ${key}`).toBe(true);
+  });
+
+  it('the dark block is keyed on the app attribute and the Histoire toggle class', () => {
+    const darkStart = css2.indexOf("[data-theme='dark']");
+    expect(darkStart).toBeGreaterThan(0);
+    expect(css2.slice(darkStart, css2.indexOf('{', darkStart))).toContain('html.htw-dark');
   });
 
   it('the contrast function matches known WCAG reference values', () => {

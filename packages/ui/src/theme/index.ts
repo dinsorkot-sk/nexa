@@ -45,3 +45,24 @@ export function setTheme(mode: ThemeMode, root?: HTMLElement): ResolvedTheme {
   }
   return applyTheme(mode, root);
 }
+
+let systemWatcher: { media: MediaQueryList; onChange: () => void } | undefined;
+
+/**
+ * Keeps `system` mode live: when the OS preference changes, the theme re-resolves without a reload.
+ * The mode being explicit (light/dark) makes the change a no-op. Returns a disposer.
+ */
+export function watchSystemTheme(root: HTMLElement = document.documentElement): () => void {
+  if (typeof globalThis.matchMedia !== 'function') return () => undefined;
+  systemWatcher?.media.removeEventListener('change', systemWatcher.onChange);
+  const media = globalThis.matchMedia('(prefers-color-scheme: dark)');
+  const onChange = () => {
+    if ((readStored() ?? 'system') === 'system') applyTheme('system', root);
+  };
+  media.addEventListener('change', onChange);
+  systemWatcher = { media, onChange };
+  return () => {
+    media.removeEventListener('change', onChange);
+    if (systemWatcher?.media === media) systemWatcher = undefined;
+  };
+}

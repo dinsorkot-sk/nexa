@@ -4,7 +4,11 @@ import { HstVue } from '@histoire/plugin-vue';
 export default defineConfig({
   plugins: [HstVue()],
   setupFile: '/histoire.setup.ts',
-  theme: { title: 'Nexa UI' },
+  theme: {
+    title: 'Nexa UI',
+    // Histoire's own light/dark switch sets `htw-dark` on the preview, which tokens.css keys on for the dark tokens.
+    darkClass: 'htw-dark',
+  },
   // Histoire's own light/dark switch drives the same data-theme attribute the app uses.
   backgroundPresets: [
     { label: 'Theme background', color: 'var(--nx-background)', contrastColor: 'var(--nx-foreground)' },
