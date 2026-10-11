@@ -14,7 +14,11 @@ export function isEditableField(field: FieldDefinition): boolean {
   return !field.options.readonly && !field.options.hidden && isWritableFieldType(field.type);
 }
 
-/** Human-readable display value for a record value against a field definition. */
+/**
+ * @deprecated English-only, and it truncates reference ids. Use `formatFieldDisplay` from `./display`, which follows the
+ * user's language, formats dates, numbers and currency by locale, and resolves references to labels. Kept so existing
+ * callers keep their behaviour; nothing in this package uses it any more.
+ */
 export function formatFieldValue(field: FieldDefinition, value: unknown): string {
   if (value === null || value === undefined || value === '') return '';
   if (field.type === 'boolean') {

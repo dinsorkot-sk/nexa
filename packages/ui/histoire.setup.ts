@@ -1,4 +1,5 @@
 import './src/styles/index.css';
+import './src/styles/playground.css';
 import { defineSetupVue3 } from '@histoire/plugin-vue';
 import { createNexaI18n } from './src/i18n';
 

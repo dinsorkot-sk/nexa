@@ -1,0 +1,9 @@
+/*
+ * Playground only; not part of the shipped stylesheet. Histoire's own CSS sets `html { font-family }` outside any cascade
+ * layer, which beats the layered rule in index.css and would replace our fonts (and so drop Thai glyphs) in the preview.
+ * Setting it again here, unlayered and later, makes the preview use the same font stack as the real app.
+ */
+html,
+body {
+  font-family: var(--font-sans);
+}
