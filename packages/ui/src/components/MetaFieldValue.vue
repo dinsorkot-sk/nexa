@@ -12,5 +12,5 @@ const display = computed(() => formatFieldValue(props.field, props.value));
 </script>
 
 <template>
-  <span :class="display ? '' : 'text-neutral-400'">{{ display || '—' }}</span>
+  <span :class="display ? '' : 'text-foreground-subtle'">{{ display || '—' }}</span>
 </template>

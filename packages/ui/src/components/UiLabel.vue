@@ -1,5 +1,8 @@
 <template>
-  <label :for="forId" :class="cn('mb-1.5 block text-sm font-medium text-slate-200', props.class)">
+  <label
+    :for="props.for"
+    :class="cn('mb-1.5 block text-sm font-medium text-foreground', props.class)"
+  >
     <slot />
   </label>
 </template>
@@ -8,5 +11,4 @@
 import { cn } from '../cn';
 
 const props = defineProps<{ for?: string; class?: string }>();
-const forId = props.for;
 </script>

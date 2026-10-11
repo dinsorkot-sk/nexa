@@ -6,19 +6,37 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "story:dev": "histoire dev",
+    "story:build": "histoire build"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/noto-sans-thai": "^5.3.0",
     "@nexa/meta": "workspace:*",
     "clsx": "^2.1.1",
-    "tailwind-merge": "^3.0.2",
     "lucide-vue-next": "^0.475.0",
     "radix-vue": "^1.9.15",
-    "vue": "^3.5.13"
+    "tailwind-merge": "^3.0.2",
+    "vue": "^3.5.13",
+    "vue-i18n": "^11.4.14"
   },
   "devDependencies": {
+    "@histoire/plugin-vue": "1.0.0-beta.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "@vue/test-utils": "^2.5.1",
+    "happy-dom": "^20.14.6",
+    "histoire": "1.0.0-beta.1",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.7.3",
-    "vitest": "^3.0.7"
+    "vite": "^7.3.0",
+    "vitest": "^3.0.7",
+    "vue-tsc": "^3.3.13"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./styles.css": "./src/styles/index.css"
   }
 }

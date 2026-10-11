@@ -1,10 +1,12 @@
+import vue from '@vitejs/plugin-vue';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  plugins: [vue()],
   test: {
     globals: true,
-    environment: 'node',
-    // PGlite-backed tests bootstrap a fresh in-memory database per test; see root vitest.config.ts.
+    // Components are mounted for real, so they need a DOM.
+    environment: 'happy-dom',
     testTimeout: 30_000,
   },
 });

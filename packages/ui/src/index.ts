@@ -16,5 +16,5 @@ export { default as UiCard } from './components/UiCard.vue';
 export { default as UiBadge } from './components/UiBadge.vue';
 export { default as UiSelect } from './components/UiSelect.vue';
 export { default as UiDialog } from './components/UiDialog.vue';
-
-export {};
+export * from './theme';
+export * from './i18n';

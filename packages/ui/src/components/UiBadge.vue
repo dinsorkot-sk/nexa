@@ -8,11 +8,11 @@
 import { computed } from 'vue';
 import { cn } from '../cn';
 
-const props = withDefaults(defineProps<{ tone?: 'neutral' | 'success' | 'warning' | 'danger'; class?: string }>(), { tone: 'neutral' });
+const props = withDefaults(defineProps<{ tone?: 'neutral' | 'success' | 'warning' | 'danger'; class?: string }>(), { tone: 'neutral', class: undefined });
 const toneClass = computed(() => ({
-  'bg-slate-800 text-slate-300': props.tone === 'neutral',
-  'bg-emerald-950 text-emerald-300': props.tone === 'success',
-  'bg-amber-950 text-amber-300': props.tone === 'warning',
-  'bg-rose-950 text-rose-300': props.tone === 'danger',
+  'bg-neutral-soft text-neutral-soft-foreground': props.tone === 'neutral',
+  'bg-success-soft text-success-soft-foreground': props.tone === 'success',
+  'bg-warning-soft text-warning-soft-foreground': props.tone === 'warning',
+  'bg-danger-soft text-danger-soft-foreground': props.tone === 'danger',
 }));
 </script>

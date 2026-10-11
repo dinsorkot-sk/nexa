@@ -47,7 +47,7 @@ function onCheckbox(event: Event) {
   <input
     v-if="isBoolean"
     type="checkbox"
-    class="h-4 w-4 rounded border-slate-700 bg-slate-900"
+    class="h-4 w-4 rounded border-border bg-surface accent-primary"
     :checked="modelValue === true || modelValue === 'true'"
     :disabled="!editable"
     :aria-label="field.label || field.name || field.id"
@@ -66,7 +66,13 @@ function onCheckbox(event: Event) {
     @update:model-value="emitValue"
   >
     <option value="" />
-    <option v-for="choice in choices" :key="choice.value" :value="choice.value">{{ choice.label }}</option>
+    <option
+      v-for="choice in choices"
+      :key="choice.value"
+      :value="choice.value"
+    >
+      {{ choice.label }}
+    </option>
   </UiSelect>
   <UiInput
     v-else
