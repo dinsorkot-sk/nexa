@@ -14,8 +14,10 @@ export type MetaFormFieldErrors = Record<string, string>;
 export interface MetaSectionView {
   id: string;
   label: string;
+  /** Authored section column count (1–4), from the FormDefinition. */
+  columns: number;
   /** Fields of this section, in order, already filtered to what this user may see. */
-  fields: Array<{ field: FieldDefinition; columns?: number }>;
+  fields: Array<{ field: FieldDefinition }>;
 }
 
 /**
@@ -28,6 +30,7 @@ export function formSections(form: FormDefinition, fields: FieldDefinition[]): M
   return form.sections.map((section) => ({
     id: section.id,
     label: section.label,
+    columns: section.columns,
     fields: section.fieldIds
       .map((fieldId) => byId.get(fieldId))
       .filter((field): field is FieldDefinition => Boolean(field) && !field!.options.hidden)

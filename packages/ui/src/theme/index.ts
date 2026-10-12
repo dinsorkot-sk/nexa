@@ -46,7 +46,7 @@ export function setTheme(mode: ThemeMode, root?: HTMLElement): ResolvedTheme {
   return applyTheme(mode, root);
 }
 
-let systemWatcher: { media: MediaQueryList; onChange: () => void } | undefined;
+let systemWatcher: { media: MediaQueryList; onChange: () => void; root: HTMLElement } | undefined;
 
 /**
  * Keeps `system` mode live: when the OS preference changes, the theme re-resolves without a reload.
@@ -54,15 +54,17 @@ let systemWatcher: { media: MediaQueryList; onChange: () => void } | undefined;
  */
 export function watchSystemTheme(root: HTMLElement = document.documentElement): () => void {
   if (typeof globalThis.matchMedia !== 'function') return () => undefined;
+  // Clean up any existing watcher first so we don't leak listeners.
   systemWatcher?.media.removeEventListener('change', systemWatcher.onChange);
+  systemWatcher = undefined;
   const media = globalThis.matchMedia('(prefers-color-scheme: dark)');
   const onChange = () => {
     if ((readStored() ?? 'system') === 'system') applyTheme('system', root);
   };
   media.addEventListener('change', onChange);
-  systemWatcher = { media, onChange };
+  systemWatcher = { media, onChange, root };
   return () => {
     media.removeEventListener('change', onChange);
-    if (systemWatcher?.media === media) systemWatcher = undefined;
+    if (systemWatcher?.media === media && systemWatcher?.root === root) systemWatcher = undefined;
   };
 }

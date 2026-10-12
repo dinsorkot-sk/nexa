@@ -37,7 +37,7 @@ const buttonClass = computed(() => cn(
     'border border-border bg-surface-muted text-foreground hover:bg-border': props.variant === 'secondary',
     'text-foreground-muted hover:bg-surface-muted hover:text-foreground': props.variant === 'ghost',
     'bg-danger text-danger-foreground hover:bg-danger-hover': props.variant === 'danger',
-    'px-2.5 py-1 text-xs': props.size === 'sm',
+    'px-2.5 py-1 text-sm': props.size === 'sm',
     'px-3 py-2 text-sm': props.size === 'md',
     'px-4 py-2.5 text-base': props.size === 'lg',
   },

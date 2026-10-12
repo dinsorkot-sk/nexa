@@ -6,6 +6,7 @@ import UiButton from '../src/components/UiButton.vue';
 import UiCard from '../src/components/UiCard.vue';
 import UiDialog from '../src/components/UiDialog.vue';
 import UiInput from '../src/components/UiInput.vue';
+import UiFieldWrapper from '../src/components/UiFieldWrapper.vue';
 import UiLabel from '../src/components/UiLabel.vue';
 import UiSelect from '../src/components/UiSelect.vue';
 import UiTextarea from '../src/components/UiTextarea.vue';
@@ -35,6 +36,12 @@ describe('UiButton', () => {
     expect(mount(UiButton, { props: { variant: 'danger' } }).classes()).toContain('bg-danger');
     expect(mount(UiButton, { props: { variant: 'secondary' } }).classes()).toContain('bg-surface-muted');
     expect(mount(UiButton, { props: { variant: 'ghost' } }).classes()).toContain('text-foreground-muted');
+  });
+
+  it('uses readable text in the compact size', () => {
+    const wrapper = mount(UiButton, { props: { size: 'sm' }, slots: { default: 'Save' } });
+    expect(wrapper.classes()).toContain('text-sm');
+    expect(wrapper.classes()).toContain('py-1');
   });
 
   it('lets a caller class override a conflicting utility', () => {
@@ -70,6 +77,15 @@ describe('form primitives', () => {
     expect(wrapper.get('label').attributes('for')).toBe('one');
     await wrapper.setProps({ for: 'two' });
     expect(wrapper.get('label').attributes('for')).toBe('two');
+  });
+
+  it('UiFieldWrapper keeps helper and error text readable', () => {
+    const help = mountWithI18n(UiFieldWrapper, { props: { label: 'Name', helpText: 'Use the full name.' }, slots: { default: '<input />' } });
+    expect(help.get('p').classes()).toContain('text-sm');
+    help.unmount();
+
+    const error = mountWithI18n(UiFieldWrapper, { props: { label: 'Name', error: 'Name is required.' }, slots: { default: '<input />' } });
+    expect(error.get('[role="alert"]').classes()).toContain('text-sm');
   });
 });
 

@@ -81,7 +81,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, useId } from 'vue';
+import { computed, ref, useId, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { FieldDefinition, FormDefinition } from '@nexa/meta';
 import { cn } from '../cn';
@@ -141,6 +141,11 @@ const sections = computed(() => formSections(props.form, props.fields));
 const draft = ref<Record<string, unknown>>({ ...(props.initialData ?? {}) });
 const touched = ref<Set<string>>(new Set());
 
+/** Re-sync draft when initialData changes from the parent (e.g. async fetch then prop update). */
+watch(() => props.initialData, () => {
+  draft.value = { ...(props.initialData ?? {}) };
+}, { deep: true });
+
 function setDraft(fieldId: string, value: unknown): void {
   draft.value[fieldId] = value;
   touched.value.add(fieldId);
@@ -159,8 +164,12 @@ function fieldError(fieldId: string): string | undefined {
   return props.fieldErrors[fieldId];
 }
 
-function sectionColumnCount(section: { fields: unknown[] } & { columns?: number }): number {
-  return Math.min(Math.max(section.fields.length, 1), 4);
+/**
+ * Section column count: the authored count (1–4), capped at the number of fields so a
+ * single-field section never renders a lone narrow column beside empty space.
+ */
+function sectionColumnCount(section: { fields: unknown[]; columns?: number }): number {
+  return Math.min(section.columns ?? 1, section.fields.length);
 }
 
 const submitLabel = computed(() => props.submitLabel ?? t('form.save'));

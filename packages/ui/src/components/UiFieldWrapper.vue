@@ -24,7 +24,7 @@
     <p
       v-if="helpText && !error"
       :id="helpId"
-      class="text-xs text-foreground-muted"
+      class="text-sm text-foreground-muted"
     >
       {{ helpText }}
     </p>
@@ -32,7 +32,7 @@
       v-if="error"
       :id="errorId"
       role="alert"
-      class="text-xs font-medium text-danger-soft-foreground"
+      class="text-sm font-medium text-danger-soft-foreground"
     >
       {{ error }}
     </p>

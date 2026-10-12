@@ -133,7 +133,9 @@ const props = defineProps<{
 const { t, locale } = useI18n();
 
 /** Hidden fields never show, even if a caller passes them: the server redacts them. */
-const fieldEntries = computed(() => props.fields.filter((field) => !field.options.hidden));const numberFormat = computed(() => new Intl.DateTimeFormat(locale.value === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' }));
+const fieldEntries = computed(() => props.fields.filter((field) => !field.options.hidden));
+
+const numberFormat = computed(() => new Intl.DateTimeFormat(locale.value === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' }));
 function formatActivityTime(occurredAt: string): string {
   const instant = new Date(occurredAt);
   return Number.isNaN(instant.getTime()) ? occurredAt : numberFormat.value.format(instant);
