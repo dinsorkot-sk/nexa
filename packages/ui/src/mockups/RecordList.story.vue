@@ -1,28 +1,38 @@
 <script setup lang="ts">
 /**
- * Mockup: Runtime Record List (Vehicle index)
- * Purpose: Show record list using MetaTable + UiPagination with mock data.
- * Exercising: search, filtering, sorting, pagination, empty/error/loading states.
+ * Mockup: Runtime record list. Uses the real MetaTable + UiPagination with entity-record fixtures.
+ * Toolbar follows the API contract: free-text search, filter on filterable fields, one sort.
+ * CSV import/export exist in the runtime today (client side), so both are offered; bulk actions
+ * are not supported by the API and are deliberately absent.
  */
-import { ref } from 'vue';
-import UiCard from '../components/UiCard.vue';
+import { computed, ref } from 'vue';
+import { Download, Plus, Search, Upload } from 'lucide-vue-next';
 import UiButton from '../components/UiButton.vue';
 import UiInput from '../components/UiInput.vue';
-import UiBadge from '../components/UiBadge.vue';
-import MetaTable from '../components/MetaTable.vue';
+import UiSelect from '../components/UiSelect.vue';
 import UiPagination from '../components/UiPagination.vue';
-import { vehicleFields, firstPage, secondPage, sampleSort, emptyPage } from './_fixtures';
-import type { MetaTableSort, MetaTablePage } from '../components/table';
+import MetaTable from '../components/MetaTable.vue';
+import MockShell from './parts/MockShell.vue';
+import { emptyPage, sampleSort, vehicleFields, vehicleRows } from './_fixtures';
+import type { MetaTablePage, MetaTableSort } from '../components/table';
 
-const columns = vehicleFields.map((field) => ({ field }));
-
-const mockPage = ref<MetaTablePage>(firstPage);
-const mockSort = ref<MetaTableSort>(sampleSort);
+const columns = vehicleFields.filter((f) => f.id !== 'lastService' && f.id !== 'active').map((field) => ({ field }));
 const search = ref('');
+const status = ref('all');
+const sort = ref<MetaTableSort>(sampleSort);
 
-function onSort(sort: MetaTableSort) {
-  mockSort.value = sort;
-}
+const rows = computed(() => {
+  const term = search.value.trim().toLowerCase();
+  const filtered = vehicleRows.filter((r) =>
+    (status.value === 'all' || r.data.status === status.value)
+    && (!term || Object.values(r.data).some((v) => String(v).toLowerCase().includes(term))));
+  const s = sort.value;
+  if (!s) return filtered;
+  return [...filtered].sort((a, b) => (s.direction === 'asc' ? 1 : -1) * String(a.data[s.fieldId]).localeCompare(String(b.data[s.fieldId]), 'th'));
+});
+const page = computed<MetaTablePage>(() => ({ items: rows.value, total: rows.value.length, limit: 25, offset: 0 }));
+const filtering = computed(() => Boolean(search.value || status.value !== 'all'));
+function reset() { search.value = ''; status.value = 'all'; }
 </script>
 
 <template>
@@ -31,140 +41,157 @@ function onSort(sort: MetaTableSort) {
     group="Mockups"
   >
     <Variant title="Data">
-      <div class="mx-auto max-w-[1440px] space-y-6">
-        <!-- Page header -->
-        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-          <div>
-            <h1 class="text-2xl font-semibold">Vehicles</h1>
-            <p class="mt-1 text-sm text-foreground-muted">Browse, search, and manage fleet vehicles.</p>
-          </div>
-          <div class="flex items-center gap-2">
-            <UiButton variant="secondary">Import CSV</UiButton>
-            <UiButton variant="primary">New vehicle</UiButton>
-          </div>
-        </div>
+      <MockShell
+        active="apps"
+        title="Vehicles"
+        description="Browse and manage the vehicles in your fleet."
+        :crumbs="['Apps', 'Fleet Management']"
+      >
+        <template #actions>
+          <UiButton color="neutral">
+            <Upload
+              class="mr-1.5 size-4"
+              aria-hidden="true"
+            />Import CSV
+          </UiButton>
+          <UiButton color="neutral">
+            <Download
+              class="mr-1.5 size-4"
+              aria-hidden="true"
+            />Export
+          </UiButton>
+          <UiButton>
+            <Plus
+              class="mr-1.5 size-4"
+              aria-hidden="true"
+            />New vehicle
+          </UiButton>
+        </template>
 
-        <!-- Toolbar: search + filters -->
-        <div class="flex flex-col sm:flex-row gap-3 sm:items-center">
-          <div class="flex-1">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div class="relative flex-1 sm:max-w-sm">
+            <Search
+              class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-subtle"
+              aria-hidden="true"
+            />
             <UiInput
               v-model="search"
+              class="pl-9"
               type="search"
               placeholder="Search vehicles…"
               aria-label="Search vehicles"
             />
           </div>
-          <UiButton variant="secondary">
-            Status: All
+          <UiSelect
+            v-model="status"
+            class="sm:w-48"
+            aria-label="Filter by status"
+          >
+            <option value="all">
+              Status: all
+            </option>
+            <option value="available">
+              Available
+            </option>
+            <option value="rented">
+              Rented
+            </option>
+            <option value="maintenance">
+              Maintenance
+            </option>
+          </UiSelect>
+          <UiButton
+            v-if="filtering"
+            variant="ghost"
+            @click="reset"
+          >
+            Clear
           </UiButton>
+          <p class="text-sm text-foreground-muted sm:ml-auto">
+            {{ rows.length }} of {{ vehicleRows.length }} vehicles
+          </p>
         </div>
 
-        <!-- Result count -->
-        <p class="text-sm text-foreground-muted">12 records · sorted by Plate ascending</p>
-
-        <!-- Table -->
-        <UiCard class="overflow-hidden p-0">
+        <div class="overflow-hidden rounded-xl border border-border bg-surface">
           <MetaTable
             :columns="columns"
-            :page="mockPage"
-            :sort="mockSort"
+            :page="page"
+            :sort="sort"
             sortable
             clickable
-            @update:sort="onSort"
+            currency="THB"
+            empty-title="No vehicles match"
+            empty-description="Try another keyword or clear the filters."
+            @update:sort="(s) => (sort = s)"
           />
-          <div class="border-t border-border p-4">
+          <div class="border-t border-border px-4 py-3">
             <UiPagination
-              :total="mockPage.total"
-              :limit="mockPage.limit"
-              :offset="mockPage.offset"
-            />
-          </div>
-        </UiCard>
-      </div>
-    </Variant>
-
-    <Variant title="No Results">
-      <div class="mx-auto max-w-[1440px] space-y-6">
-        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-          <div>
-            <h1 class="text-2xl font-semibold">Vehicles</h1>
-            <p class="mt-1 text-sm text-foreground-muted">Browse, search, and manage fleet vehicles.</p>
-          </div>
-        </div>
-
-        <div class="flex flex-col sm:flex-row gap-3 sm:items-center">
-          <div class="flex-1">
-            <UiInput
-              value="zzz-no-match"
-              type="search"
-              aria-label="Search vehicles"
+              :total="page.total"
+              :limit="page.limit"
+              :offset="page.offset"
             />
           </div>
         </div>
-
-        <UiCard class="p-0">
-          <MetaTable
-            :columns="columns"
-            :page="emptyPage"
-            empty-title="No vehicles match your search"
-            empty-description="Try a different keyword or clear the filters."
-          />
-        </UiCard>
-      </div>
+      </MockShell>
     </Variant>
 
-    <Variant title="Empty Collection">
-      <div class="mx-auto max-w-[1440px] space-y-6">
-        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-          <div>
-            <h1 class="text-2xl font-semibold">Vehicles</h1>
-            <p class="mt-1 text-sm text-foreground-muted">Browse, search, and manage fleet vehicles.</p>
+    <Variant title="Empty collection">
+      <MockShell
+        active="apps"
+        title="Vehicles"
+        description="Browse and manage the vehicles in your fleet."
+        :crumbs="['Apps', 'Fleet Management']"
+      >
+        <template #actions>
+          <UiButton>New vehicle</UiButton>
+        </template>
+        <div class="rounded-xl border border-dashed border-border-strong bg-surface px-6 py-14 text-center">
+          <h2 class="text-lg font-semibold">
+            No vehicles yet
+          </h2>
+          <p class="mx-auto mt-1 max-w-md text-sm text-foreground-muted">
+            Add the first vehicle, or import several at once from a CSV file.
+          </p>
+          <div class="mt-5 flex justify-center gap-2">
+            <UiButton>New vehicle</UiButton><UiButton color="neutral">
+              Import CSV
+            </UiButton>
           </div>
-          <UiButton variant="primary">New vehicle</UiButton>
         </div>
-
-        <UiCard class="p-0">
-          <MetaTable
-            :columns="columns"
-            :page="emptyPage"
-            empty-title="No vehicles yet"
-            empty-description="Create your first vehicle to start tracking the fleet."
-          />
-        </UiCard>
-      </div>
+      </MockShell>
     </Variant>
 
     <Variant title="Loading">
-      <div class="mx-auto max-w-[1440px] space-y-6">
-        <div>
-          <h1 class="text-2xl font-semibold">Vehicles</h1>
-          <p class="mt-1 text-sm text-foreground-muted">Browse, search, and manage fleet vehicles.</p>
-        </div>
-        <UiCard class="p-0">
+      <MockShell
+        active="apps"
+        title="Vehicles"
+        :crumbs="['Apps', 'Fleet Management']"
+      >
+        <div class="overflow-hidden rounded-xl border border-border bg-surface">
           <MetaTable
             :columns="columns"
             :page="emptyPage"
             loading
           />
-        </UiCard>
-      </div>
+        </div>
+      </MockShell>
     </Variant>
 
     <Variant title="Error">
-      <div class="mx-auto max-w-[1440px] space-y-6">
-        <div>
-          <h1 class="text-2xl font-semibold">Vehicles</h1>
-          <p class="mt-1 text-sm text-foreground-muted">Browse, search, and manage fleet vehicles.</p>
-        </div>
-        <UiCard class="p-0">
+      <MockShell
+        active="apps"
+        title="Vehicles"
+        :crumbs="['Apps', 'Fleet Management']"
+      >
+        <div class="overflow-hidden rounded-xl border border-border bg-surface">
           <MetaTable
             :columns="columns"
             :page="emptyPage"
             error="Could not load vehicles. The server may be unreachable."
-            :retry="() => console.log('retry')"
+            :retry="() => undefined"
           />
-        </UiCard>
-      </div>
+        </div>
+      </MockShell>
     </Variant>
   </Story>
 </template>

@@ -38,7 +38,7 @@ const referenceLabel = (id: string) => people.find((p) => p.value === id)?.label
 <template>
   <Story
     title="Fields/All 23 field types"
-    layout="{ type: 'single', iframe: false }"
+    :layout="{ type: 'single', iframe: false }"
   >
     <Variant title="Inputs">
       <div class="grid gap-4 p-4 md:grid-cols-2">

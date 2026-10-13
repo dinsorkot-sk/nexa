@@ -10,7 +10,7 @@ import UiTooltip from './UiTooltip.vue';
       <div class="p-4">
         <UiPopover closable>
           <template #trigger>
-            <UiButton variant="secondary">
+            <UiButton color="neutral">
               Open popover
             </UiButton>
           </template>
@@ -29,7 +29,7 @@ import UiTooltip from './UiTooltip.vue';
           text="Deletes it for good"
           side="bottom"
         >
-          <UiButton variant="danger">
+          <UiButton color="error">
             Delete
           </UiButton>
         </UiTooltip>

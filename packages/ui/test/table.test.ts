@@ -70,6 +70,26 @@ describe('MetaTable', () => {
     expect(wrapper.find('th').attributes('aria-sort')).toBeUndefined();
   });
 
+  it('keeps comfortable as the default density with 36 px-style vertical padding', () => {
+    const wrapper = mountWithI18n(MetaTable, {
+      props: { columns: [{ field: textField }], page: { items: rows, total: 2, limit: 25, offset: 0 } },
+    });
+    const cell = wrapper.findAll('tbody td')[0]!;
+    expect(cell.classes()).toContain('py-2');
+    expect(cell.classes()).not.toContain('py-1');
+    wrapper.unmount();
+  });
+
+  it('uses compact vertical padding when density is compact, and keeps horizontal padding', () => {
+    const wrapper = mountWithI18n(MetaTable, {
+      props: { columns: [{ field: textField }], page: { items: rows, total: 2, limit: 25, offset: 0 }, density: 'compact' },
+    });
+    const cell = wrapper.findAll('tbody td')[0]!;
+    expect(cell.classes()).toEqual(expect.arrayContaining(['py-1', 'px-3']));
+    expect(cell.classes()).not.toContain('py-2');
+    wrapper.unmount();
+  });
+
   it('shows skeleton rows while loading and no data', () => {
     const wrapper = mountWithI18n(MetaTable, { props: { columns: [{ field: textField }], page, loading: true } }, 'en');
     expect(wrapper.text()).not.toContain('Alpha');

@@ -64,7 +64,7 @@
       <UiButton
         v-if="cancel"
         type="button"
-        variant="secondary"
+        color="neutral"
         :disabled="submitting"
         @click="cancel"
       >

@@ -31,7 +31,7 @@
         </option>
       </select>
       <UiButton
-        variant="secondary"
+        color="neutral"
         size="sm"
         :disabled="disabled || !hasPrev"
         :aria-label="t('pagination.prev')"
@@ -40,7 +40,7 @@
         <span aria-hidden="true">‹</span>
       </UiButton>
       <UiButton
-        variant="secondary"
+        color="neutral"
         size="sm"
         :disabled="disabled || !hasNext"
         :aria-label="t('pagination.next')"

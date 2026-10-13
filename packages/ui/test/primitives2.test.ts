@@ -82,6 +82,27 @@ describe('status primitives', () => {
     expect(mount(UiAlert, { props: { tone: 'success' }, slots: { default: 'x' } }).attributes('role')).toBe('status');
   });
 
+  it('UiAlert keeps role=alert when danger is passed as color, and error maps to danger', () => {
+    expect(mount(UiAlert, { props: { color: 'danger' }, slots: { default: 'x' } }).attributes('role')).toBe('alert');
+    expect(mount(UiAlert, { props: { color: 'error' }, slots: { default: 'x' } }).attributes('role')).toBe('alert');
+  });
+
+  it('UiAlert defaults to the soft variant and solid uses the strong fill', () => {
+    const soft = mount(UiAlert, { props: { tone: 'warning' }, slots: { default: 'x' } }).classes();
+    expect(soft).toEqual(expect.arrayContaining(['bg-warning-soft']));
+    const solid = mount(UiAlert, { props: { variant: 'solid', color: 'danger' }, slots: { default: 'x' } }).classes();
+    expect(solid).toEqual(expect.arrayContaining(['bg-danger', 'text-danger-foreground']));
+    expect(solid).not.toContain('bg-danger-soft');
+  });
+
+  it('UiAlert subtle and outline do not use the solid fill', () => {
+    const outline = mount(UiAlert, { props: { variant: 'outline', color: 'danger' }, slots: { default: 'x' } }).classes();
+    expect(outline).toContain('bg-surface');
+    expect(outline).not.toContain('bg-danger');
+    const subtle = mount(UiAlert, { props: { variant: 'subtle', color: 'warning' }, slots: { default: 'x' } }).classes();
+    expect(subtle).toContain('bg-surface-muted');
+  });
+
   it('UiEmptyState shows a localised default and accepts custom content', () => {
     expect(mountWithI18n(UiEmptyState, {}, 'th').text()).toContain('ไม่พบผลลัพธ์');
     expect(mountWithI18n(UiEmptyState, { slots: { default: 'Nothing yet', description: 'Add one' } }, 'en').text()).toContain('Nothing yet');

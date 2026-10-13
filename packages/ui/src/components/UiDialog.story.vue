@@ -28,7 +28,7 @@ const open = ref(false);
               Cancel
             </UiButton>
             <UiButton
-              variant="danger"
+              color="error"
               @click="open = false"
             >
               Delete

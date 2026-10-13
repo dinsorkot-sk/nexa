@@ -6,15 +6,15 @@ These Histoire stories are the review checkpoint before rebuilding `apps/web`. T
 
 | Story | Screens and states |
 |---|---|
-| `AppShell.story.vue` | Shared desktop shell and narrow-viewport layout |
-| `WorkspaceHome.story.vue` | Workspace home and enabled/draft module launcher |
+| `WorkspaceHome.story.vue` | Workspace home and enabled/draft module launcher; first run with no modules |
 | `Auth.story.vue` | Sign in, organization selection, sign up |
-| `ModulesIndex.story.vue` | Realistic module index, search/status filtering, empty, loading, error, no-results, pagination |
-| `ModuleDetail.story.vue` | Module overview, entities, relations |
-| `DefinitionEditor.story.vue` | Entity, field, and relation forms; lifecycle/archive confirmation |
-| `RecordList.story.vue` | Record list, search/no results, empty collection, loading, error |
-| `RecordForm.story.vue` | Create, edit, validation errors, stale-write conflict, viewer/read-only |
-| `RecordDetail.story.vue` | Record details, relations, activity, empty activity, read-only relation links |
+| `ModulesIndex.story.vue` | Module index: search/status filtering, empty workspace, loading, error |
+| `ModuleDetail.story.vue` | Module overview, entities, relations; lifecycle transitions |
+| `DefinitionEditor.story.vue` | Field and relation editors |
+| `RecordList.story.vue` | Record list: search/filter, empty collection, loading, error |
+| `Records.story.vue` | Record detail, create, edit, validation errors, stale-write conflict (409), viewer read-only |
+
+`parts/MockShell.vue` is the shared application shell used by every story. `parts/data.ts` and `parts/ModuleStatus.vue` hold the module-builder fixtures. `_fixtures.ts` holds the vehicle entity fixtures for record stories. `AppShell`, `RecordForm`, and `RecordDetail` stories were folded into the shell and `Records` story and no longer exist as separate files.
 
 The adjacent component stories exercise individual UI primitives. Keep application-level composition here and reusable behavior in `packages/ui/src/components`. The modules index must use module fixtures, while record stories use entity records; do not mix these two domains to simulate data.
 

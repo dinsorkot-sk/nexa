@@ -5,11 +5,14 @@ import UiFieldWrapper from './UiFieldWrapper.vue';
 import UiInput from './UiInput.vue';
 import UiSkeleton from './UiSkeleton.vue';
 import UiSpinner from './UiSpinner.vue';
+
+const alertVariants = ['solid', 'soft', 'outline', 'subtle'] as const;
+const alertColors = ['primary', 'neutral', 'success', 'warning', 'danger'] as const;
 </script>
 
 <template>
   <Story title="Primitives/Status and feedback">
-    <Variant title="Alerts">
+    <Variant title="Alerts (tones)">
       <div class="grid max-w-md gap-2 p-4">
         <UiAlert>Neutral note</UiAlert>
         <UiAlert tone="success">
@@ -21,6 +24,28 @@ import UiSpinner from './UiSpinner.vue';
         <UiAlert tone="danger">
           Something failed
         </UiAlert>
+      </div>
+    </Variant>
+    <Variant title="Alert variants × colors">
+      <div class="grid max-w-2xl gap-4 p-4">
+        <div
+          v-for="variant in alertVariants"
+          :key="variant"
+        >
+          <p class="mb-1 text-xs font-medium text-foreground-muted">
+            {{ variant }}
+          </p>
+          <div class="grid gap-1.5">
+            <UiAlert
+              v-for="color in alertColors"
+              :key="color"
+              :variant="variant"
+              :color="color"
+            >
+              {{ variant }} {{ color }}
+            </UiAlert>
+          </div>
+        </div>
       </div>
     </Variant>
     <Variant title="Loading">

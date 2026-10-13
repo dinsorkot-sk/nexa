@@ -7,7 +7,7 @@
             v-for="column in columns"
             :key="column.field.id"
             :style="{ width: column.width ? `${column.width}px` : undefined }"
-            class="px-3 py-2 text-left font-medium text-foreground-muted"
+            :class="['px-3 text-left font-medium text-foreground-muted', cellPadding]"
             :aria-sort="sortable && isSortable(column.field) ? ariaSort(column.field.id) : undefined"
           >
             <button
@@ -39,7 +39,7 @@
             <td
               v-for="column in columns"
               :key="column.field.id"
-              class="px-3 py-2"
+              :class="['px-3', cellPadding]"
             >
               <UiSkeleton class="h-4 w-full max-w-32" />
             </td>
@@ -52,15 +52,14 @@
               class="px-3 py-8"
             >
               <UiAlert
-                variant="error"
-                role="alert"
+                tone="danger"
               >
                 {{ error }}
               </UiAlert>
               <UiButton
                 v-if="retry"
                 class="mt-3"
-                variant="secondary"
+                color="neutral"
                 size="sm"
                 @click="retry"
               >
@@ -95,7 +94,7 @@
             <td
               v-for="column in columns"
               :key="column.field.id"
-              class="px-3 py-2 align-middle"
+              :class="['px-3 align-middle', cellPadding]"
               :tabindex="clickable && column === columns[0] ? 0 : undefined"
             >
               <MetaFieldValue
@@ -148,6 +147,11 @@ const props = defineProps<{
   emptyDescription?: string;
   /** Row click/Enter opens the record; also puts a focusable cell in the first column. */
   clickable?: boolean;
+  /**
+   * Row density. `comfortable` (36 px rows, measured) is the default and matches existing callers; `compact` (28 px, measured) suits
+   * scan-heavy screens. Both use the same token-based classes, so the choice is per table, not per cell.
+   */
+  density?: 'comfortable' | 'compact';
   class?: string;
 }>();
 
@@ -161,6 +165,8 @@ const tableId = useId();
 const rows = computed(() => (props.loading ? [] : props.page.items));
 const skeletonRows = 5;
 const clickable = computed(() => Boolean(props.clickable));
+// Vertical padding only: horizontal padding stays px-3 so column alignment is identical in both densities.
+const cellPadding = computed(() => (props.density === 'compact' ? 'py-1' : 'py-2'));
 /**
  * Hidden fields never render, even if a caller passes them: the server redacts them from
  * responses, and the table must not become the place they leak from.

@@ -33,9 +33,29 @@ describe('UiButton', () => {
   });
 
   it('maps each variant to semantic classes only', () => {
-    expect(mount(UiButton, { props: { variant: 'danger' } }).classes()).toContain('bg-danger');
-    expect(mount(UiButton, { props: { variant: 'secondary' } }).classes()).toContain('bg-surface-muted');
-    expect(mount(UiButton, { props: { variant: 'ghost' } }).classes()).toContain('text-foreground-muted');
+    expect(mount(UiButton, { props: { color: 'error' } }).classes()).toContain('bg-danger');
+    expect(mount(UiButton, { props: { color: 'neutral' } }).classes()).toContain('bg-surface-muted');
+    expect(mount(UiButton, { props: { variant: 'ghost', color: 'neutral' } }).classes()).toContain('text-foreground-muted');
+    expect(mount(UiButton, { props: { variant: 'ghost' } }).classes()).toContain('text-primary');
+  });
+
+  it('keeps primary on the Emerald token and never uses raw palette classes', () => {
+    const primary = mount(UiButton, { props: { color: 'primary' } }).classes();
+    expect(primary).toContain('bg-primary');
+    expect(primary.some((c) => /(^|-)(emerald|slate|rose|amber)-\d/.test(c))).toBe(false);
+  });
+
+  it('supports block and square layout and Nuxt-style xs/xl sizes', () => {
+    expect(mount(UiButton, { props: { block: true } }).classes()).toContain('w-full');
+    expect(mount(UiButton, { props: { square: true, size: 'md' } }).classes()).toContain('size-8');
+    expect(mount(UiButton, { props: { size: 'xs' } }).classes()).toContain('text-xs');
+    expect(mount(UiButton, { props: { size: 'xl' } }).classes()).toContain('text-base');
+  });
+
+  it('renders leading and trailing icon components', () => {
+    const icon = { render: () => null };
+    const wrapper = mount(UiButton, { props: { leadingIcon: icon, trailingIcon: icon }, slots: { default: 'Go' } });
+    expect(wrapper.findAllComponents(icon)).toHaveLength(2);
   });
 
   it('uses readable text in the compact size', () => {
@@ -96,6 +116,14 @@ describe('display primitives', () => {
     expect(wrapper.classes()).toEqual(expect.arrayContaining(['bg-surface', 'border-border']));
   });
 
+  it('UiCard defaults to the elevated card and flat drops the shadow', () => {
+    const card = mount(UiCard, { slots: { default: 'Body' } }).classes();
+    expect(card).toContain('shadow-sm');
+    const flat = mount(UiCard, { props: { variant: 'flat' }, slots: { default: 'Body' } }).classes();
+    expect(flat).not.toContain('shadow-sm');
+    expect(flat).toEqual(expect.arrayContaining(['bg-surface-muted', 'border-border']));
+  });
+
   it.each([
     ['neutral', 'bg-neutral-soft'],
     ['success', 'bg-success-soft'],
@@ -103,6 +131,39 @@ describe('display primitives', () => {
     ['danger', 'bg-danger-soft'],
   ] as const)('UiBadge %s uses %s', (tone, cls) => {
     expect(mount(UiBadge, { props: { tone }, slots: { default: 'x' } }).classes()).toContain(cls);
+  });
+
+  it('UiBadge defaults to the soft variant and md size', () => {
+    const classes = mount(UiBadge, { props: { tone: 'danger' }, slots: { default: 'x' } }).classes();
+    expect(classes).toEqual(expect.arrayContaining(['bg-danger-soft', 'text-xs']));
+    expect(classes).not.toContain('bg-danger');
+  });
+
+  it('UiBadge solid uses the danger fill with its foreground, and color alias matches tone', () => {
+    const solid = mount(UiBadge, { props: { variant: 'solid', color: 'danger' }, slots: { default: 'x' } }).classes();
+    expect(solid).toEqual(expect.arrayContaining(['bg-danger', 'text-danger-foreground']));
+    const alias = mount(UiBadge, { props: { variant: 'soft', tone: 'danger' }, slots: { default: 'x' } }).classes();
+    const color = mount(UiBadge, { props: { variant: 'soft', color: 'danger' }, slots: { default: 'x' } }).classes();
+    expect(alias).toEqual(color);
+  });
+
+  it('UiBadge treats error as a synonym of danger', () => {
+    const error = mount(UiBadge, { props: { color: 'error' }, slots: { default: 'x' } }).classes();
+    expect(error).toContain('bg-danger-soft');
+  });
+
+  it('UiBadge size scales the text and padding', () => {
+    const xs = mount(UiBadge, { props: { size: 'xs' }, slots: { default: 'x' } }).classes();
+    const xl = mount(UiBadge, { props: { size: 'xl' }, slots: { default: 'x' } }).classes();
+    expect(xs).toContain('text-[10px]');
+    expect(xl).toContain('text-base');
+  });
+
+  it('UiBadge outline and subtle keep the status colour inside a ring', () => {
+    const outline = mount(UiBadge, { props: { variant: 'outline', color: 'primary' }, slots: { default: 'x' } }).classes();
+    expect(outline).toEqual(expect.arrayContaining(['text-primary', 'ring-1', 'ring-inset']));
+    const subtle = mount(UiBadge, { props: { variant: 'subtle', color: 'danger' }, slots: { default: 'x' } }).classes();
+    expect(subtle).toEqual(expect.arrayContaining(['ring-1', 'ring-inset']));
   });
 });
 
