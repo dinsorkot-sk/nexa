@@ -14,4 +14,6 @@ export default defineConfig({
     { label: 'Theme background', color: 'var(--nx-background)', contrastColor: 'var(--nx-foreground)' },
   ],
   storyMatch: ['src/**/*.story.vue'],
+  // WSL2 filesystem I/O is slow; reduce thread contention during collection.
+  collectMaxThreads: 1,
 });

@@ -1,0 +1,24 @@
+diff --git a/dist/node/collect/index.js b/dist/node/collect/index.js
+index ade275094092af3809be501d6a3ad706baa6144d..226e501275be7c9ecf6b90236540e324853032a6 100755
+--- a/dist/node/collect/index.js
++++ b/dist/node/collect/index.js
+@@ -54,6 +54,7 @@ export function useCollectStories(options, ctx) {
+         }, {
+             post: data => port.postMessage(data),
+             on: data => port.on('message', data),
++            timeout: -1,
+         });
+         return {
+             port,
+diff --git a/dist/node/collect/worker.js b/dist/node/collect/worker.js
+index 2f5a2fda0d78fa966f2d8aa00fd64c12a0a993e6..28fbb0eba23bb6f20541ee2ce205ade21b35dfbc 100755
+--- a/dist/node/collect/worker.js
++++ b/dist/node/collect/worker.js
+@@ -22,6 +22,7 @@ export default async (payload) => {
+     _rpc = createBirpc({}, {
+         post: data => payload.port.postMessage(data),
+         on: data => payload.port.on('message', data),
++        timeout: -1,
+     });
+     const runner = _runner ?? (_runner = new ViteNodeRunner({
+         root: payload.root,
