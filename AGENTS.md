@@ -39,12 +39,9 @@ pnpm exec vitest run --project @nexa/server --reporter=dot --testTimeout=30000 -
 
 For detailed architecture and repository conventions, see [CLAUDE.md](CLAUDE.md). Historical phase scope and verification notes live in [docs/plans/README.md](docs/plans/README.md).
 
-## UX/UI design documentation
+## UX/UI
 
-- Before doing any UI/UX implementation that has been explicitly authorized by the active project plan, read [`docs/design.md`](docs/design.md) and [`docs/plans/ux-ui-redesign.md`](docs/plans/ux-ui-redesign.md), along with `CLAUDE.md` and `docs/plans/README.md`.
-- `docs/design.md` is the shared design and implementation standard: semantic theme tokens, typography, spacing, page patterns, responsive behavior, accessibility, interaction states, component reuse, and definition of done.
-- `docs/plans/ux-ui-redesign.md` describes UX objectives, target information architecture, scope, and suggested order. Use it to decide what to improve; use `docs/design.md` to decide how to design and implement it.
-- Follow the active phase sequence in `docs/plans/README.md`. These UX/UI documents do not authorize starting a new phase, branch, or recreating removed workspaces by themselves.
-- The current project status says `apps/web` and `apps/cli` were intentionally removed. Do not recreate them unless explicitly asked. Inspect the current repository before assuming UI workspaces, routes, or components exist.
-- When UI work is authorized, reuse existing design tokens, shared UI primitives, metadata-driven renderers, localization, and established architecture. Do not introduce a second component library or hard-code domain-specific business logic into generic UI.
+- UI is built with Nuxt UI v4 through the `packages/ui` layer. Use its `U*` components, color tokens (`primary`/`neutral`), and locales; do not add custom design tokens or hand-built primitives.
+- Follow the active phase sequence in `docs/plans/README.md`. UI work does not authorize starting a new phase or branch by itself.
+- `apps/web` and `apps/cli` were intentionally removed on 2026-10-09. Do not recreate them unless explicitly asked.
 - Preserve existing user changes. Check `git status --short` before editing, run applicable checks, and report what was changed and what remains unverified.

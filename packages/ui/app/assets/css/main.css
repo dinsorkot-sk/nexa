@@ -1,0 +1,8 @@
+@import 'tailwindcss';
+@import '@nuxt/ui';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/noto-sans-thai';
+
+@theme {
+  --font-sans: 'Inter Variable', 'Noto Sans Thai Variable', ui-sans-serif, system-ui, sans-serif;
+}

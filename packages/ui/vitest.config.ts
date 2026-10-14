@@ -1,14 +1,11 @@
 import vue from '@vitejs/plugin-vue';
+import ui from '@nuxt/ui/vite';
 import { defineConfig } from 'vitest/config';
 
-// Fixed so datetime tests are deterministic: Bangkok is UTC+7 with no daylight saving.
-process.env.TZ = 'Asia/Bangkok';
-
+// Components are mounted outside Nuxt, so the Nuxt UI Vite plugin supplies the styles and component transforms.
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), ui()],
   test: {
-    globals: true,
-    // Components are mounted for real, so they need a DOM.
     environment: 'happy-dom',
     testTimeout: 30_000,
   },

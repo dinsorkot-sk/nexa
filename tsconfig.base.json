@@ -11,7 +11,6 @@
       "@nexa/meta": ["./packages/meta/src/index.ts"],
       "@nexa/engine/*": ["./packages/engine/*"],
       "@nexa/db": ["./packages/db/src/index.ts"],
-      "@nexa/ui": ["./packages/ui/src/index.ts"],
       "@nexa/auth": ["./packages/auth/src/index.ts"],
       "@nexa/sdk": ["./packages/sdk/src/index.ts"],
       "@nexa/server": ["./apps/server/hono/app.ts"],

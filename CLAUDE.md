@@ -12,7 +12,7 @@ Nexa is a metadata-driven app platform. Backend hardening is the current focus. 
 - `packages/meta`: source of truth for Zod schemas and TS types for modules, entities, fields, views, workflows, permissions, and related metadata.
 - `packages/engine`: server-side domain core, organised as plain subfolders (not a separate package): entity, query, permission, workflow, hooks.
 - `packages/db`: Drizzle on PostgreSQL; PGlite is the local development default when `DATABASE_URL` is unset. It also owns the `db:migrate`, `db:seed`, and `db:check` commands, replacing the removed CLI workspace. Shared-schema tenancy scopes generic JSONB-backed records, metadata, and module definitions; use `tenantRepository` for tenant record/link access, `moduleRepository` for module lifecycle operations, and `definitionRepository` for a module's entity/field/relation definitions (stored in `nexa_metadata_definitions`, editable only while the module is draft/review, validated by `definition-integrity.ts` on every write). Migrations are forward-only under `packages/db/migrations`.
-- `packages/ui`: shadcn-vue + Tailwind primitives and metadata-driven field/view renderers; keep those layers separate.
+- `packages/ui`: Nuxt layer built on Nuxt UI v4 (`extends: ['@nexa/ui']`; theme primary emerald, neutral slate). Build components on Nuxt UI (`U*`) components; do not hand-build primitives or add a second component library. Metadata-driven renderers are rebuilt on top of Nuxt UI in later phases.
 - `packages/auth` and `packages/sdk`: authentication utilities and typed API client.
 - `templates/{inventory,crm,hr}`: metadata packages, not built-in domain logic. `integrations/*` provide workflow actions.
 
@@ -49,15 +49,12 @@ Run tests directly if Turbo cannot spawn child processes in the current shell:
 - Integrations are workflow actions, not special cases in the engine.
 - Commit lockfiles. Do not commit `node_modules/`, `.nuxt/`, `.output/`, `dist/`, `.env*`, or `.data/`.
 
-## UX/UI design documentation
+## UX/UI
 
-- For any explicitly authorized UX/UI task, read [`docs/design.md`](docs/design.md) and [`docs/plans/ux-ui-redesign.md`](docs/plans/ux-ui-redesign.md) before proposing or implementing changes. Also follow `AGENTS.md` and the active sequence in [`docs/plans/README.md`](docs/plans/README.md).
-- `docs/design.md` is the shared implementation reference for visual language, semantic tokens, typography, spacing, reusable components, responsive layouts, accessibility, localization, interaction states, implementation workflow, and definition of done.
-- `docs/plans/ux-ui-redesign.md` is the UX improvement plan: goals, information architecture, scope, and suggested sequence. It does not override the active master plan.
-- Backend hardening remains the current focus. Do not start a UX/UI phase, create a new branch, or reorder the master plan unless explicitly asked and permitted by the project workflow.
-- `apps/web` and `apps/cli` were intentionally removed on 2026-10-09. Do not assume they exist or recreate them unless explicitly asked. Inspect current files, workspace configuration, and routes first.
-- If UI work is authorized, reuse the current UI package, design tokens, localization, and metadata-driven renderers. Do not add a parallel component library, dead navigation, fabricated data, or domain-specific logic to generic platform UI.
-- Before editing, inspect `git status --short` and preserve unrelated changes. After editing, run relevant tests/typecheck/lint/build gates supported by the current workspace and report exact results; never claim unrun checks passed.
+- UI is built with Nuxt UI v4 through the `packages/ui` layer. Use its `U*` components, color tokens (`primary`/`neutral`), and locales (`@nuxt/ui/locale`); do not add custom design tokens or hand-built primitives.
+- Verify UI changes in the playground (`pnpm --filter @nexa/ui dev`), not only through tests.
+- Follow the active phase sequence in [`docs/plans/README.md`](docs/plans/README.md). UI work does not authorize starting a new phase or branch by itself.
+- `apps/web` and `apps/cli` were intentionally removed on 2026-10-09. Do not recreate them unless explicitly asked.
 
 ## Git workflow
 

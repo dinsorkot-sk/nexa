@@ -12,5 +12,3 @@ dist
 # Claude Code local settings
 .claude/settings.local.json
 
-# Histoire playground build output
-.histoire

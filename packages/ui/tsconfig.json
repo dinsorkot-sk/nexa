@@ -1,9 +1,0 @@
-{
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "outDir": "./dist",
-    "jsx": "preserve",
-    "allowArbitraryExtensions": true
-  },
-  "include": ["src/**/*", "test/**/*", "histoire.config.ts", "histoire.setup.ts"]
-}
