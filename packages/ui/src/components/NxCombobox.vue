@@ -1,0 +1,241 @@
+<script setup lang="ts">
+import { Check, ChevronDown } from 'lucide-vue-next';
+import {
+  ComboboxAnchor, ComboboxContent, ComboboxInput, ComboboxItem, ComboboxItemIndicator, ComboboxPortal, ComboboxRoot,
+  ComboboxTrigger, ComboboxViewport,
+} from 'reka-ui';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { comboboxMaxLimit, type ComboboxOption, type LoadOptions } from '../lib/combobox';
+import { useNxMessages } from '../lib/locale';
+import NxChip from './NxChip.vue';
+
+/**
+ * Searchable picker. Pass `options` for a short static list, or `loadOptions` to search on the server. The component
+ * never calls an API itself. `multiple` stores an array of ids and shows each chosen label as a removable chip.
+ * Stored values are ids; labels are display only. `label` is the accessible name and is required.
+ */
+const props = withDefaults(defineProps<{
+  modelValue?: string | string[] | null;
+  multiple?: boolean;
+  options?: ComboboxOption[];
+  loadOptions?: LoadOptions;
+  /** Labels for values already chosen, so they show before any search has run. */
+  selected?: ComboboxOption[];
+  label: string;
+  placeholder?: string;
+  disabled?: boolean;
+  invalid?: boolean;
+  id?: string;
+  describedBy?: string;
+  debounceMs?: number;
+}>(), {
+  modelValue: undefined,
+  multiple: false,
+  options: undefined,
+  loadOptions: undefined,
+  selected: () => [],
+  placeholder: undefined,
+  disabled: false,
+  invalid: false,
+  id: undefined,
+  describedBy: undefined,
+  debounceMs: 250,
+});
+
+const emit = defineEmits<{ 'update:modelValue': [value: string | string[] | undefined] }>();
+const messages = useNxMessages();
+
+type Status = 'idle' | 'loading' | 'ready' | 'error';
+const status = ref<Status>('idle');
+const items = ref<ComboboxOption[]>([]);
+const search = ref('');
+const open = ref(false);
+
+/** Every label seen so far, so a chosen value keeps its label after the option list changes. */
+const labels = new Map<string, string>();
+function remember(list: ComboboxOption[]) { for (const item of list) labels.set(item.value, item.label); }
+watch(() => props.selected, (list) => remember(list ?? []), { immediate: true, deep: true });
+watch(() => props.options, (list) => remember(list ?? []), { immediate: true, deep: true });
+
+/** Without a server search, filter the static list on the client. */
+const fetcher: LoadOptions = props.loadOptions ?? (async (term) => {
+  const needle = term.trim().toLowerCase();
+  return (props.options ?? []).filter((option) => option.label.toLowerCase().includes(needle));
+});
+
+const selectedValues = computed<string[]>(() => {
+  if (props.multiple) return Array.isArray(props.modelValue) ? props.modelValue : [];
+  return typeof props.modelValue === 'string' && props.modelValue ? [props.modelValue] : [];
+});
+const labelOf = (value: string) => labels.get(value) ?? value;
+const chips = computed(() => (props.multiple ? selectedValues.value.map((value) => ({ value, label: labelOf(value) })) : []));
+const rootValue = computed(() => (props.multiple ? selectedValues.value : (selectedValues.value[0] ?? undefined)));
+const displayValue = (value: unknown) => (typeof value === 'string' ? labelOf(value) : '');
+/** Filtering is done by the fetcher; every returned item is shown unchanged. */
+const keepAll = (list: unknown) => list as never;
+
+const anchorClass = computed(() => [
+  'flex min-h-9 w-full flex-wrap items-center gap-1 rounded-ui border bg-ui-bg px-2 py-1 text-sm text-ui-text-highlighted focus-within:ring-2 focus-within:ring-ui-primary/50',
+  props.invalid ? 'border-ui-error' : 'border-ui-border-accented',
+  props.disabled && 'cursor-not-allowed opacity-50',
+]);
+
+// Each request gets a sequence number and an AbortController. Only the newest may update the list, so a slow response
+// to an earlier search can never overwrite the results of a later one.
+let latest = 0;
+let controller: AbortController | undefined;
+let timer: ReturnType<typeof setTimeout> | undefined;
+
+async function run(term: string) {
+  const mine = ++latest;
+  controller?.abort();
+  controller = new AbortController();
+  status.value = 'loading';
+  try {
+    const result = await fetcher(term, { limit: comboboxMaxLimit, signal: controller.signal });
+    if (mine !== latest) return;
+    items.value = result.slice(0, comboboxMaxLimit);
+    remember(items.value);
+    status.value = 'ready';
+  } catch {
+    if (mine !== latest) return;
+    items.value = [];
+    status.value = 'error';
+  }
+}
+
+function onSearch(term: string) {
+  search.value = term;
+  if (!open.value) return;
+  clearTimeout(timer);
+  timer = setTimeout(() => { void run(term); }, props.debounceMs);
+}
+
+function onOpenChange(next: boolean) {
+  open.value = next;
+  if (next) {
+    clearTimeout(timer);
+    void run(search.value);
+  }
+}
+
+function onSelect(value: unknown) {
+  if (props.multiple) {
+    emit('update:modelValue', Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []);
+    search.value = '';
+  } else {
+    emit('update:modelValue', typeof value === 'string' && value ? value : undefined);
+    search.value = typeof value === 'string' ? labelOf(value) : '';
+    open.value = false;
+  }
+}
+
+function removeValue(value: string) {
+  emit('update:modelValue', selectedValues.value.filter((item) => item !== value));
+}
+
+onBeforeUnmount(() => {
+  clearTimeout(timer);
+  controller?.abort();
+  latest += 1;
+});
+</script>
+
+<template>
+  <ComboboxRoot
+    :model-value="rootValue"
+    :multiple="multiple"
+    :open="open"
+    :search-term="search"
+    :filter-function="keepAll"
+    :display-value="displayValue"
+    :disabled="disabled"
+    :reset-search-term-on-blur="false"
+    :reset-search-term-on-select="false"
+    @update:model-value="onSelect"
+    @update:open="onOpenChange"
+    @update:search-term="onSearch"
+  >
+    <ComboboxAnchor :class="anchorClass">
+      <NxChip
+        v-for="item in chips"
+        :key="item.value"
+        removable
+        :remove-label="messages.remove(item.label)"
+        @remove="removeValue(item.value)"
+      >
+        {{ item.label }}
+      </NxChip>
+      <ComboboxInput
+        :id="id"
+        :aria-label="label"
+        :aria-describedby="describedBy"
+        :aria-invalid="invalid || undefined"
+        :placeholder="chips.length ? undefined : placeholder"
+        :disabled="disabled"
+        class="min-w-24 flex-1 bg-transparent px-1 py-1 outline-none placeholder:text-ui-text-muted"
+      />
+      <ComboboxTrigger
+        :aria-label="messages.openList"
+        :disabled="disabled"
+        class="rounded px-1 text-ui-text-muted outline-none focus-visible:ring-2 focus-visible:ring-ui-primary"
+      >
+        <ChevronDown
+          class="size-4"
+          aria-hidden="true"
+        />
+      </ComboboxTrigger>
+    </ComboboxAnchor>
+    <ComboboxPortal>
+      <ComboboxContent
+        position="popper"
+        :side-offset="4"
+        class="z-50 w-[var(--reka-combobox-trigger-width)] overflow-hidden rounded-ui border border-ui-border bg-ui-bg text-ui-text shadow-lg"
+      >
+        <ComboboxViewport class="max-h-64 overflow-y-auto p-1">
+          <div
+            v-if="status === 'loading'"
+            role="status"
+            class="px-3 py-2 text-sm text-ui-text-muted"
+          >
+            {{ messages.loading }}
+          </div>
+          <div
+            v-else-if="status === 'error'"
+            role="alert"
+            class="flex items-center justify-between gap-2 px-3 py-2 text-sm text-ui-error-text"
+          >
+            <span>{{ messages.comboboxError }}</span>
+            <button
+              type="button"
+              class="rounded px-2 py-0.5 underline outline-none focus-visible:ring-2 focus-visible:ring-ui-primary"
+              @click="run(search)"
+            >
+              {{ messages.retry }}
+            </button>
+          </div>
+          <div
+            v-else-if="status === 'ready' && !items.length"
+            class="px-3 py-2 text-sm text-ui-text-muted"
+          >
+            {{ messages.noResults }}
+          </div>
+          <ComboboxItem
+            v-for="option in items"
+            :key="option.value"
+            :value="option.value"
+            class="flex cursor-pointer items-center justify-between gap-2 rounded-ui px-3 py-2 text-sm text-ui-text outline-none data-[highlighted]:bg-ui-bg-muted data-[state=checked]:font-medium data-[state=checked]:text-ui-text-highlighted"
+          >
+            {{ option.label }}
+            <ComboboxItemIndicator>
+              <Check
+                class="size-4 text-ui-text-highlighted"
+                aria-hidden="true"
+              />
+            </ComboboxItemIndicator>
+          </ComboboxItem>
+        </ComboboxViewport>
+      </ComboboxContent>
+    </ComboboxPortal>
+  </ComboboxRoot>
+</template>

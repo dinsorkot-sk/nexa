@@ -1,0 +1,82 @@
+/*
+ * Design tokens exported from the Figma mockup (nexa.figcraft, collection "3 - Tokens" and "1 - Primary").
+ * Light is the default; Dark applies under the `dark` class on an ancestor. Never reference these values
+ * from components directly: components use the Tailwind `ui-*` colour utilities defined in theme.css.
+ */
+:root {
+  color-scheme: light;
+
+  --ui-primary: #00c16a;
+  --ui-primary-text: #00a155;
+  --ui-secondary: #2b7fff;
+  --ui-secondary-text: #155dfc;
+  --ui-success: #00c16a;
+  --ui-success-text: #00a155;
+  --ui-info: #2b7fff;
+  --ui-info-text: #155dfc;
+  --ui-warning: #efb100;
+  --ui-warning-text: #d08700;
+  --ui-error: #fb2c36;
+  --ui-error-text: #e7000b;
+  --ui-neutral: #000000;
+  /* Text on a solid primary, secondary, error or warning fill. The mockup's white label fails WCAG AA on it. */
+  --ui-on-solid: #0f172b;
+
+  --ui-bg: #ffffff;
+  --ui-bg-muted: #f8fafc;
+  --ui-bg-elevated: #f1f5f9;
+  --ui-bg-accented: #e2e8f0;
+  --ui-bg-inverted: #0f172b;
+
+  --ui-text-dimmed: #90a1b9;
+  --ui-text-muted: #62748e;
+  --ui-text-toned: #45556c;
+  --ui-text: #314158;
+  --ui-text-highlighted: #0f172b;
+  --ui-text-inverted: #ffffff;
+
+  --ui-border: #e2e8f0;
+  --ui-border-muted: #e2e8f0;
+  --ui-border-accented: #cad5e2;
+  --ui-border-inverted: #0f172b;
+
+  /* Mockup default radius mode: 0.5rem (8px). */
+  --ui-radius: 0.5rem;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --ui-primary: #00dc82;
+  --ui-primary-text: #75edae;
+  --ui-secondary: #51a2ff;
+  --ui-secondary-text: #8ec5ff;
+  --ui-success: #00dc82;
+  --ui-success-text: #75edae;
+  --ui-info: #51a2ff;
+  --ui-info-text: #8ec5ff;
+  --ui-warning: #fcc800;
+  --ui-warning-text: #ffdf20;
+  --ui-error: #ff6467;
+  --ui-error-text: #ffa2a2;
+  --ui-neutral: #ffffff;
+  --ui-on-solid: #0f172b;
+
+  --ui-bg: #0f172b;
+  --ui-bg-muted: #1d293d;
+  --ui-bg-elevated: #1d293d;
+  --ui-bg-accented: #314158;
+  --ui-bg-inverted: #ffffff;
+
+  --ui-text-dimmed: #62748e;
+  --ui-text-muted: #90a1b9;
+  --ui-text-toned: #cad5e2;
+  --ui-text: #e2e8f0;
+  --ui-text-highlighted: #ffffff;
+  --ui-text-inverted: #0f172b;
+
+  --ui-border: #1d293d;
+  --ui-border-muted: #314158;
+  --ui-border-accented: #314158;
+  --ui-border-inverted: #ffffff;
+}

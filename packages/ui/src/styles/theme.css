@@ -1,0 +1,60 @@
+@import 'tailwindcss';
+
+/* Scan the component and playground sources for class names. Without this, utilities used only in components are not generated. */
+@source '../';
+@source '../../playground';
+
+/* Class-based dark mode: the `dark` class on an ancestor (set by the app or the playground). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Tailwind utilities for every token: bg-ui-bg, text-ui-text-muted, border-ui-border, bg-ui-primary/15, rounded-ui. */
+@theme inline {
+  --color-ui-neutral: var(--ui-neutral);
+  --color-ui-on-solid: var(--ui-on-solid);
+  --color-ui-primary: var(--ui-primary);
+  --color-ui-primary-text: var(--ui-primary-text);
+  --color-ui-secondary: var(--ui-secondary);
+  --color-ui-secondary-text: var(--ui-secondary-text);
+  --color-ui-success: var(--ui-success);
+  --color-ui-success-text: var(--ui-success-text);
+  --color-ui-info: var(--ui-info);
+  --color-ui-info-text: var(--ui-info-text);
+  --color-ui-warning: var(--ui-warning);
+  --color-ui-warning-text: var(--ui-warning-text);
+  --color-ui-error: var(--ui-error);
+  --color-ui-error-text: var(--ui-error-text);
+
+  --color-ui-bg: var(--ui-bg);
+  --color-ui-bg-muted: var(--ui-bg-muted);
+  --color-ui-bg-elevated: var(--ui-bg-elevated);
+  --color-ui-bg-accented: var(--ui-bg-accented);
+  --color-ui-bg-inverted: var(--ui-bg-inverted);
+
+  --color-ui-text-dimmed: var(--ui-text-dimmed);
+  --color-ui-text-muted: var(--ui-text-muted);
+  --color-ui-text-toned: var(--ui-text-toned);
+  --color-ui-text: var(--ui-text);
+  --color-ui-text-highlighted: var(--ui-text-highlighted);
+  --color-ui-text-inverted: var(--ui-text-inverted);
+
+  --color-ui-border: var(--ui-border);
+  --color-ui-border-muted: var(--ui-border-muted);
+  --color-ui-border-accented: var(--ui-border-accented);
+  --color-ui-border-inverted: var(--ui-border-inverted);
+
+  --radius-ui: var(--ui-radius);
+  --radius-ui-sm: calc(var(--ui-radius) - 0.25rem);
+  --radius-ui-lg: calc(var(--ui-radius) + 0.25rem);
+
+  --font-sans: 'Inter Variable', 'Noto Sans Thai Variable', ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+  }
+  body {
+    background-color: var(--ui-bg);
+    color: var(--ui-text);
+  }
+}
