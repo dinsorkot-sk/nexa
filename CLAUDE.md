@@ -12,7 +12,7 @@ Nexa is a metadata-driven app platform. Backend hardening is the current focus. 
 - `packages/meta`: source of truth for Zod schemas and TS types for modules, entities, fields, views, workflows, permissions, and related metadata.
 - `packages/engine`: server-side domain core, organised as plain subfolders (not a separate package): entity, query, permission, workflow, hooks.
 - `packages/db`: Drizzle on PostgreSQL; PGlite is the local development default when `DATABASE_URL` is unset. It also owns the `db:migrate`, `db:seed`, and `db:check` commands, replacing the removed CLI workspace. Shared-schema tenancy scopes generic JSONB-backed records, metadata, and module definitions; use `tenantRepository` for tenant record/link access, `moduleRepository` for module lifecycle operations, and `definitionRepository` for a module's entity/field/relation definitions (stored in `nexa_metadata_definitions`, editable only while the module is draft/review, validated by `definition-integrity.ts` on every write). Migrations are forward-only under `packages/db/migrations`.
-- `packages/ui`: Nuxt layer built on Nuxt UI v4 (`extends: ['@nexa/ui']`; theme primary emerald, neutral slate). Build components on Nuxt UI (`U*`) components; do not hand-build primitives or add a second component library. Metadata-driven renderers are rebuilt on top of Nuxt UI in later phases.
+- `packages/ui`: Nexa's own plain Vue 3 component library styled with Tailwind v4 and Reka UI for overlays (Phase 22 in [`docs/plans/README.md`](docs/plans/README.md)), built from the Figma mockup `D:\project\mockup\nexa.figcraft`. Tokens (Light/Dark) are CSS variables mirrored from the mockup. Components are prefixed `Nx`; the package has no Nuxt layer and no `@nuxt/ui` dependency.
 - `packages/auth` and `packages/sdk`: authentication utilities and typed API client.
 - `templates/{inventory,crm,hr}`: metadata packages, not built-in domain logic. `integrations/*` provide workflow actions.
 
@@ -51,7 +51,7 @@ Run tests directly if Turbo cannot spawn child processes in the current shell:
 
 ## UX/UI
 
-- UI is built with Nuxt UI v4 through the `packages/ui` layer. Use its `U*` components, color tokens (`primary`/`neutral`), and locales (`@nuxt/ui/locale`); do not add custom design tokens or hand-built primitives.
+- UI components are hand-built in `packages/ui` with Tailwind and follow the Figma mockup. Use only token utilities (no hardcoded colors), support Light and Dark, and keep components keyboard accessible. `packages/ui` takes data as props and never calls the SDK. Do not add a second component library beyond Reka UI for overlays.
 - Verify UI changes in the playground (`pnpm --filter @nexa/ui dev`), not only through tests.
 - Follow the active phase sequence in [`docs/plans/README.md`](docs/plans/README.md). UI work does not authorize starting a new phase or branch by itself.
 - `apps/web` and `apps/cli` were intentionally removed on 2026-10-09. Do not recreate them unless explicitly asked.
