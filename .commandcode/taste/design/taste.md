@@ -1,0 +1,6 @@
+- Makes color/label decisions based on WCAG AA compliance — e.g., uses `--ui-text-highlighted` for outline/light-label badges and `--ui-on-solid` for solid-label badges per Phase 22 WCAG AA guidance. Confidence: 0.9
+- Uses Inter as the primary UI font with Noto Sans Thai as the automatic fallback for Thai script; expects both to be installed. Confidence: 0.85
+- Follows a discrete size scale of sm=28, md=36, lg=44 for component sizing. Confidence: 0.9
+- Defines 4 corner-radius modes for the base radius token, plus 14 text styles and 5 color primitive sets (green, blue, yellow, red, slate). Confidence: 0.8
+- Maintains 60 semantic tokens with Light/Dark modes, each accompanied by a paint style plus usage-rule documentation on the Foundations page. Confidence: 0.85
+- Preserves line weight (stroke width = 2) when downscaling icons, scaling coordinates proportionally (e.g., 16/24 ratio) rather than just scaling the frame — and preserves per-node rotation data during scaling. Confidence: 0.85

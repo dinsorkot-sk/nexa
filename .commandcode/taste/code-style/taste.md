@@ -1,0 +1,4 @@
+- Uses the `Nx*` naming prefix for Vue components in `packages/ui` (e.g., NxSpinner, NxToaster, NxFieldWrapper, NxCombobox). Confidence: 0.95
+- Names semantic design tokens with a `--ui-*` convention matching the `tokens.css` file (e.g., `--ui-text-highlighted`, `--ui-on-solid`), with Light/Dark variable modes. Confidence: 0.95
+- Composes components via instance references rather than duplication — e.g., Modal uses Button, Table uses Badge and Avatar, Sidebar uses Logo/OrgSwitcher/NavItem. Confidence: 0.85
+- Defines variant properties consistently as Color, Variant, Size, and State (matching Nuxt UI conventions), plus editable Label (text) and Icon (swap) properties. Confidence: 0.85

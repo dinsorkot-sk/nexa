@@ -17,6 +17,12 @@ export interface NxMessages {
   openCalendar: string;
   prevMonth: string;
   nextMonth: string;
+  previous: string;
+  next: string;
+  pagination: string;
+  search: string;
+  copy: string;
+  copied: string;
   empty: string;
   yes: string;
   no: string;
@@ -36,6 +42,12 @@ export const messages: Record<NxLocale, NxMessages> = {
     openCalendar: 'Open calendar',
     prevMonth: 'Previous month',
     nextMonth: 'Next month',
+    previous: 'Previous page',
+    next: 'Next page',
+    pagination: 'Pagination',
+    search: 'Search',
+    copy: 'Copy',
+    copied: 'Copied',
     empty: '—',
     yes: 'Yes',
     no: 'No',
@@ -53,6 +65,12 @@ export const messages: Record<NxLocale, NxMessages> = {
     openCalendar: 'เปิดปฏิทิน',
     prevMonth: 'เดือนก่อนหน้า',
     nextMonth: 'เดือนถัดไป',
+    previous: 'หน้าก่อนหน้า',
+    next: 'หน้าถัดไป',
+    pagination: 'การแบ่งหน้า',
+    search: 'ค้นหา',
+    copy: 'คัดลอก',
+    copied: 'คัดลอกแล้ว',
     empty: '—',
     yes: 'ใช่',
     no: 'ไม่ใช่',
