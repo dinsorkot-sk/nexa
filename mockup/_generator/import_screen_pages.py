@@ -1,4 +1,9 @@
-"""Split the Copy mockup's screen artboards into individual Nexa FigCraft pages."""
+"""Split the Copy mockup's screen artboards into section-grouped Nexa FigCraft pages.
+
+Each source page group (Login, Admin, User) is split into a single Nexa page
+(named "<Group> · <Subcategory>") containing sections (one per screen).  Every
+section holds a Light and a Dark frame side-by-side.
+"""
 from __future__ import annotations
 
 import argparse
@@ -7,6 +12,7 @@ import json
 import os
 import tempfile
 import zipfile
+from collections import OrderedDict
 from pathlib import Path
 
 
@@ -20,6 +26,11 @@ PAGE_GROUPS = (
 )
 RADIO_VARIANT = "Checked=Unchecked, State=Default, Size=md, Label=No"
 CHECKBOX_VARIANT = "Checked=Checked, State=Default, Size=md, Label=No"
+
+# Vertical gap between sections stacked on a consolidated page.
+PAGE_GAP = 80
+# Section background fill — matches the page background.
+SECTION_FILL = {"r": 0.9607843137254902, "g": 0.9607843137254902, "b": 0.9607843137254902, "a": 1.0}
 
 
 def children_of(node: dict) -> list[int]:
@@ -155,7 +166,9 @@ def make_pages(document: dict, source: dict) -> tuple[dict, int]:
             nodes[str(copied["id"])] = copied
         return remap[screen_id], width, height
 
-    pages_added = 0
+    # Collect screens grouped by category prefix.
+    # screen_name like "Auth / Login" → category "Login · Auth", screen "Login"
+    groups: OrderedDict[str, list[tuple[str, int, int]]] = OrderedDict()
     for light_name, dark_name, group in PAGE_GROUPS:
         light_page = source_pages[light_name]
         dark_page = source_pages[dark_name]
@@ -166,20 +179,62 @@ def make_pages(document: dict, source: dict) -> tuple[dict, int]:
 
         for screen_name, light_id in light_screens.items():
             dark_id = dark_screens[screen_name]
-            page_id = allocate()
-            title = f"{group} · {screen_name}"
-            new_page = copy.deepcopy(base_page)
-            new_page.update({"id": page_id, "name": title, "children": []})
-            nodes[str(page_id)] = new_page
+            if " / " in screen_name:
+                subcategory, _, screen_short = screen_name.partition(" / ")
+            else:
+                subcategory = screen_name
+                screen_short = screen_name
+            category = f"{group} · {subcategory}"
+            groups.setdefault(category, []).append((screen_short, light_id, dark_id))
 
-            light_node_id, light_width, light_height = append_screen(light_id, page_id, 0, "Light")
+    # Create one page per category, with a section per screen.
+    screen_count = 0
+    for category, screens in groups.items():
+        page_id = allocate()
+        new_page = copy.deepcopy(base_page)
+        new_page["id"] = page_id
+        new_page["name"] = category
+        new_page["children"] = []
+        new_page["width"] = 0.0
+        new_page["height"] = 0.0
+        nodes[str(page_id)] = new_page
+
+        section_ids: list[int] = []
+        cumulative_y = 0.0
+        max_width = 0.0
+
+        for screen_short, light_id, dark_id in screens:
+            section_id = allocate()
+            section: dict = {
+                "id": section_id,
+                "name": screen_short,
+                "type": "section",
+                "parent": page_id,
+                "children": [],
+                "transform": [1.0, 0.0, 0.0, 1.0, 0.0, cumulative_y],
+                "width": 0.0,
+                "height": 0.0,
+                "fills": [{"type": "solid", "color": dict(SECTION_FILL), "opacity": 1.0, "visible": True, "blend": "normal"}],
+                "bound": {},
+            }
+            nodes[str(section_id)] = section
+            section_ids.append(section_id)
+
+            light_node_id, light_width, light_height = append_screen(light_id, section_id, 0, "Light")
             dark_node_id, dark_width, dark_height = append_screen(
-                dark_id, page_id, light_width + 80, "Dark"
+                dark_id, section_id, light_width + 80, "Dark"
             )
-            new_page["children"] = [light_node_id, dark_node_id]
-            new_page["width"] = light_width + 80 + dark_width
-            new_page["height"] = max(light_height, dark_height)
-            pages_added += 1
+            section["children"] = [light_node_id, dark_node_id]
+            section["width"] = float(light_width + 80 + dark_width)
+            section["height"] = float(max(light_height, dark_height))
+
+            cumulative_y += section["height"] + PAGE_GAP
+            max_width = max(max_width, section["width"])
+            screen_count += 1
+
+        new_page["children"] = section_ids
+        new_page["width"] = float(max_width)
+        new_page["height"] = float(cumulative_y - PAGE_GAP) if cumulative_y > PAGE_GAP else 0.0
 
     document["pages"].extend(
         int(node_id)
@@ -188,7 +243,7 @@ def make_pages(document: dict, source: dict) -> tuple[dict, int]:
         and node_id not in {str(page_id) for page_id in document["pages"]}
     )
     document["next_id"] = next_id
-    return document, pages_added
+    return document, screen_count
 
 
 def validate(document: dict) -> list[str]:
@@ -209,12 +264,26 @@ def validate(document: dict) -> list[str]:
         if node.get("type") == "instance" and str(node.get("component")) not in ids:
             errors.append(f"{node_id}: missing component {node.get('component')}")
         if node.get("type") == "page" and node.get("name", "").startswith(("Login · ", "Admin · ", "User · ")):
-            if len(node.get("children", [])) != 2:
+            page_children = node.get("children", [])
+            child_types = {nodes.get(str(c), {}).get("type") for c in page_children}
+            if "section" in child_types:
+                # Consolidated page: children are sections, each containing Light/Dark frames.
+                for section_id in page_children:
+                    section = nodes.get(str(section_id), {})
+                    section_children = section.get("children", [])
+                    if len(section_children) != 2:
+                        errors.append(f"{section_id}: section expected 2 children (Light/Dark), got {len(section_children)}")
+                    elif not all(
+                        " · Light" in nodes[str(c)]["name"] or " · Dark" in nodes[str(c)]["name"]
+                        for c in section_children
+                    ):
+                        errors.append(f"{section_id}: section screen frames must identify their theme")
+            elif len(page_children) != 2:
                 errors.append(f"{node_id}: expected Light and Dark screen frames")
             elif not all(
                 " · Light" in nodes[str(child_id)]["name"]
                 or " · Dark" in nodes[str(child_id)]["name"]
-                for child_id in node["children"]
+                for child_id in page_children
             ):
                 errors.append(f"{node_id}: screen frame labels must identify their theme")
     if len(document["pages"]) != len(set(document["pages"])):
@@ -224,7 +293,7 @@ def validate(document: dict) -> list[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--write", action="store_true", help="Write the new screen pages to Nexa.figcraft")
+    parser.add_argument("--write", action="store_true", help="Write the new section-grouped pages to Nexa.figcraft")
     args = parser.parse_args()
 
     with zipfile.ZipFile(DESTINATION) as archive:
@@ -239,14 +308,19 @@ def main() -> None:
         if document["nodes"][str(page_id)]["name"].startswith(("Login · ", "Admin · ", "User · "))
     ]
     if already_added:
-        raise SystemExit("Screen pages are already present; refusing to duplicate them.")
+        raise SystemExit(
+            "Screen pages are already present; refusing to duplicate them.\n"
+            "Import is idempotent — each run regenerates the full section tree from the\n"
+            "Copy mockup.  If you need a clean import, remove existing screen pages\n"
+            "from Nexa.figcraft first, then re-run."
+        )
 
     document, count = make_pages(document, source)
     errors = validate(document)
     if errors:
         raise SystemExit("\n".join(errors[:20]))
     print(
-        f"Validated {count} Light/Dark screen pages; "
+        f"Validated {count} screen sections across {len([p for p in document['pages']])} pages; "
         f"{len(document['nodes'])} nodes, {len(document['pages'])} total pages."
     )
     if not args.write:
