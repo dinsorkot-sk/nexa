@@ -57,17 +57,21 @@ async function copy() {
         @click="copy"
       />
     </div>
-    <pre
-      :aria-label="label"
-      class="flex max-h-[32rem] flex-col gap-0.5 overflow-auto px-4 py-3 font-mono text-[13px] leading-5"
-    ><div
-      v-for="(line, index) in lines"
-      :key="index"
-      class="flex gap-3"
-    ><span
-      v-if="lineNumbers"
-      aria-hidden="true"
-      class="w-4 shrink-0 select-none text-right text-xs text-ui-text-dimmed"
-    >{{ index + 1 }}</span><code class="whitespace-pre text-ui-text-inverted">{{ line === '' ? ' ' : line }}</code></div></pre>
+    <div class="flex max-h-[32rem] gap-3 overflow-auto px-4 py-3 font-mono text-[13px] leading-5">
+      <div
+        v-if="lineNumbers"
+        aria-hidden="true"
+        class="flex shrink-0 select-none flex-col text-right text-xs text-ui-text-dimmed"
+      >
+        <span
+          v-for="n in lines.length"
+          :key="n"
+        >{{ n }}</span>
+      </div>
+      <pre
+        :aria-label="label"
+        class="min-w-0 flex-1 whitespace-pre text-ui-text-inverted"
+      ><code>{{ lines.join('\n') }}</code></pre>
+    </div>
   </div>
 </template>

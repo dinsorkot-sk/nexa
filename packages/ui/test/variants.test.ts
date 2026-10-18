@@ -921,12 +921,11 @@ describe('chart, app shell and builder panels', () => {
     expect(wrapper.classes()).toContain('rounded-ui-lg');
     expect(wrapper.classes()).toContain('bg-ui-bg-inverted');
     expect(wrapper.text()).toContain('package.json');
-    expect(wrapper.findAll('code')).toHaveLength(3);
-    expect(wrapper.findAll('pre span')).toHaveLength(3);
+    expect(wrapper.findAll('code')).toHaveLength(1);
+    expect(wrapper.findAll('div[aria-hidden="true"] span')).toHaveLength(3);
     expect(wrapper.find('button').attributes('aria-label')).toBe('Copy');
     const plain = mount(NxCodeBlock, { props: { code: 'a\nb', lineNumbers: false } });
-    expect(plain.findAll('code')).toHaveLength(2);
-    expect(plain.findAll('pre span')).toHaveLength(0);
+    expect(plain.findAll('div[aria-hidden="true"] span')).toHaveLength(0);
     expect(plain.find('button').exists()).toBe(false);
   });
 
