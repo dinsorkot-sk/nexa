@@ -18,6 +18,23 @@ instead of being flattened into frames:
 * anything that matches nothing is left as a frame, and the script reports it.
 
 The script is repeatable: the pages it produced on an earlier run are removed first.
+
+Known limitation of the art rebuild (kept as is for now). When a source instance has no
+children at all, its look can only come from the target, so the matched variant's art is
+copied in and the source instance's own fill/stroke is dropped. For the 42 such instances
+in the mockup (Radio 22, Checkbox 20) that costs fidelity:
+
+* the match is theme-sensitive — empty controls in the Light screens all resolve to
+  `Checked=Unchecked` while the same controls in the Dark screens all resolve to
+  `Checked=Checked`, so a selected Radio shows unselected (Light) or every Radio shows
+  selected (Dark);
+* the copied art keeps the master's `bound` variables, and imported screens carry no
+  `var_modes`, so the app resolves them in the default (Light) mode — inside the Dark
+  screens that shows Light colours (white 16px Checkbox boxes in `Records – Table · Dark`).
+
+Fix this together with the next library rebuild: either keep the source instance's own
+fills/strokes instead of copying master art, or set `var_modes` on the rebuilt root to the
+mode of the screen it is being placed in.
 """
 from __future__ import annotations
 
