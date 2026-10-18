@@ -11,6 +11,8 @@
 @theme inline {
   --color-ui-neutral: var(--ui-neutral);
   --color-ui-on-solid: var(--ui-on-solid);
+  --color-ui-brand-a: var(--ui-brand-a);
+  --color-ui-brand-b: var(--ui-brand-b);
   --color-ui-primary: var(--ui-primary);
   --color-ui-primary-text: var(--ui-primary-text);
   --color-ui-secondary: var(--ui-secondary);
@@ -23,6 +25,39 @@
   --color-ui-warning-text: var(--ui-warning-text);
   --color-ui-error: var(--ui-error);
   --color-ui-error-text: var(--ui-error-text);
+
+  /* Variant fills from the mockup's tone table: Solid hover, Soft/Subtle tint and its hover, and the two border alphas. */
+  --color-ui-neutral-hover: var(--ui-neutral-hover);
+  --color-ui-primary-hover: var(--ui-primary-hover);
+  --color-ui-primary-soft: var(--ui-primary-soft);
+  --color-ui-primary-soft-hover: var(--ui-primary-soft-hover);
+  --color-ui-primary-ring: var(--ui-primary-ring);
+  --color-ui-primary-outline: var(--ui-primary-outline);
+  --color-ui-secondary-hover: var(--ui-secondary-hover);
+  --color-ui-secondary-soft: var(--ui-secondary-soft);
+  --color-ui-secondary-soft-hover: var(--ui-secondary-soft-hover);
+  --color-ui-secondary-ring: var(--ui-secondary-ring);
+  --color-ui-secondary-outline: var(--ui-secondary-outline);
+  --color-ui-success-hover: var(--ui-success-hover);
+  --color-ui-success-soft: var(--ui-success-soft);
+  --color-ui-success-soft-hover: var(--ui-success-soft-hover);
+  --color-ui-success-ring: var(--ui-success-ring);
+  --color-ui-success-outline: var(--ui-success-outline);
+  --color-ui-info-hover: var(--ui-info-hover);
+  --color-ui-info-soft: var(--ui-info-soft);
+  --color-ui-info-soft-hover: var(--ui-info-soft-hover);
+  --color-ui-info-ring: var(--ui-info-ring);
+  --color-ui-info-outline: var(--ui-info-outline);
+  --color-ui-warning-hover: var(--ui-warning-hover);
+  --color-ui-warning-soft: var(--ui-warning-soft);
+  --color-ui-warning-soft-hover: var(--ui-warning-soft-hover);
+  --color-ui-warning-ring: var(--ui-warning-ring);
+  --color-ui-warning-outline: var(--ui-warning-outline);
+  --color-ui-error-hover: var(--ui-error-hover);
+  --color-ui-error-soft: var(--ui-error-soft);
+  --color-ui-error-soft-hover: var(--ui-error-soft-hover);
+  --color-ui-error-ring: var(--ui-error-ring);
+  --color-ui-error-outline: var(--ui-error-outline);
 
   --color-ui-bg: var(--ui-bg);
   --color-ui-bg-muted: var(--ui-bg-muted);
@@ -41,10 +76,17 @@
   --color-ui-border-muted: var(--ui-border-muted);
   --color-ui-border-accented: var(--ui-border-accented);
   --color-ui-border-inverted: var(--ui-border-inverted);
+  --color-ui-ring: var(--ui-ring);
+  --color-ui-overlay: var(--ui-overlay);
 
-  --radius-ui: var(--ui-radius);
-  --radius-ui-sm: calc(var(--ui-radius) - 0.25rem);
-  --radius-ui-lg: calc(var(--ui-radius) + 0.25rem);
+  /* The mockup's radius roles, each a multiple of the base radius of the "Default (4)" mode. */
+  --radius-ui-xs: calc(var(--ui-radius) * 0.5);
+  --radius-ui-sm: var(--ui-radius);
+  --radius-ui: calc(var(--ui-radius) * 1.5);
+  --radius-ui-lg: calc(var(--ui-radius) * 2);
+  --radius-ui-xl: calc(var(--ui-radius) * 3);
+  --radius-ui-2xl: calc(var(--ui-radius) * 4);
+  --radius-ui-full: 9999px;
 
   --font-sans: 'Inter Variable', 'Noto Sans Thai Variable', ui-sans-serif, system-ui, sans-serif;
 }

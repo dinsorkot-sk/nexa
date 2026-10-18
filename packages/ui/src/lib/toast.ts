@@ -1,6 +1,6 @@
 import { reactive, readonly } from 'vue';
 
-export type ToastColor = 'info' | 'success' | 'warning' | 'error';
+export type ToastColor = 'neutral' | 'info' | 'success' | 'warning' | 'error';
 
 export interface ToastItem {
   id: number;

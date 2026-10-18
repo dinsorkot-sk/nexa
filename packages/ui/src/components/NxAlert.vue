@@ -1,69 +1,79 @@
 <script setup lang="ts">
 import type { Component } from 'vue';
-import { CircleAlert, CircleCheck, Info, TriangleAlert } from 'lucide-vue-next';
-import { tv } from 'tailwind-variants';
+import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from 'lucide-vue-next';
+import { useNxMessages } from '../lib/locale';
+import { tone, type NxColor, type NxVariant } from '../lib/tone';
+import NxIconButton from './NxIconButton.vue';
 
-export type AlertColor = 'info' | 'success' | 'warning' | 'error';
+/** Inline message for a page or section: 7 colours x 4 variants, as the mockup's Alert section. */
+export type AlertColor = NxColor;
+export type AlertVariant = Extract<NxVariant, 'solid' | 'outline' | 'soft' | 'subtle'>;
 
-const alert = tv({
-  base: 'flex gap-3 rounded-ui border p-3 text-sm',
-  variants: {
-    color: {
-      info: 'border-ui-info/40 bg-ui-info/10',
-      success: 'border-ui-success/40 bg-ui-success/10',
-      warning: 'border-ui-warning/50 bg-ui-warning/15',
-      error: 'border-ui-error/40 bg-ui-error/10',
-    },
-  },
-  defaultVariants: { color: 'info' },
-});
-
-// Icon colours avoid the warning text token, which is below the 3:1 non-text contrast on a light background.
-const iconColor: Record<AlertColor, string> = {
-  info: 'text-ui-info-text',
-  success: 'text-ui-success-text',
-  warning: 'text-ui-text-highlighted',
-  error: 'text-ui-error-text',
-};
-
-const icons: Record<AlertColor, Component> = {
-  info: Info,
+const icons: Record<NxColor, Component> = {
+  primary: Info,
+  secondary: Info,
   success: CircleCheck,
+  info: Info,
   warning: TriangleAlert,
   error: CircleAlert,
+  neutral: Info,
 };
 
 const props = withDefaults(defineProps<{
   color?: AlertColor;
+  variant?: AlertVariant;
   title?: string;
   description?: string;
-}>(), { color: 'info', title: undefined, description: undefined });
+  /** Shows the close button from the mockup. Turn off for a message that is not dismissible. */
+  dismissible?: boolean;
+}>(), {
+  color: 'info',
+  variant: 'soft',
+  title: undefined,
+  description: undefined,
+  dismissible: true,
+});
+
+const emit = defineEmits<{ close: [] }>();
+const messages = useNxMessages();
+
+const t = () => tone(props.color, props.variant);
+const isSolid = () => props.variant === 'solid';
 </script>
 
 <template>
   <div
-    :role="props.color === 'error' ? 'alert' : 'status'"
-    :class="alert({ color })"
+    :role="color === 'error' ? 'alert' : 'status'"
+    :class="['flex items-start gap-3 rounded-ui-lg px-4 py-3', t().surface, t().border]"
   >
     <component
-      :is="icons[props.color]"
+      :is="icons[color]"
       aria-hidden="true"
-      :class="['mt-0.5 size-4 shrink-0', iconColor[props.color]]"
+      :class="['mt-0.5 size-5 shrink-0', t().icon]"
     />
-    <div class="min-w-0 flex-1 space-y-1">
+    <div class="min-w-0 flex-1 space-y-0.5">
       <p
         v-if="title"
-        class="font-medium text-ui-text-highlighted"
+        :class="['text-sm font-medium', t().label]"
       >
         {{ title }}
       </p>
       <p
         v-if="description"
-        class="text-ui-text-toned"
+        :class="['text-xs', isSolid() ? t().label : 'text-ui-text-toned']"
       >
         {{ description }}
       </p>
       <slot />
     </div>
+    <NxIconButton
+      v-if="dismissible"
+      :icon="X"
+      :label="messages.close"
+      color="neutral"
+      variant="ghost"
+      size="sm"
+      @click="emit('close')"
+    />
   </div>
 </template>

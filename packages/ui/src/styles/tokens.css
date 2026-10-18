@@ -1,7 +1,8 @@
 /*
- * Design tokens exported from the Figma mockup (nexa.figcraft, collection "3 - Tokens" and "1 - Primary").
+ * Design tokens exported from the Figma mockup (nexa.figcraft, collections "Nexa / Semantic colors",
+ * "Nexa / Radius" and "Nexa / Spacing").
  * Light is the default; Dark applies under the `dark` class on an ancestor. Never reference these values
- * from components directly: components use the Tailwind `ui-*` colour utilities defined in theme.css.
+ * from components directly: components use the Tailwind `ui-*` colour and radius utilities defined in theme.css.
  */
 :root {
   color-scheme: light;
@@ -21,6 +22,43 @@
   --ui-neutral: #000000;
   /* Text on a solid primary, secondary, error or warning fill. The mockup's white label fails WCAG AA on it. */
   --ui-on-solid: #0f172b;
+  --ui-neutral-hover: rgba(15, 23, 43, 0.9);
+
+  /* The Logo mark's two greens. They are the brand asset, not theme tokens, so they are the same in both modes. */
+  --ui-brand-a: #10b981;
+  --ui-brand-b: #34d399;
+
+  /* Per-colour fills the mockup variants use: Solid hover, Soft/Subtle tint, tint hover and the two border alphas. */
+  --ui-primary-hover: rgba(0, 193, 106, 0.9);
+  --ui-primary-soft: rgba(0, 193, 106, 0.1);
+  --ui-primary-soft-hover: rgba(0, 193, 106, 0.15);
+  --ui-primary-ring: rgba(0, 193, 106, 0.25);
+  --ui-primary-outline: rgba(0, 193, 106, 0.5);
+  --ui-secondary-hover: rgba(43, 127, 255, 0.9);
+  --ui-secondary-soft: rgba(43, 127, 255, 0.1);
+  --ui-secondary-soft-hover: rgba(43, 127, 255, 0.15);
+  --ui-secondary-ring: rgba(43, 127, 255, 0.25);
+  --ui-secondary-outline: rgba(43, 127, 255, 0.5);
+  --ui-success-hover: rgba(0, 193, 106, 0.9);
+  --ui-success-soft: rgba(0, 193, 106, 0.1);
+  --ui-success-soft-hover: rgba(0, 193, 106, 0.15);
+  --ui-success-ring: rgba(0, 193, 106, 0.25);
+  --ui-success-outline: rgba(0, 193, 106, 0.5);
+  --ui-info-hover: rgba(43, 127, 255, 0.9);
+  --ui-info-soft: rgba(43, 127, 255, 0.1);
+  --ui-info-soft-hover: rgba(43, 127, 255, 0.15);
+  --ui-info-ring: rgba(43, 127, 255, 0.25);
+  --ui-info-outline: rgba(43, 127, 255, 0.5);
+  --ui-warning-hover: rgba(239, 177, 0, 0.9);
+  --ui-warning-soft: rgba(239, 177, 0, 0.1);
+  --ui-warning-soft-hover: rgba(239, 177, 0, 0.15);
+  --ui-warning-ring: rgba(239, 177, 0, 0.25);
+  --ui-warning-outline: rgba(239, 177, 0, 0.5);
+  --ui-error-hover: rgba(251, 44, 54, 0.9);
+  --ui-error-soft: rgba(251, 44, 54, 0.1);
+  --ui-error-soft-hover: rgba(251, 44, 54, 0.15);
+  --ui-error-ring: rgba(251, 44, 54, 0.25);
+  --ui-error-outline: rgba(251, 44, 54, 0.5);
 
   --ui-bg: #ffffff;
   --ui-bg-muted: #f8fafc;
@@ -39,9 +77,11 @@
   --ui-border-muted: #e2e8f0;
   --ui-border-accented: #cad5e2;
   --ui-border-inverted: #0f172b;
+  --ui-ring: #0f172b;
+  --ui-overlay: rgba(2, 6, 24, 0.5);
 
-  /* Mockup default radius mode: 0.5rem (8px). */
-  --ui-radius: 0.5rem;
+  /* Base radius, the mockup's "Default (4)" mode. theme.css derives ui-xs (0.5x) to ui-2xl (4x) from it. */
+  --ui-radius: 4px;
 }
 
 .dark {
@@ -61,6 +101,40 @@
   --ui-error-text: #ffa2a2;
   --ui-neutral: #ffffff;
   --ui-on-solid: #0f172b;
+  --ui-neutral-hover: rgba(255, 255, 255, 0.9);
+  --ui-brand-a: #10b981;
+  --ui-brand-b: #34d399;
+
+  --ui-primary-hover: rgba(0, 220, 130, 0.9);
+  --ui-primary-soft: rgba(0, 220, 130, 0.1);
+  --ui-primary-soft-hover: rgba(0, 220, 130, 0.15);
+  --ui-primary-ring: rgba(0, 220, 130, 0.25);
+  --ui-primary-outline: rgba(0, 220, 130, 0.5);
+  --ui-secondary-hover: rgba(81, 162, 255, 0.9);
+  --ui-secondary-soft: rgba(81, 162, 255, 0.1);
+  --ui-secondary-soft-hover: rgba(81, 162, 255, 0.15);
+  --ui-secondary-ring: rgba(81, 162, 255, 0.25);
+  --ui-secondary-outline: rgba(81, 162, 255, 0.5);
+  --ui-success-hover: rgba(0, 220, 130, 0.9);
+  --ui-success-soft: rgba(0, 220, 130, 0.1);
+  --ui-success-soft-hover: rgba(0, 220, 130, 0.15);
+  --ui-success-ring: rgba(0, 220, 130, 0.25);
+  --ui-success-outline: rgba(0, 220, 130, 0.5);
+  --ui-info-hover: rgba(81, 162, 255, 0.9);
+  --ui-info-soft: rgba(81, 162, 255, 0.1);
+  --ui-info-soft-hover: rgba(81, 162, 255, 0.15);
+  --ui-info-ring: rgba(81, 162, 255, 0.25);
+  --ui-info-outline: rgba(81, 162, 255, 0.5);
+  --ui-warning-hover: rgba(252, 200, 0, 0.9);
+  --ui-warning-soft: rgba(252, 200, 0, 0.1);
+  --ui-warning-soft-hover: rgba(252, 200, 0, 0.15);
+  --ui-warning-ring: rgba(252, 200, 0, 0.25);
+  --ui-warning-outline: rgba(252, 200, 0, 0.5);
+  --ui-error-hover: rgba(255, 100, 103, 0.9);
+  --ui-error-soft: rgba(255, 100, 103, 0.1);
+  --ui-error-soft-hover: rgba(255, 100, 103, 0.15);
+  --ui-error-ring: rgba(255, 100, 103, 0.25);
+  --ui-error-outline: rgba(255, 100, 103, 0.5);
 
   --ui-bg: #0f172b;
   --ui-bg-muted: #1d293d;
@@ -79,4 +153,6 @@
   --ui-border-muted: #314158;
   --ui-border-accented: #314158;
   --ui-border-inverted: #ffffff;
+  --ui-ring: #ffffff;
+  --ui-overlay: rgba(2, 6, 24, 0.7);
 }

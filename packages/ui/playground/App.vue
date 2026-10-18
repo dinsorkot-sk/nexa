@@ -140,14 +140,25 @@ const stateRows = [
           <NxButton color="neutral">
             Neutral
           </NxButton>
-          <NxButton color="ghost">
+          <NxButton variant="ghost">
             Ghost
           </NxButton>
           <NxButton
-            color="danger"
+            color="error"
             :trailing-icon="Trash2"
           >
             Danger
+          </NxButton>
+          <NxButton
+            color="neutral"
+            variant="outline"
+          >
+            Outline
+          </NxButton>
+          <NxButton
+            variant="link"
+          >
+            Link
           </NxButton>
           <NxButton
             size="sm"
@@ -416,7 +427,7 @@ const stateRows = [
             Show success toast
           </NxButton>
           <NxButton
-            color="danger"
+            color="error"
             @click="pushToast({ title: 'Save failed', description: 'Try again in a moment.', color: 'error', duration: 0 })"
           >
             Show error toast
@@ -441,7 +452,7 @@ const stateRows = [
           Cancel
         </NxButton>
         <NxButton
-          color="danger"
+          color="error"
           @click="modal = false"
         >
           Delete

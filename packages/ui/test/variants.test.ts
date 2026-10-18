@@ -1,0 +1,289 @@
+import { describe, expect, it } from 'vitest';
+import { mount } from '@vue/test-utils';
+import { Info } from 'lucide-vue-next';
+import NxAlert from '../src/components/NxAlert.vue';
+import NxBadge from '../src/components/NxBadge.vue';
+import NxButton from '../src/components/NxButton.vue';
+import NxCard from '../src/components/NxCard.vue';
+import NxChip from '../src/components/NxChip.vue';
+import NxIconButton from '../src/components/NxIconButton.vue';
+import NxIndicator from '../src/components/NxIndicator.vue';
+import NxInput from '../src/components/NxInput.vue';
+import NxKbd from '../src/components/NxKbd.vue';
+import NxLogo from '../src/components/NxLogo.vue';
+import NxSelect from '../src/components/NxSelect.vue';
+import NxSeparator from '../src/components/NxSeparator.vue';
+import NxSkeleton from '../src/components/NxSkeleton.vue';
+import NxTextarea from '../src/components/NxTextarea.vue';
+import NxToast from '../src/components/NxToast.vue';
+import { buttonClasses } from '../src/lib/button';
+import { fieldStyles } from '../src/lib/input';
+import { dotColor, tone, nxColors, nxSizes, nxVariants, } from '../src/lib/tone';
+
+/**
+ * The variant axes of the mockup's Components page: every component is checked for the Color / Variant / Size /
+ * State combinations its section shows, so a missing axis fails here instead of being found by eye.
+ */
+
+describe('tone table', () => {
+  const pairs = nxColors.flatMap((color) => nxVariants.map((variant) => [color, variant] as const));
+
+  it('defines every Color x Variant pair with a tone', () => {
+    expect(pairs).toHaveLength(42);
+    for (const [color, variant] of pairs) {
+      const t = tone(color, variant);
+      for (const key of ['surface', 'hover', 'border', 'label', 'icon', 'ring'] as const) {
+        expect(typeof t[key], `${color}/${variant}.${key}`).toBe('string');
+      }
+      expect(t.label, `${color}/${variant} label`).not.toBe('');
+      expect(t.ring, `${color}/${variant} ring`).toContain('focus-visible:ring-');
+    }
+  });
+
+  it('labels solid fills with the on-solid token, which is the only one that meets AA on them', () => {
+    for (const color of nxColors) expect(tone(color, 'solid').label).toBe(color === 'neutral' ? 'text-ui-text-inverted' : 'text-ui-on-solid');
+  });
+
+  it('labels tints with the highlighted text token', () => {
+    for (const color of nxColors) {
+      for (const variant of ['soft', 'subtle'] as const) {
+        expect(tone(color, variant).label).toBe('text-ui-text-highlighted');
+      }
+      // The neutral outline fill is the page surface, so its label is the toned body colour, as in the mockup.
+      expect(tone(color, 'outline').label).toBe(color === 'neutral' ? 'text-ui-text-toned' : 'text-ui-text-highlighted');
+    }
+  });
+
+  it('gives outline and subtle variants an inset border and leaves ghost and link borderless', () => {
+    for (const color of nxColors) {
+      expect(tone(color, 'outline').border).toContain('ring-1 ring-inset');
+      expect(tone(color, 'subtle').border).toContain('ring-1 ring-inset');
+      expect(tone(color, 'ghost').border).toBe('');
+      expect(tone(color, 'link').border).toBe('');
+      expect(tone(color, 'link').surface).toBe('');
+    }
+  });
+
+  it('paints the Solid dot with the label colour and the others with the colour itself', () => {
+    expect(dotColor('success', 'solid')).toBe('bg-ui-on-solid');
+    expect(dotColor('success', 'soft')).toBe('bg-ui-success');
+    expect(dotColor('neutral', 'outline')).toBe('bg-ui-text-muted');
+  });
+});
+
+describe('button variants', () => {
+  it('covers the 5 variants x 4 colors x 3 sizes x leading/trailing icon the mockup shows', () => {
+    for (const color of ['primary', 'secondary', 'neutral', 'error'] as const) {
+      for (const variant of nxVariants) {
+        for (const size of nxSizes) {
+          const classes = buttonClasses(color, variant, size);
+          expect(classes).toContain(tone(color, variant).label);
+          expect(classes).toContain(tone(color, variant).surface || 'inline-flex');
+        }
+      }
+    }
+  });
+
+  it('uses the mockup heights: 28, 36 and 44 px', () => {
+    expect(buttonClasses('primary', 'solid', 'sm')).toContain('h-7');
+    expect(buttonClasses('primary', 'solid', 'md')).toContain('h-9');
+    expect(buttonClasses('primary', 'solid', 'lg')).toContain('h-11');
+  });
+
+  it('uses a square box for the icon-only form', () => {
+    expect(buttonClasses('neutral', 'ghost', 'md', true)).toContain('size-9');
+    expect(buttonClasses('neutral', 'ghost', 'md', true)).not.toContain('px-3');
+  });
+
+  it('renders the requested variant and size on the button element', () => {
+    const wrapper = mount(NxButton, { props: { color: 'error', variant: 'outline', size: 'lg' }, slots: { default: 'Delete' } });
+    expect(wrapper.classes()).toContain('ring-ui-error-outline');
+    expect(wrapper.classes()).toContain('h-11');
+    expect(wrapper.classes()).toContain('text-ui-text-highlighted');
+    expect(wrapper.classes()).toContain('hover:bg-ui-error-soft');
+  });
+
+  it('replaces the leading icon with a spinner while loading, and does not render the icon', () => {
+    const wrapper = mount(NxButton, { props: { loading: true, icon: Info }, slots: { default: 'Saving' } });
+    expect(wrapper.findAll('svg')).toHaveLength(1);
+    expect(wrapper.find('svg').classes()).toContain('animate-spin');
+  });
+
+  it('underlines the link variant on hover', () => {
+    expect(mount(NxButton, { props: { variant: 'link' }, slots: { default: 'Open' } }).classes()).toContain('hover:underline');
+  });
+
+  it('NxIconButton carries the variant axes too and keeps its accessible name', () => {
+    const wrapper = mount(NxIconButton, { props: { icon: Info, label: 'Details', color: 'primary', variant: 'soft', size: 'lg' } });
+    expect(wrapper.attributes('aria-label')).toBe('Details');
+    expect(wrapper.classes()).toContain('size-11');
+    expect(wrapper.classes()).toContain('bg-ui-primary-soft');
+  });
+});
+
+describe('badge variants', () => {
+  it('covers 7 colors x 4 variants x 3 sizes', () => {
+    for (const color of nxColors) {
+      for (const variant of ['solid', 'outline', 'soft', 'subtle'] as const) {
+        for (const size of nxSizes) {
+          const wrapper = mount(NxBadge, { props: { color, variant, size }, slots: { default: 'Badge' } });
+          expect(wrapper.classes(), `${color}/${variant}/${size}`).toContain(tone(color, variant).label);
+        }
+      }
+    }
+  });
+
+  it('renders the leading icon axis and drops it when a dot is asked for', () => {
+    expect(mount(NxBadge, { props: { icon: Info }, slots: { default: 'Info' } }).find('svg').attributes('aria-hidden')).toBe('true');
+    const dotted = mount(NxBadge, { props: { dot: true, icon: Info }, slots: { default: 'Info' } });
+    expect(dotted.find('svg').exists()).toBe(false);
+    expect(dotted.find('span > span').classes()).toContain('rounded-full');
+  });
+});
+
+describe('alert variants', () => {
+  it('supports all 7 colours and 4 variants', () => {
+    for (const color of nxColors) {
+      for (const variant of ['solid', 'outline', 'soft', 'subtle'] as const) {
+        const wrapper = mount(NxAlert, { props: { color, variant, title: 'Note' } });
+        expect(wrapper.classes()).toContain(tone(color, variant).surface || 'flex');
+        expect(wrapper.find('svg').exists()).toBe(true);
+      }
+    }
+  });
+
+  it('uses the inverted description colour on a solid fill', () => {
+    const solid = mount(NxAlert, { props: { color: 'success', variant: 'solid', title: 'Saved', description: 'Ready' } });
+    const paragraphs = solid.findAll('p');
+    expect(paragraphs[1].classes()).toContain('text-ui-on-solid');
+    const soft = mount(NxAlert, { props: { color: 'success', title: 'Saved', description: 'Ready' } });
+    expect(soft.findAll('p')[1].classes()).toContain('text-ui-text-toned');
+  });
+
+  it('emits close from the dismiss button, and renders none when not dismissible', async () => {
+    const wrapper = mount(NxAlert, { props: { title: 'Note' }, attachTo: document.body });
+    await wrapper.find('button').trigger('click');
+    expect(wrapper.emitted('close')).toHaveLength(1);
+    expect(mount(NxAlert, { props: { title: 'Note', dismissible: false } }).find('button').exists()).toBe(false);
+  });
+});
+
+describe('field variants', () => {
+  it('covers 3 variants x 3 sizes with the mockup heights', () => {
+    for (const variant of ['outline', 'soft', 'subtle'] as const) {
+      for (const size of ['sm', 'md', 'lg'] as const) {
+        const classes = fieldStyles({ variant, size, invalid: false });
+        expect(classes, `${variant}/${size}`).toContain(variant === 'soft' ? 'bg-ui-bg-elevated' : 'ring-1');
+      }
+    }
+  });
+
+  it('swaps the border and focus ring for the error colours when invalid', () => {
+    expect(fieldStyles({ variant: 'outline', size: 'md', invalid: true })).toContain('ring-ui-error');
+    expect(fieldStyles({ variant: 'outline', size: 'md', invalid: false })).toContain('ring-ui-border-accented');
+    expect(fieldStyles({ variant: 'outline', size: 'md', invalid: true })).not.toContain('ring-ui-primary');
+  });
+
+  it('NxInput renders the variant, size, leading and trailing icons', () => {
+    const wrapper = mount(NxInput, { props: { variant: 'subtle', size: 'lg', icon: Info, trailingIcon: Info, trailingLabel: 'Reveal' }, attachTo: document.body });
+    expect(wrapper.find('input').classes()).toContain('h-11');
+    expect(wrapper.find('input').classes()).toContain('rounded-ui-lg');
+    expect(wrapper.findAll('svg')).toHaveLength(2);
+    expect(wrapper.find('button').attributes('aria-label')).toBe('Reveal');
+  });
+
+  it('NxInput keeps attributes on the input element, not on the wrapper', () => {
+    const wrapper = mount(NxInput, { attrs: { 'aria-label': 'Search' } });
+    expect(wrapper.find('input').attributes('aria-label')).toBe('Search');
+    expect(wrapper.attributes('aria-label')).toBeUndefined();
+  });
+
+  it('NxTextarea applies the variant and size paddings', () => {
+    const wrapper = mount(NxTextarea, { props: { variant: 'soft', size: 'lg' } });
+    expect(wrapper.classes()).toContain('bg-ui-bg-elevated');
+    expect(wrapper.classes()).toContain('py-2.5');
+  });
+
+  it('NxSelect covers the variants and keeps the leading icon inside the field', () => {
+    const wrapper = mount(NxSelect, { props: { options: [], variant: 'subtle', size: 'sm', icon: Info } });
+    expect(wrapper.find('select').classes()).toContain('h-7');
+    expect(wrapper.find('select').classes()).toContain('pl-8');
+    expect(wrapper.findAll('svg')).toHaveLength(2);
+  });
+});
+
+describe('display variants', () => {
+  it('NxCard covers the 4 variants and only renders the parts it is given', () => {
+    for (const variant of ['outline', 'soft', 'subtle', 'solid'] as const) {
+      const wrapper = mount(NxCard, { props: { variant }, slots: { default: 'Body', footer: 'Footer' } });
+      expect(wrapper.classes(), variant).toContain(variant === 'outline' ? 'bg-ui-bg' : variant === 'solid' ? 'bg-ui-bg-inverted' : 'bg-ui-bg-muted');
+    }
+    const plain = mount(NxCard, { slots: { default: 'Body' } });
+    expect(plain.text()).toBe('Body');
+    expect(plain.html()).not.toContain('border-b');
+    expect(plain.html()).not.toContain('border-t');
+  });
+
+  it('NxCard header takes a title and description, and inverts them on the solid variant', () => {
+    const wrapper = mount(NxCard, { props: { title: 'Vehicles', description: 'All records' }, slots: { default: 'Body' } });
+    expect(wrapper.text()).toContain('Vehicles');
+    expect(wrapper.find('p').classes()).toContain('text-ui-text-highlighted');
+    const solid = mount(NxCard, { props: { variant: 'solid', title: 'Vehicles' }, slots: { default: 'Body' } });
+    expect(solid.find('p').classes()).toContain('text-ui-text-inverted');
+  });
+
+  it('NxKbd covers 3 variants x 3 sizes', () => {
+    expect(mount(NxKbd, { props: { variant: 'solid', size: 'lg' }, slots: { default: 'K' } }).classes()).toContain('bg-ui-bg-inverted');
+    expect(mount(NxKbd, { props: { variant: 'outline' }, slots: { default: 'K' } }).classes()).toContain('border-ui-border-accented');
+    expect(mount(NxKbd, { props: { size: 'sm' }, slots: { default: 'K' } }).classes()).toContain('py-px');
+  });
+
+  it('NxSkeleton covers the 3 shapes', () => {
+    for (const shape of ['line', 'circle', 'block'] as const) {
+      expect(mount(NxSkeleton, { props: { shape } }).classes(), shape).toContain('animate-pulse');
+    }
+    expect(mount(NxSkeleton, { props: { shape: 'circle' } }).classes()).toContain('rounded-full');
+    expect(mount(NxSkeleton, { props: { shape: 'block' } }).classes()).toContain('rounded-ui-lg');
+  });
+
+  it('NxSeparator shows a label between two lines, and has no label by default', () => {
+    const labelled = mount(NxSeparator, { props: { label: 'or' } });
+    expect(labelled.text()).toBe('or');
+    expect(labelled.attributes('role')).toBe('separator');
+    expect(mount(NxSeparator).attributes('role')).toBe('none');
+  });
+
+  it('NxChip covers both colours, both sizes, the icon and the remove button', () => {
+    expect(mount(NxChip, { props: { color: 'primary', size: 'sm' }, slots: { default: 'Draft' } }).classes()).toContain('bg-ui-primary-soft');
+    expect(mount(NxChip, { props: { size: 'md' }, slots: { default: 'Draft' } }).classes()).toContain('text-sm');
+    expect(mount(NxChip, { props: { icon: Info }, slots: { default: 'Draft' } }).find('svg').attributes('aria-hidden')).toBe('true');
+  });
+
+  it('NxIndicator covers the dot and count forms at every size', () => {
+    for (const size of nxSizes) {
+      expect(mount(NxIndicator, { props: { size, content: 'dot' } }).classes(), size).toContain('rounded-full');
+    }
+    const count = mount(NxIndicator, { props: { content: 'count', count: 12, label: 'Notifications' } });
+    expect(count.text()).toBe('12');
+    expect(count.attributes('role')).toBe('status');
+    expect(count.attributes('aria-label')).toBe('Notifications');
+    expect(mount(NxIndicator, { props: { content: 'count', count: 240, max: 99 } }).text()).toBe('99+');
+  });
+
+  it('NxToast covers the 5 colours and announces errors as alerts', () => {
+    for (const color of ['neutral', 'info', 'success', 'warning', 'error'] as const) {
+      const wrapper = mount(NxToast, { props: { color, title: 'Saved' } });
+      expect(wrapper.find('svg').exists(), color).toBe(true);
+      expect(wrapper.attributes('role')).toBe(color === 'error' ? 'alert' : 'status');
+    }
+  });
+
+  it('NxLogo covers mark and full at the three sizes', () => {
+    const mark = mount(NxLogo, { props: { type: 'mark', size: 'sm' } });
+    expect(mark.findAll('rect')).toHaveLength(2);
+    expect(mark.find('svg').classes()).toContain('size-6');
+    expect(mark.text()).toBe('');
+    const full = mount(NxLogo, { props: { type: 'full', size: 'lg' } });
+    expect(full.text()).toBe('Nexa');
+  });
+});

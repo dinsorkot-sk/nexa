@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger } from 'reka-ui';
 
+/**
+ * Short hint on hover or focus, as the mockup's Tooltip section: an inverted surface with an optional keyboard
+ * shortcut. `text` is required and is the tooltip's content; the trigger is the default slot.
+ */
 withDefaults(defineProps<{
   text: string;
   delayDuration?: number;
   side?: 'top' | 'right' | 'bottom' | 'left';
-}>(), { delayDuration: 300, side: 'top' });
+  /** Shortcut shown next to the text, for example "K". */
+  kbd?: string;
+}>(), {
+  delayDuration: 300,
+  side: 'top',
+  kbd: undefined,
+});
 </script>
 
 <template>
@@ -19,9 +29,13 @@ withDefaults(defineProps<{
           :side="side"
           :side-offset="6"
           :delay-duration="delayDuration"
-          class="z-50 rounded-ui bg-ui-bg-inverted px-2 py-1 text-xs text-ui-text-inverted"
+          class="z-50 flex items-center gap-2 rounded-ui-sm bg-ui-bg-inverted px-2 py-1 text-xs text-ui-text-inverted"
         >
           {{ text }}
+          <kbd
+            v-if="kbd"
+            class="rounded-ui-xs border border-ui-text-muted px-1 font-mono text-[11px]"
+          >{{ kbd }}</kbd>
         </TooltipContent>
       </TooltipPortal>
     </TooltipRoot>

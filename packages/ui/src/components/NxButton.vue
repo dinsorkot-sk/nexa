@@ -1,19 +1,23 @@
 <script setup lang="ts">
 import type { Component } from 'vue';
 import { LoaderCircle } from 'lucide-vue-next';
-import { buttonStyles, type ButtonColor, type ButtonSize } from '../lib/button';
+import { buttonClasses, type ButtonColor, type ButtonSize, type ButtonVariant } from '../lib/button';
 
 withDefaults(defineProps<{
+  /** Intent: primary, secondary, success, info, warning, error or neutral. */
   color?: ButtonColor;
+  /** Emphasis: solid, outline, soft, subtle, ghost or link. */
+  variant?: ButtonVariant;
   size?: ButtonSize;
   type?: 'button' | 'submit' | 'reset';
   disabled?: boolean;
-  /** Shows a spinner in place of the leading icon and blocks clicks. */
+  /** Shows a spinner in place of the leading icon and blocks clicks, as the mockup's Loading state. */
   loading?: boolean;
   icon?: Component;
   trailingIcon?: Component;
 }>(), {
   color: 'primary',
+  variant: 'solid',
   size: 'md',
   type: 'button',
   disabled: false,
@@ -28,7 +32,7 @@ withDefaults(defineProps<{
     :type="type"
     :disabled="disabled || loading"
     :aria-busy="loading || undefined"
-    :class="buttonStyles({ color, size })"
+    :class="buttonClasses(color, variant, size)"
   >
     <LoaderCircle
       v-if="loading"

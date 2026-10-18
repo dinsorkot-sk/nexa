@@ -54,9 +54,12 @@ describe('NxIconButton', () => {
 });
 
 describe('display components', () => {
-  it('NxBadge renders a dot when asked', () => {
-    const wrapper = mount(NxBadge, { props: { color: 'success', dot: true }, slots: { default: 'Active' } });
-    expect(wrapper.find('span.rounded-full.size-1\\.5').exists()).toBe(true);
+  it('NxBadge renders a dot when asked, and a variant fill', () => {
+    const wrapper = mount(NxBadge, { props: { color: 'success', variant: 'soft', dot: true }, slots: { default: 'Active' } });
+    const dot = wrapper.find('span > span');
+    expect(dot.classes()).toContain('rounded-full');
+    expect(dot.classes()).toContain('bg-ui-success');
+    expect(wrapper.classes()).toContain('bg-ui-success-soft');
     expect(wrapper.text()).toBe('Active');
   });
 
@@ -82,14 +85,15 @@ describe('display components', () => {
 describe('form controls', () => {
   it('NxInput emits the typed value and reflects modelValue', async () => {
     const wrapper = mount(NxInput, { props: { modelValue: 'a' } });
-    expect((wrapper.element as HTMLInputElement).value).toBe('a');
-    await wrapper.setValue('bc');
+    const input = wrapper.find('input');
+    expect((input.element as HTMLInputElement).value).toBe('a');
+    await input.setValue('bc');
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['bc']);
   });
 
   it('NxInput marks itself invalid for assistive technology', () => {
-    expect(mount(NxInput, { props: { invalid: true } }).attributes('aria-invalid')).toBe('true');
-    expect(mount(NxInput).attributes('aria-invalid')).toBeUndefined();
+    expect(mount(NxInput, { props: { invalid: true } }).find('input').attributes('aria-invalid')).toBe('true');
+    expect(mount(NxInput).find('input').attributes('aria-invalid')).toBeUndefined();
   });
 
   it('NxTextarea emits the typed value', async () => {
