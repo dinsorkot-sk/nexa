@@ -1,8 +1,23 @@
 """Split the Copy mockup's screen artboards into section-grouped Nexa FigCraft pages.
 
-Each source page group (Login, Admin, User) is split into a single Nexa page
-(named "<Group> · <Subcategory>") containing sections (one per screen).  Every
-section holds a Light and a Dark frame side-by-side.
+Each source page group (Login, Admin, User) becomes one Nexa page per subcategory
+(named "<Group> · <Subcategory>") holding one section per screen, with the Light and
+Dark frames side by side.
+
+Instances are re-linked to the component sets that already exist in Nexa.figcraft
+instead of being flattened into frames:
+
+* the base name of the instance picks the component set (`BASE_TO_SET`), and
+  `instance_match` chooses the variant whose own appearance is closest to the
+  instance's fill, stroke, label colour, size and child tree;
+* instances whose (deleted) source master is an icon are re-linked by icon name
+  through the icon page;
+* source instances that carry no children at all cannot be drawn from themselves, so
+  their art is rebuilt from the matched target variant (or icon, or a documented
+  fallback variant), and the copy becomes a real instance of it;
+* anything that matches nothing is left as a frame, and the script reports it.
+
+The script is repeatable: the pages it produced on an earlier run are removed first.
 """
 from __future__ import annotations
 
@@ -10,11 +25,15 @@ import argparse
 import copy
 import json
 import os
+import sys
 import tempfile
 import zipfile
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import instance_match as im  # noqa: E402  (local helper, kept beside this script)
 
 ROOT = Path(__file__).resolve().parents[1]
 DESTINATION = ROOT / "Nexa.figcraft"
@@ -26,7 +45,48 @@ PAGE_GROUPS = (
 )
 RADIO_VARIANT = "Checked=Unchecked, State=Default, Size=md, Label=No"
 CHECKBOX_VARIANT = "Checked=Checked, State=Default, Size=md, Label=No"
+IMPORTED_PREFIXES = ("Login · ", "Admin · ", "User · ")
 
+# Component mapping from source instance base names to target component sets.
+BASE_TO_SET = {
+    "Alert": "Alert",
+    "Avatar": "Avatar",
+    "Badge": "Badge",
+    "Button": "Button",
+    "Card": "Card",
+    "Checkbox": "Checkbox",
+    "IconButton": "IconButton",
+    "Input": "Input",
+    "Kbd": "Kbd",
+    "Logo": "Logo",
+    "Modal": "Modal",
+    "Nav": "NavItem",
+    "Radio": "Radio",
+    "Search": "Input",
+    "Segment": "Segment",
+    "Select": "Select",
+    "Switch": "Switch",
+    "Toast": "Toast",
+    # The Builder screens draw their variant tags with a local pill whose master was
+    # deleted; the library's Badge covers the same role.
+    "variant": "Badge",
+    "checked": "Checkbox",
+}
+# Empty source instances whose set cannot be matched fall back to this variant's art.
+FALLBACK_MASTERS = {
+    "Radio": ("Radio", RADIO_VARIANT),
+    "checked": ("Checkbox", CHECKBOX_VARIANT),
+}
+# Keys that describe the source document, not the target one; they would dangle here.
+SOURCE_ONLY_KEYS = (
+    "annotations",
+    "bound",
+    "componentSetId",
+    "prototype",
+    "source",
+    "styles",
+    "var_modes",
+)
 # Vertical gap between sections stacked on a consolidated page.
 PAGE_GAP = 80
 # Section background fill — matches the page background.
@@ -54,19 +114,38 @@ def subtree_ids(nodes: dict[str, dict], root_id: int) -> list[int]:
     return ordered
 
 
-def variant_ids(nodes: dict[str, dict]) -> dict[str, dict[str, int]]:
-    result: dict[str, dict[str, int]] = {}
+def named_variant(nodes: dict[str, dict], set_name: str, variant_name: str) -> int | None:
+    """Component id of a named variant inside a component set."""
     for node in nodes.values():
-        if node.get("type") != "componentSet":
+        if node.get("type") != "componentSet" or node.get("name") != set_name:
             continue
-        result[node["name"]] = {
-            nodes[str(child_id)]["name"]: child_id
-            for child_id in children_of(node)
-        }
-    return result
+        for child_id in children_of(node):
+            child = nodes.get(str(child_id))
+            if child is not None and child.get("name") == variant_name:
+                return child_id
+    return None
 
 
-def make_pages(document: dict, source: dict) -> tuple[dict, int]:
+def strip_imported(document: dict) -> tuple[int, int]:
+    """Remove the pages an earlier run produced, so importing twice is harmless."""
+    nodes = document["nodes"]
+    page_ids = [
+        page_id
+        for page_id in document["pages"]
+        if nodes[str(page_id)]["name"].startswith(IMPORTED_PREFIXES)
+    ]
+    removed = 0
+    for page_id in page_ids:
+        for node_id in subtree_ids(nodes, page_id):
+            if str(node_id) in nodes:
+                del nodes[str(node_id)]
+                removed += 1
+    dropped = set(page_ids)
+    document["pages"] = [page_id for page_id in document["pages"] if page_id not in dropped]
+    return len(page_ids), removed
+
+
+def make_pages(document: dict, source: dict, stats: dict[str, Counter]) -> tuple[dict, int]:
     nodes = document["nodes"]
     source_nodes = source["nodes"]
     source_pages = {
@@ -78,7 +157,9 @@ def make_pages(document: dict, source: dict) -> tuple[dict, int]:
         for node in nodes.values()
         if node.get("type") == "page" and node.get("name") == "Foundations"
     )
-    sets = variant_ids(nodes)
+    variants = im.VariantIndex(nodes)
+    target_icons = im.icon_index(nodes)
+    source_icons = im.source_icon_names(source_nodes)
     next_id = max(int(document.get("next_id", 1)), max(map(int, nodes)) + 1)
 
     def allocate() -> int:
@@ -97,12 +178,28 @@ def make_pages(document: dict, source: dict) -> tuple[dict, int]:
                 result[child["name"]] = child_id
         return result
 
-    def append_master_art(node_id: int, parent_id: int, root_id: int,
-                          root_name: str, root_transform: list,
-                          root_width: float, root_height: float) -> None:
-        master_id = sets["Radio" if source_nodes[str(node_id)]["name"] == "Radio" else "Checkbox"][
-            RADIO_VARIANT if source_nodes[str(node_id)]["name"] == "Radio" else CHECKBOX_VARIANT
-        ]
+    def matched_variant(original: dict) -> int | None:
+        """Variant of the mapped component set that best matches the source instance."""
+        set_name = BASE_TO_SET.get(im.base_name(original.get("name", "")))
+        if set_name is None or not variants.has(set_name):
+            return None
+        picked = variants.match(set_name, im.signature(source_nodes, original))
+        return None if picked is None else variants.resting(set_name, picked)
+
+    def relink(copied: dict, master_id: int) -> None:
+        copied["component"] = master_id
+        copied["props"] = {}
+        copied["overrides"] = []
+        for key in SOURCE_ONLY_KEYS:
+            copied.pop(key, None)
+
+    def build_master_art(master_id: int, parent_id: int, root_id: int, root_name: str,
+                         root_transform: list, root_width: float, root_height: float) -> None:
+        """Rebuild an empty source instance from a target master's own art.
+
+        The source instance has no children to copy, so its look can only come from the
+        target; the copy stays an instance of that master.
+        """
         ids = subtree_ids(nodes, master_id)
         remap = {old_id: (root_id if old_id == master_id else allocate()) for old_id in ids}
         for old_id in ids:
@@ -112,12 +209,16 @@ def make_pages(document: dict, source: dict) -> tuple[dict, int]:
             if copied.get("children"):
                 copied["children"] = [remap[child_id] for child_id in copied["children"]]
             if old_id == master_id:
-                copied["type"] = "frame"
+                copied["type"] = "instance"
                 copied["name"] = root_name
+                copied["component"] = master_id
                 copied["transform"] = root_transform
                 copied["width"] = root_width
                 copied["height"] = root_height
-                for key in ("component", "description", "props", "source", "overrides"):
+                copied["props"] = {}
+                copied["overrides"] = []
+                copied.pop("description", None)
+                for key in SOURCE_ONLY_KEYS:
                     copied.pop(key, None)
             nodes[str(copied["id"])] = copied
 
@@ -138,28 +239,50 @@ def make_pages(document: dict, source: dict) -> tuple[dict, int]:
                 copied["name"] = f"{screen['name']} · {suffix}"
                 copied["transform"] = [1.0, 0.0, 0.0, 1.0, x, 0.0]
 
-            node_type = original.get("type")
-            if node_type == "instance" and not children_of(original):
-                if original["name"] not in ("Radio", "checked"):
-                    raise ValueError(f"Cannot recover empty source instance {original['name']!r}")
-                original_id = copied["id"]
-                nodes[str(original_id)] = copied
-                append_master_art(
-                    old_id,
-                    int(copied["parent"]),
-                    original_id,
-                    original["name"],
-                    copied["transform"],
-                    float(original.get("width", 16)),
-                    float(original.get("height", 16)),
-                )
-                continue
+            if original.get("type") == "instance":
+                base = im.base_name(original.get("name", ""))
+                icon_name = source_icons.get(original.get("component"))
+                icon_id = target_icons.get(icon_name) if icon_name else None
+                if children_of(original):
+                    master_id = matched_variant(original)
+                    if master_id is not None:
+                        relink(copied, master_id)
+                        nodes[str(copied["id"])] = copied
+                        stats["set"][BASE_TO_SET[base]] += 1
+                        continue
+                    if icon_id is not None:
+                        relink(copied, icon_id)
+                        nodes[str(copied["id"])] = copied
+                        stats["icon"][base] += 1
+                        continue
+                else:
+                    art_id = matched_variant(original) or icon_id
+                    if art_id is None:
+                        fallback = FALLBACK_MASTERS.get(base)
+                        if fallback is not None:
+                            art_id = named_variant(nodes, *fallback)
+                    if art_id is not None:
+                        build_master_art(
+                            art_id,
+                            int(copied["parent"]),
+                            int(copied["id"]),
+                            original["name"],
+                            copied["transform"],
+                            float(original.get("width", 16)),
+                            float(original.get("height", 16)),
+                        )
+                        stats["art"][base] += 1
+                        continue
 
-            if node_type in ("instance", "component", "componentSet"):
+                stats["frame"][base] += 1
                 copied["type"] = "frame"
-                for key in ("component", "description", "props", "source", "overrides"):
-                    copied.pop(key, None)
-            for key in ("annotations", "bound", "prototype", "source", "var_modes", "styles"):
+            elif original.get("type") in ("component", "componentSet"):
+                copied["type"] = "frame"
+                copied.pop("description", None)
+
+            for key in SOURCE_ONLY_KEYS:
+                copied.pop(key, None)
+            for key in ("component", "props", "overrides"):
                 copied.pop(key, None)
             if isinstance(copied.get("style"), dict):
                 copied["style"].pop("style_id", None)
@@ -246,10 +369,23 @@ def make_pages(document: dict, source: dict) -> tuple[dict, int]:
     return document, screen_count
 
 
+def imported_node_ids(nodes: dict[str, dict], document: dict) -> set[str]:
+    result: set[str] = set()
+    for page_id in document["pages"]:
+        page = nodes[str(page_id)]
+        if page.get("name", "").startswith(IMPORTED_PREFIXES):
+            result.update(str(node_id) for node_id in subtree_ids(nodes, page_id))
+    return result
+
+
 def validate(document: dict) -> list[str]:
     nodes = document["nodes"]
     errors: list[str] = []
     ids = set(nodes)
+    variable_ids = {
+        variable["id"]
+        for variable in (document.get("variables") or {}).get("variables", [])
+    }
     for node_id, node in nodes.items():
         if str(node["id"]) != node_id:
             errors.append(f"Node key/id mismatch: {node_id}")
@@ -263,7 +399,7 @@ def validate(document: dict) -> list[str]:
             errors.append(f"{node_id}: missing parent")
         if node.get("type") == "instance" and str(node.get("component")) not in ids:
             errors.append(f"{node_id}: missing component {node.get('component')}")
-        if node.get("type") == "page" and node.get("name", "").startswith(("Login · ", "Admin · ", "User · ")):
+        if node.get("type") == "page" and node.get("name", "").startswith(IMPORTED_PREFIXES):
             page_children = node.get("children", [])
             child_types = {nodes.get(str(c), {}).get("type") for c in page_children}
             if "section" in child_types:
@@ -286,9 +422,44 @@ def validate(document: dict) -> list[str]:
                 for child_id in page_children
             ):
                 errors.append(f"{node_id}: screen frame labels must identify their theme")
+    for node_id in imported_node_ids(nodes, document):
+        node = nodes[node_id]
+        for key, value in (node.get("bound") or {}).items():
+            if value not in variable_ids:
+                errors.append(f"{node_id}: bound {key}={value!r} is not a variable of this document")
+        if node.get("type") == "instance" and "componentSetId" in node:
+            errors.append(f"{node_id}: imported instances must not carry componentSetId")
     if len(document["pages"]) != len(set(document["pages"])):
         errors.append("Duplicate page IDs")
     return errors
+
+
+def report(stats: dict[str, Counter], screen_count: int, pages: int, node_count: int) -> None:
+    mapped = sum(stats["set"].values())
+    icons = sum(stats["icon"].values())
+    art = sum(stats["art"].values())
+    frames = sum(stats["frame"].values())
+    total = mapped + icons + art + frames
+    linked = total - frames
+    share = f" ({linked / total:.1%})" if total else ""
+    print(
+        f"Validated {screen_count} screen sections across {pages} pages; "
+        f"{node_count} nodes, {pages} total pages."
+    )
+    print(
+        f"Instances re-linked: {linked}/{total}{share} — "
+        f"{mapped} to component sets, {icons} to icons, {art} rebuilt from target art"
+    )
+    for set_name, count in stats["set"].most_common():
+        print(f"   set    {count:5d}  {set_name}")
+    for base, count in stats["icon"].most_common(10):
+        print(f"   icon   {count:5d}  {base!r}")
+    for base, count in stats["art"].most_common(10):
+        print(f"   art    {count:5d}  {base!r}")
+    if frames:
+        print(f"Left as frames: {frames}")
+        for base, count in stats["frame"].most_common(20):
+            print(f"   frame  {count:5d}  {base!r}")
 
 
 def main() -> None:
@@ -302,27 +473,21 @@ def main() -> None:
     with zipfile.ZipFile(SOURCE) as archive:
         source = json.loads(archive.read("document.json"))
 
-    already_added = [
-        document["nodes"][str(page_id)]["name"]
-        for page_id in document["pages"]
-        if document["nodes"][str(page_id)]["name"].startswith(("Login · ", "Admin · ", "User · "))
-    ]
-    if already_added:
-        raise SystemExit(
-            "Screen pages are already present; refusing to duplicate them.\n"
-            "Import is idempotent — each run regenerates the full section tree from the\n"
-            "Copy mockup.  If you need a clean import, remove existing screen pages\n"
-            "from Nexa.figcraft first, then re-run."
-        )
+    dropped_pages, dropped_nodes = strip_imported(document)
+    if dropped_pages:
+        print(f"Replaced {dropped_pages} previously imported pages ({dropped_nodes} nodes removed).")
 
-    document, count = make_pages(document, source)
+    stats: dict[str, Counter] = {
+        "set": Counter(),
+        "icon": Counter(),
+        "art": Counter(),
+        "frame": Counter(),
+    }
+    document, count = make_pages(document, source, stats)
     errors = validate(document)
     if errors:
         raise SystemExit("\n".join(errors[:20]))
-    print(
-        f"Validated {count} screen sections across {len([p for p in document['pages']])} pages; "
-        f"{len(document['nodes'])} nodes, {len(document['pages'])} total pages."
-    )
+    report(stats, count, len(document["pages"]), len(document["nodes"]))
     if not args.write:
         print("Dry run only. Pass --write to update Nexa.figcraft.")
         return
