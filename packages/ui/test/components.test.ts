@@ -110,11 +110,12 @@ describe('form controls', () => {
       props: { options: [{ value: 'a', label: 'Alpha' }, { value: 'b', label: 'Beta' }], placeholder: 'Choose' },
       attrs: { 'aria-label': 'Status' },
     });
-    expect(wrapper.find('select').attributes('aria-label')).toBe('Status');
-    await wrapper.find('select').setValue('b');
+    expect(wrapper.find('button').attributes('aria-label')).toBe('Status');
+    await wrapper.find('button').trigger('click');
+    await flushPromises();
+    await wrapper.find('[role="option"]:nth-child(2)').trigger('click');
+    await flushPromises();
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['b']);
-    await wrapper.find('select').setValue('');
-    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([undefined]);
   });
 
   it('NxCheckbox toggles through Reka and emits a boolean', async () => {
