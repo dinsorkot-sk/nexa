@@ -31,7 +31,9 @@ Rule: one phase per version branch (`v0.0.1`, `v0.0.2`, ...), in order. Phase 0 
 | 21 | v0.0.22 | Replace hand-built UI with Nuxt UI (`packages/ui`): delete the custom Ui* primitives, tokens, Histoire playground and metadata renderers; rebuild `packages/ui` as a Nuxt layer on `@nuxt/ui` v4 (theme primary emerald, neutral slate, Inter + Noto Sans Thai) with a Nuxt playground and a Vitest smoke test | complete | Requested by the user, who discarded the uncommitted v0.0.21-era UI work. Removed `docs/design.md`, `docs/plans/ux-ui-redesign.md` and `docs/_preview-ref-board.html`. **Verified 2026-10-14** in `packages/ui`: `nuxi prepare`, `nuxi typecheck`, Vitest (2/2), playground `nuxi build`, and ESLint (0 errors, 0 warnings) pass. Vitest uses happy-dom with the Nuxt UI Vite plugin, not the Nuxt test environment, which failed during setup. Metadata field/view renderers are not rebuilt in this phase. |
 | 22 | v0.0.23 | Own component library (`packages/ui`, Tailwind): replace the Nuxt UI layer with Nexa's own components, built from the Figma mockup `nexa.figcraft`. Plain Vue 3 + Tailwind v4 package; overlays on Reka UI. Scope in the section below | complete | **Verified 2026-10-16** in `packages/ui`: `vue-tsc` typecheck 0 errors; Vitest 190/190 across 5 files; ESLint 0 errors and 0 warnings; `vite build` of the playground passes; playground checked in headless Chromium in Light and Dark. Mockup contrast: several of the mockup's own pairs fail WCAG AA (white on the primary fill 2.38:1, white on danger 3.81:1, primary text on its tint 3.23:1, warning text on white 2.94:1, dimmed text 2.63:1). Solid fills use a new `--ui-on-solid` label token (`#0f172b`, both modes), and labels on tints use the highlighted text token; the test suite documents the failing pairs. Root `pnpm typecheck` still fails in `@nexa/sdk` (4 implicit-any errors in `test/sdk.test.ts`); the same errors are present at `v0.0.22`, so they predate this phase and were not changed. Not checked: screen readers, touch and mobile layouts, browsers other than Chromium, and full keyboard coverage (Combobox and DatePicker keyboard tests are partial). |
 
-Full functional requirements and acceptance criteria are in the user-provided LOGHOLIZON SRS v1.0, adapted to the decisions documented here. Do not add phases beyond this table (Phase 22 was added at the user's explicit request).
+| 23 | v0.0.24 | Own component library — mockup completeness pass (`packages/ui`): finish every component against `mockup/Nexa.figcraft` — token fidelity, the full Colour × Variant × Size × State axes, the navigation/overlay set, the data/composite set, the charts and the builder/app-shell panels, plus a full playground gallery | complete | **Verified 2026-10-18** in `packages/ui`: `vue-tsc` typecheck 0 errors; Vitest 332/332 across 7 files; ESLint 0 errors and 0 warnings; `vite build` of the playground passes and emits the new utilities. Visual comparison in a browser was not run this pass. |
+
+Full functional requirements and acceptance criteria are in the user-provided LOGHOLIZON SRS v1.0, adapted to the decisions documented here. Do not add phases beyond this table (Phases 22 and 23 were added at the user's explicit request).
 
 ## Phase 22 — Own component library in `packages/ui` (complete)
 
@@ -56,3 +58,31 @@ Source design: `D:\project\mockup\nexa.figcraft` (a zip holding `document.json`;
 - Components use only token utilities (no raw hex), support Light and Dark, and are keyboard accessible with correct ARIA.
 - Decided 2026-10-16: overlays use Reka UI; `packages/ui` is a plain Vue 3 + Tailwind v4 package (no Nuxt layer, no `@nuxt/ui`).
 - Out of scope: reassembling `apps/web`, file upload, charts, and new backend endpoints. Screens in the mockup are reference for later phases; this phase ships components only.
+
+## Phase 23 — Mockup completeness pass in `packages/ui` (complete)
+
+Requested by the user: make the `packages/ui` component library complete, using `mockup/Nexa.figcraft` as the source of truth, covering every component in priority groups and shipping in tested batches. Shipped on branch `v0.0.24` in five commits.
+
+### Source and ground rules
+- The mockup is a zip holding `document.json`; the per-section specs in `mockup/_generator/comp_*.py` (CTRL/SW/FIELD/TS/SEG tables, per-tone fills, shadows, `Nexa/*` text styles) are the authoritative reference for each section.
+- `src/lib/tone.ts` stays the single literal-class source of truth: Tailwind only generates class names it can read in the source, so per-tone colours use record maps keyed by tone, never string concatenation.
+- Token fidelity: the base radius is the mockup's "Default (4)" mode (`--ui-radius: 4px`), so `rounded-ui` is 6px, `rounded-ui-lg` 8px, `rounded-ui-xl` 12px. Overlays use the mockup scrim token `bg-ui-overlay`.
+
+### What changed
+1. **Foundation and base components** (`a93e0ee`): the full design-token set, the tone table (42 Colour × Variant pairs), and the Colour/Variant/Size/State axes for Button, IconButton, Badge, Alert, Input, Textarea, Select, Card, Kbd, Chip, Avatar, Indicator, Skeleton, Separator, EmptyState, Tooltip, Toast and Logo.
+2. **Form controls** (`c14d597`, `8fea728`): size and control-state axes for Checkbox, Radio, Switch and FormField (with `NxFormField`); mockup states for the SelectMenu (combobox) and DatePicker, with new locale keys `noMatches`, `noMatchesHint`, `selectedCount`, `clear`.
+3. **Navigation and overlays** (`e614eb9`): Tabs, Segment, NavItem, NavGroupLabel, Breadcrumb, PageButton, Pagination (ellipsis windowing and the `range` summary), Menu, Modal, Slideover, Popover, CommandPalette, Accordion and Banner.
+4. **Data and composite** (`ade3700`): Table/TableRow density and states, StatCard, Progress, Stepper, KanbanCard, FileUpload, ActivityItem (owns the marker and connector), Timeline, Link, AvatarGroup, WorkflowNode/Edge, DiffRow, PackageDiff, PermissionCell, FieldRow and ChartCard.
+5. **Charts, code and app shell** (`a115f1c`): Bar/Line/Donut charts with the mockup axis, grid lines, series points and donut centre, the shared ChartLegend palette, a dark CodeBlock with file name, numbered lines and a copy button, the FormulaEditor status panel, the OrgSwitcher avatar/name/chevrons trigger, and the Sidebar/Navbar/PageHeader/PermissionsTable/CalendarView sizes and fills.
+
+### Breaking API changes (no `apps/web` consumer)
+- `NxButton variant="ghost"`, `color="error"`; `NxIconButton` defaults to `color="neutral" variant="ghost"`.
+- `NxIndicator` is the corner dot/count badge; `NxWorkflowNode kind` is `'start' | 'step' | 'end'`.
+- `NxActivityItem` renders the mockup marker/connector and owns the connector line instead of `NxTimeline`.
+- `NxPagination` renders page buttons with the `range` summary instead of the old `page / pageCount` text.
+- `NxOrgSwitcher` is a button trigger that opens a menu, not an `NxSelect`.
+
+### Gate
+- `vue-tsc` typecheck 0 errors; Vitest 332/332 across 7 files; ESLint 0 errors and 0 warnings; `vite build` of the playground passes and the new utilities (`w-62`, `w-54`, `min-h-15`, `h-11`, `w-22`, `h-26`, `rounded-t-[3px]`, `size-[22px]`, the secondary tones) are emitted.
+- `playground/App.vue` is now a full gallery that mirrors the mockup's Components page sections with a Light/Dark toggle; every exported component is exercised there.
+- Not run this pass: comparison in a real browser (the previous phase used headless Chromium), and screen reader or touch coverage.
