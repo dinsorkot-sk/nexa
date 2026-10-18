@@ -53,6 +53,18 @@ import NxTextarea from '../src/components/NxTextarea.vue';
 import NxToast from '../src/components/NxToast.vue';
 import NxWorkflowEdge from '../src/components/NxWorkflowEdge.vue';
 import NxWorkflowNode from '../src/components/NxWorkflowNode.vue';
+import NxBarChart from '../src/components/NxBarChart.vue';
+import NxCalendarView from '../src/components/NxCalendarView.vue';
+import NxChartLegend from '../src/components/NxChartLegend.vue';
+import NxCodeBlock from '../src/components/NxCodeBlock.vue';
+import NxDonutChart from '../src/components/NxDonutChart.vue';
+import NxFormulaEditor from '../src/components/NxFormulaEditor.vue';
+import NxLineChart from '../src/components/NxLineChart.vue';
+import NxNavbar from '../src/components/NxNavbar.vue';
+import NxOrgSwitcher from '../src/components/NxOrgSwitcher.vue';
+import NxPageHeader from '../src/components/NxPageHeader.vue';
+import NxPermissionsTable from '../src/components/NxPermissionsTable.vue';
+import NxSidebar from '../src/components/NxSidebar.vue';
 import { buttonClasses } from '../src/lib/button';
 import { fieldStyles } from '../src/lib/input';
 import { dotColor, tone, nxColors, nxSizes, nxVariants, } from '../src/lib/tone';
@@ -853,3 +865,130 @@ describe('display variants', () => {
     expect(full.text()).toBe('Nexa');
   });
 });
+
+describe('chart, app shell and builder panels', () => {
+  it('NxChartLegend follows the chart palette', () => {
+    const wrapper = mount(NxChartLegend, { props: { items: [{ label: 'Fuel' }, { label: 'Service' }, { label: 'Other' }], label: 'Series' } });
+    expect(wrapper.classes()).toContain('text-ui-text-muted');
+    const dots = wrapper.findAll('li > span:first-child');
+    expect(dots[0].classes()).toContain('bg-ui-primary');
+    expect(dots[1].classes()).toContain('bg-ui-secondary');
+    expect(dots[2].classes()).toContain('bg-ui-warning');
+  });
+
+  it('NxBarChart draws the axis, the primary/secondary bars and the legend for two series', () => {
+    const single = mount(NxBarChart, { props: { labels: ['Apr', 'May'], series: [{ label: 'Fuel', values: [40, 80] }], label: 'Cost by month' } });
+    expect(single.text()).toContain('100');
+    const bars = single.findAll('.bg-ui-primary');
+    expect(bars).toHaveLength(2);
+    expect(bars[0].attributes('style')).toContain('40%');
+    expect(single.findAll('li')).toHaveLength(0);
+    const double = mount(NxBarChart, { props: { labels: ['Apr'], series: [{ label: 'Fuel', values: [40] }, { label: 'Service', values: [20] }], label: 'Cost by month' } });
+    const pair = double.findAll('div').filter((node) => node.classes().includes('w-3.5'));
+    expect(pair).toHaveLength(2);
+    expect(pair[1].classes()).toContain('bg-ui-secondary');
+    expect(double.findAll('li')).toHaveLength(2);
+  });
+
+  it('NxLineChart draws one polyline and one point per value', () => {
+    const wrapper = mount(NxLineChart, { props: { labels: ['Apr', 'May', 'Jun'], series: [{ label: 'Fuel', values: [40, 62, 35] }], label: 'Records by month' } });
+    expect(wrapper.findAll('polyline')).toHaveLength(1);
+    expect(wrapper.findAll('span.absolute')).toHaveLength(3);
+    const double = mount(NxLineChart, { props: { labels: ['Apr', 'May'], series: [{ label: 'A', values: [1, 2] }, { label: 'B', values: [2, 1] }], label: 'Series' } });
+    expect(double.findAll('polyline')).toHaveLength(2);
+    expect(double.findAll('span.absolute')).toHaveLength(4);
+  });
+
+  it('NxDonutChart shows the centre total and the share per segment', () => {
+    const wrapper = mount(NxDonutChart, {
+      props: {
+        segments: [{ label: 'Active', value: 55 }, { label: 'In service', value: 30 }, { label: 'Retired', value: 15 }],
+        label: 'Fleet',
+        centerValue: '1,204',
+        centerLabel: 'Total',
+      },
+    });
+    expect(wrapper.text()).toContain('1,204');
+    expect(wrapper.text()).toContain('Total');
+    expect(wrapper.text()).toContain('55%');
+    expect(wrapper.text()).toContain('15%');
+    expect(wrapper.findAll('circle')).toHaveLength(4);
+    expect(wrapper.findAll('li')).toHaveLength(3);
+  });
+
+  it('NxCodeBlock shows the file name, the numbered lines and the copy button', () => {
+    const wrapper = mount(NxCodeBlock, { props: { code: '{\n  "module": "vehicles"\n}', filename: 'package.json', copyable: true, label: 'Package' } });
+    expect(wrapper.classes()).toContain('rounded-ui-lg');
+    expect(wrapper.classes()).toContain('bg-ui-bg-inverted');
+    expect(wrapper.text()).toContain('package.json');
+    expect(wrapper.findAll('code')).toHaveLength(3);
+    expect(wrapper.findAll('pre span')).toHaveLength(3);
+    expect(wrapper.find('button').attributes('aria-label')).toBe('Copy');
+    const plain = mount(NxCodeBlock, { props: { code: 'a\nb', lineNumbers: false } });
+    expect(plain.findAll('code')).toHaveLength(2);
+    expect(plain.findAll('pre span')).toHaveLength(0);
+    expect(plain.find('button').exists()).toBe(false);
+  });
+
+  it('NxFormulaEditor follows the valid, error and empty states', () => {
+    const valid = mount(NxFormulaEditor, { props: { modelValue: 'price * quantity', label: 'Formula', hint: 'Result preview: 13,375.00' } });
+    expect(valid.text()).toContain('Valid');
+    expect(valid.text()).toContain('Result preview');
+    expect(valid.find('textarea').element.value).toBe('price * quantity');
+    const error = mount(NxFormulaEditor, { props: { modelValue: 'price *', label: 'Formula', error: 'Unexpected end of expression.' } });
+    expect(error.text()).toContain('Error');
+    expect(error.text()).toContain('Unexpected end of expression.');
+    expect(error.classes()).toContain('border-ui-error');
+    expect(error.find('textarea').attributes('aria-invalid')).toBe('true');
+    const empty = mount(NxFormulaEditor, { props: { modelValue: '', label: 'Formula', rows: 4 } });
+    expect(empty.text()).toContain('Empty');
+    expect(empty.findAll('div[aria-hidden="true"] span')).toHaveLength(4);
+  });
+
+  it('NxOrgSwitcher shows the active membership and switches on select', async () => {
+    const wrapper = mount(NxOrgSwitcher, {
+      props: { modelValue: 'acme', organizations: [{ value: 'acme', label: 'Acme Co.' }, { value: 'beta', label: 'Beta Co.' }], label: 'Organization' },
+    });
+    expect(wrapper.text()).toContain('Acme Co.');
+    const trigger = wrapper.get('button[aria-haspopup="menu"]');
+    expect(trigger.attributes('aria-expanded')).toBe('false');
+    await trigger.trigger('click');
+    expect(trigger.attributes('aria-expanded')).toBe('true');
+    const options = wrapper.findAll('[role="menuitemradio"]');
+    expect(options).toHaveLength(2);
+    expect(options[0].attributes('aria-checked')).toBe('true');
+    await options[1].trigger('click');
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['beta']);
+    expect(wrapper.find('[role="menu"]').exists()).toBe(false);
+  });
+
+  it('NxPermissionsTable uses the mockup header and the mono permission names', () => {
+    const wrapper = mount(NxPermissionsTable, {
+      props: { roles: [{ id: 'owner', label: 'owner' }], permissions: [{ id: 'definition:read', label: 'definition:read' }], modelValue: {}, label: 'Permissions' },
+    });
+    expect(wrapper.text()).toContain('Permission');
+    const headers = wrapper.findAll('th');
+    expect(headers[0].classes()).toContain('h-10');
+    expect(headers[1].classes()).toContain('w-22');
+    const rowHeader = wrapper.get('tbody th');
+    expect(rowHeader.classes()).toContain('font-mono');
+    expect(rowHeader.classes()).toContain('h-11');
+  });
+
+  it('the app shell follows the mockup backgrounds and sizes', () => {
+    const sidebar = mount(NxSidebar, { props: { groups: [{ label: 'Main', items: [{ label: 'Home' }] }], label: 'Navigation' } });
+    expect(sidebar.classes()).toContain('bg-ui-bg-muted');
+    expect(sidebar.classes()).toContain('w-62');
+    expect(mount(NxSidebar, { props: { groups: [], label: 'Navigation', collapsed: true } }).classes()).toContain('w-16');
+
+    const navbar = mount(NxNavbar);
+    expect(navbar.classes()).toContain('min-h-15');
+    expect(navbar.classes()).toContain('px-6');
+
+    const header = mount(NxPageHeader, { props: { title: 'Vehicles', description: 'Fleet records' } });
+    expect(header.get('p').classes()).toContain('text-ui-text-muted');
+
+    expect(mount(NxCalendarView, { props: { month: '2026-10', label: 'Calendar' } }).classes()).toContain('rounded-ui-lg');
+  });
+});
+

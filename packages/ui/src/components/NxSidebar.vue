@@ -30,8 +30,8 @@ const toggleLabel = computed(() => props.collapsed ? 'Expand sidebar' : 'Collaps
   <aside
     :aria-label="label"
     :class="[
-      'flex h-full flex-col border-r border-ui-border bg-ui-bg transition-[width]',
-      collapsed ? 'w-16' : 'w-64',
+      'flex h-full flex-col border-r border-ui-border bg-ui-bg-muted transition-[width]',
+      collapsed ? 'w-16' : 'w-62',
     ]"
   >
     <div class="flex min-h-14 items-center justify-between gap-2 border-b border-ui-border px-3">
@@ -60,7 +60,7 @@ const toggleLabel = computed(() => props.collapsed ? 'Expand sidebar' : 'Collaps
         />
       </button>
     </div>
-    <nav class="flex-1 space-y-5 overflow-y-auto p-3">
+    <nav class="flex-1 space-y-5 overflow-y-auto px-3 py-4">
       <section
         v-for="group in groups"
         :key="group.label"

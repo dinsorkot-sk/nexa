@@ -87,7 +87,7 @@ function eventsFor(date: string) {
 <template>
   <section
     :aria-label="label"
-    class="overflow-hidden rounded-ui border border-ui-border bg-ui-bg"
+    class="overflow-hidden rounded-ui-lg border border-ui-border bg-ui-bg"
   >
     <header class="flex items-center justify-between border-b border-ui-border px-3 py-2">
       <h2 class="text-sm font-semibold text-ui-text-highlighted">

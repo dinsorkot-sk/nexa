@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useNxMessages } from '../lib/locale';
 import NxPermissionCell from './NxPermissionCell.vue';
 
 export interface NxPermissionRole {
@@ -24,6 +25,8 @@ const emit = defineEmits<{
   change: [roleId: string, permissionId: string, value: boolean];
 }>();
 
+const messages = useNxMessages();
+
 function update(roleId: string, permissionId: string, value: boolean) {
   const next = Object.fromEntries(
     Object.entries(props.modelValue).map(([key, permissions]) => [key, { ...permissions }]),
@@ -35,54 +38,56 @@ function update(roleId: string, permissionId: string, value: boolean) {
 </script>
 
 <template>
-  <div class="overflow-x-auto rounded-ui border border-ui-border">
-    <table class="w-full border-collapse text-sm">
-      <caption class="sr-only">
-        {{ label }}
-      </caption>
-      <thead class="bg-ui-bg-muted text-xs text-ui-text-muted">
-        <tr>
-          <th
-            scope="col"
-            class="px-3 py-2 text-left"
+  <div class="overflow-hidden rounded-ui-lg border border-ui-border bg-ui-bg">
+    <div class="overflow-x-auto">
+      <table class="w-full border-collapse text-sm">
+        <caption class="sr-only">
+          {{ label }}
+        </caption>
+        <thead class="bg-ui-bg-muted text-ui-text-muted">
+          <tr class="border-b border-ui-border">
+            <th
+              scope="col"
+              class="h-10 pl-4 pr-3 text-left text-xs font-medium"
+            >
+              {{ messages.permission }}
+            </th>
+            <th
+              v-for="role in roles"
+              :key="role.id"
+              scope="col"
+              class="h-10 w-22 px-3 text-center text-xs font-medium"
+            >
+              {{ role.label }}
+            </th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-ui-border">
+          <tr
+            v-for="permission in permissions"
+            :key="permission.id"
           >
-            Permission
-          </th>
-          <th
-            v-for="role in roles"
-            :key="role.id"
-            scope="col"
-            class="px-3 py-2 text-center font-medium"
-          >
-            {{ role.label }}
-          </th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-ui-border">
-        <tr
-          v-for="permission in permissions"
-          :key="permission.id"
-        >
-          <th
-            scope="row"
-            class="px-3 py-2 text-left font-medium text-ui-text-highlighted"
-          >
-            {{ permission.label }}
-          </th>
-          <td
-            v-for="role in roles"
-            :key="role.id"
-            class="px-3 py-2 text-center"
-          >
-            <NxPermissionCell
-              :model-value="modelValue[role.id]?.[permission.id] ?? false"
-              :label="`${role.label}: ${permission.label}`"
-              :disabled="disabled"
-              @update:model-value="update(role.id, permission.id, $event)"
-            />
-          </td>
-        </tr>
-      </tbody>
-    </table>
+            <th
+              scope="row"
+              class="h-11 pl-4 pr-3 text-left font-mono text-sm font-normal text-ui-text-highlighted"
+            >
+              {{ permission.label }}
+            </th>
+            <td
+              v-for="role in roles"
+              :key="role.id"
+              class="h-11 w-22 px-3 text-center"
+            >
+              <NxPermissionCell
+                :model-value="modelValue[role.id]?.[permission.id] ?? false"
+                :label="`${role.label}: ${permission.label}`"
+                :disabled="disabled"
+                @update:model-value="update(role.id, permission.id, $event)"
+              />
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </template>

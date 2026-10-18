@@ -34,6 +34,10 @@ export interface NxMessages {
   no: string;
   invalidJson: string;
   urlOnly: string;
+  statusValid: string;
+  statusError: string;
+  statusEmpty: string;
+  permission: string;
 }
 
 export const messages: Record<NxLocale, NxMessages> = {
@@ -65,6 +69,10 @@ export const messages: Record<NxLocale, NxMessages> = {
     no: 'No',
     invalidJson: 'Invalid JSON',
     urlOnly: 'Stored as a link. File upload is not supported yet.',
+    statusValid: 'Valid',
+    statusError: 'Error',
+    statusEmpty: 'Empty',
+    permission: 'Permission',
   },
   th: {
     close: 'ปิด',
@@ -94,6 +102,10 @@ export const messages: Record<NxLocale, NxMessages> = {
     no: 'ไม่ใช่',
     invalidJson: 'รูปแบบ JSON ไม่ถูกต้อง',
     urlOnly: 'เก็บเป็นลิงก์ ยังไม่รองรับการอัปโหลดไฟล์',
+    statusValid: 'ถูกต้อง',
+    statusError: 'ผิดพลาด',
+    statusEmpty: 'ว่าง',
+    permission: 'สิทธิ์',
   },
 };
 

@@ -9,7 +9,7 @@ withDefaults(defineProps<{
 </script>
 
 <template>
-  <header class="flex min-h-14 items-center justify-between gap-4 border-b border-ui-border bg-ui-bg px-4">
+  <header class="flex min-h-15 items-center justify-between gap-3 border-b border-ui-border bg-ui-bg px-6">
     <div class="flex min-w-0 items-center gap-3">
       <slot name="leading" />
       <div class="min-w-0">
