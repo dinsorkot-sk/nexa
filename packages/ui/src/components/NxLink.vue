@@ -16,7 +16,7 @@ const props = withDefaults(defineProps<{
 
 const safeUrl = computed(() => (props.disabled ? undefined : safeHref(props.href)));
 const linkClass = computed(() => [
-  'inline-flex items-center gap-1 rounded outline-none underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-ui-primary',
+  'inline-flex items-center gap-1 rounded outline-none underline-offset-2 transition-colors duration-ui-fast ease-ui-out hover:underline focus-visible:ring-2 focus-visible:ring-ui-primary',
   props.tone === 'primary' ? 'text-ui-primary-text' : 'text-ui-text-muted hover:text-ui-text-highlighted',
 ]);
 </script>

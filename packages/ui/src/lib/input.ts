@@ -9,7 +9,7 @@ import { tv } from 'tailwind-variants';
  * resolved by stylesheet order instead of by state.
  */
 export const fieldStyles = tv({
-  base: 'block w-full bg-ui-bg text-ui-text-highlighted outline-none transition-colors placeholder:text-ui-text-dimmed disabled:cursor-not-allowed disabled:opacity-50 read-only:bg-ui-bg-muted',
+  base: 'block w-full bg-ui-bg text-ui-text-highlighted outline-none transition-[color,background-color,border-color,box-shadow] duration-ui-fast ease-ui-out placeholder:text-ui-text-dimmed disabled:cursor-not-allowed disabled:opacity-50 read-only:bg-ui-bg-muted',
   variants: {
     variant: {
       outline: 'rounded-ui ring-1 ring-inset',

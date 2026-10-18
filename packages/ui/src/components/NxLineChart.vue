@@ -68,7 +68,7 @@ const pointStrokes = ['border-ui-primary', 'border-ui-secondary', 'border-ui-war
           :style="{ height: `${props.height}px` }"
         >
           <svg
-            class="absolute inset-0 h-full w-full"
+            class="absolute inset-0 h-full w-full animate-ui-wipe"
             viewBox="0 0 100 100"
             preserveAspectRatio="none"
             aria-hidden="true"
@@ -94,9 +94,9 @@ const pointStrokes = ['border-ui-primary', 'border-ui-secondary', 'border-ui-war
               v-for="(point, pointIndex) in line.points"
               :key="pointIndex"
               aria-hidden="true"
-              class="absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-ui-bg"
+              class="absolute size-2 -translate-x-1/2 -translate-y-1/2 animate-ui-fade-in rounded-full border-2 bg-ui-bg"
               :class="pointStrokes[index % pointStrokes.length]"
-              :style="{ left: `${point.x}%`, top: `${point.y}%` }"
+              :style="{ left: `${point.x}%`, top: `${point.y}%`, animationDelay: `${pointIndex * 60 + 120}ms` }"
             />
           </template>
         </div>

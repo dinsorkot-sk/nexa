@@ -82,6 +82,17 @@
 
   /* Base radius, the mockup's "Default (4)" mode. theme.css derives ui-xs (0.5x) to ui-2xl (4x) from it. */
   --ui-radius: 4px;
+
+  /*
+   * Motion. Durations are mode-independent, so like the radius they are declared once here rather than in `.dark`.
+   * motion.css maps them to the duration-ui* / ease-ui-* utilities and the overlay keyframes.
+   */
+  --ui-motion-fast: 120ms;
+  --ui-motion-base: 180ms;
+  --ui-motion-slow: 280ms;
+  --ui-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ui-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ui-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .dark {

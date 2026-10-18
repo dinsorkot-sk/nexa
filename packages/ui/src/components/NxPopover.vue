@@ -28,7 +28,7 @@ const emit = defineEmits<{ 'update:open': [value: boolean] }>();
         :side="side"
         :align="align"
         :side-offset="6"
-        class="z-50 flex w-70 flex-col gap-3 rounded-ui-lg border border-ui-border bg-ui-bg p-4 text-sm text-ui-text shadow-md outline-none"
+        class="z-50 flex w-70 flex-col gap-3 rounded-ui-lg border border-ui-border bg-ui-bg p-4 text-sm text-ui-text shadow-md outline-none data-[state=open]:animate-ui-pop-in data-[state=closed]:animate-ui-pop-out"
       >
         <h2
           v-if="title"

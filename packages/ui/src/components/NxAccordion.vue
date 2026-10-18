@@ -42,18 +42,20 @@ const emit = defineEmits<{ 'update:modelValue': [value: string | string[] | unde
         <AccordionTrigger class="flex w-full items-center justify-between gap-2 py-3.5 text-left text-sm font-medium text-ui-text-highlighted outline-none hover:text-ui-primary-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50">
           {{ item.title }}
           <ChevronDown
-            class="size-4 shrink-0 text-ui-text-muted transition-transform data-[state=open]:rotate-180"
+            class="size-4 shrink-0 text-ui-text-muted transition-transform duration-ui ease-ui-out data-[state=open]:rotate-180"
             aria-hidden="true"
           />
         </AccordionTrigger>
       </AccordionHeader>
-      <AccordionContent class="pb-3.5 text-sm text-ui-text-muted">
-        <slot
-          :name="item.value"
-          :item="item"
-        >
-          {{ item.content }}
-        </slot>
+      <AccordionContent class="overflow-hidden text-sm text-ui-text-muted data-[state=closed]:animate-ui-collapse-up data-[state=open]:animate-ui-collapse-down">
+        <div class="pb-3.5">
+          <slot
+            :name="item.value"
+            :item="item"
+          >
+            {{ item.content }}
+          </slot>
+        </div>
       </AccordionContent>
     </AccordionItem>
   </AccordionRoot>

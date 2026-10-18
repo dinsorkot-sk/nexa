@@ -52,7 +52,7 @@ function onChange(event: Event) {
       type="button"
       :disabled="disabled"
       :class="[
-        'flex w-full flex-col items-center justify-center gap-2 rounded-ui-lg border border-dashed px-6 py-8 text-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50',
+        'flex w-full flex-col items-center justify-center gap-2 rounded-ui-lg border border-dashed px-6 py-8 text-center outline-none transition-colors duration-ui ease-ui-out focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50',
         box,
       ]"
       @click="input?.click()"

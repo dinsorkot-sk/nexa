@@ -53,7 +53,7 @@ const messages = useNxMessages();
     <button
       v-if="removable"
       type="button"
-      class="rounded-full outline-none hover:text-ui-text-highlighted focus-visible:ring-2 focus-visible:ring-ui-primary"
+      class="rounded-full outline-none transition-colors duration-ui-fast ease-ui-out hover:text-ui-text-highlighted focus-visible:ring-2 focus-visible:ring-ui-primary"
       :class="iconColor[color]"
       :aria-label="removeLabel ?? messages.close"
       @click="emit('remove')"

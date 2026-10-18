@@ -95,7 +95,7 @@ function displayValue(value: unknown): string {
         <tr
           v-for="(row, rowIndex) in props.rows"
           :key="keyOf(row, rowIndex)"
-          class="bg-ui-bg hover:bg-ui-bg-elevated"
+          class="bg-ui-bg transition-colors duration-ui-fast ease-ui-out hover:bg-ui-bg-elevated"
         >
           <td
             v-for="column in props.columns"

@@ -39,10 +39,10 @@ const destructive = computed(() => props.tone === 'destructive');
     @update:open="(value) => emit('update:open', value)"
   >
     <DialogPortal>
-      <DialogOverlay class="fixed inset-0 z-50 bg-ui-overlay" />
+      <DialogOverlay class="fixed inset-0 z-50 bg-ui-overlay data-[state=open]:animate-ui-fade-in data-[state=closed]:animate-ui-fade-out" />
       <DialogContent
         :class="[
-          'fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100%-2rem)] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-ui-xl border border-ui-border bg-ui-bg shadow-lg outline-none',
+          'fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100%-2rem)] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-ui-xl border border-ui-border bg-ui-bg shadow-lg outline-none data-[state=open]:animate-ui-pop-in data-[state=closed]:animate-ui-pop-out',
           width[size],
         ]"
       >

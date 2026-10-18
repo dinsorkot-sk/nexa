@@ -9,7 +9,7 @@ export type CheckboxSize = 'sm' | 'md' | 'lg';
 
 // Box and icon sizes are the mockup's CTRL table; the box radius is radius/sm (rounded-ui-sm).
 const box = tv({
-  base: 'flex shrink-0 items-center justify-center rounded-ui-sm border bg-ui-bg outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ui-primary-outline data-[state=checked]:border-ui-primary data-[state=checked]:bg-ui-primary hover:data-[state=checked]:border-ui-primary-hover hover:data-[state=checked]:bg-ui-primary-hover data-[state=indeterminate]:border-ui-primary data-[state=indeterminate]:bg-ui-primary',
+  base: 'flex shrink-0 items-center justify-center rounded-ui-sm border bg-ui-bg outline-none transition-colors duration-ui-fast ease-ui-out focus-visible:ring-[3px] focus-visible:ring-ui-primary-outline data-[state=checked]:border-ui-primary data-[state=checked]:bg-ui-primary hover:data-[state=checked]:border-ui-primary-hover hover:data-[state=checked]:bg-ui-primary-hover data-[state=indeterminate]:border-ui-primary data-[state=indeterminate]:bg-ui-primary',
   variants: {
     size: {
       sm: 'size-3.5',
@@ -56,7 +56,7 @@ const generatedId = useId();
       :class="box({ size, checked: modelValue !== false })"
       @update:model-value="(value) => emit('update:modelValue', value === true)"
     >
-      <CheckboxIndicator class="text-ui-on-solid">
+      <CheckboxIndicator class="animate-ui-pop text-ui-on-solid">
         <Minus
           v-if="modelValue === 'indeterminate'"
           :class="iconSize[size]"

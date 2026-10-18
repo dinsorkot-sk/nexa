@@ -26,7 +26,7 @@ defineProps<{
         <a
           v-if="item.href && index < items.length - 1"
           :href="item.href"
-          class="truncate rounded text-ui-text-muted outline-none hover:text-ui-text hover:underline focus-visible:ring-2 focus-visible:ring-ui-primary"
+          class="truncate rounded text-ui-text-muted outline-none transition-colors duration-ui-fast ease-ui-out hover:text-ui-text hover:underline focus-visible:ring-2 focus-visible:ring-ui-primary"
         >{{ item.label }}</a>
         <span
           v-else

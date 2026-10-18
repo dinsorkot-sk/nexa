@@ -20,7 +20,7 @@ const emit = defineEmits<{ click: [event: MouseEvent] }>();
   <tr
     :aria-selected="selected || undefined"
     :class="[
-      'border-b border-ui-border',
+      'border-b border-ui-border transition-colors duration-ui-fast',
       head ? 'h-10 bg-ui-bg-muted' : 'h-12',
       !head && selected && 'bg-ui-primary-soft',
       !head && clickable && !selected && 'cursor-pointer hover:bg-ui-bg-elevated',

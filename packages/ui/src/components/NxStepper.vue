@@ -31,7 +31,7 @@ defineProps<{
       <div
         aria-hidden="true"
         :class="[
-          'z-10 flex size-7 items-center justify-center rounded-full text-xs font-medium',
+          'z-10 flex size-7 items-center justify-center rounded-full text-xs font-medium transition-colors duration-ui ease-ui-out',
           index <= modelValue ? 'bg-ui-primary text-ui-on-solid' : 'border border-ui-border-accented bg-ui-bg text-ui-text-muted',
         ]"
       >
@@ -56,7 +56,7 @@ defineProps<{
       <div
         v-if="index < steps.length - 1"
         aria-hidden="true"
-        class="absolute left-1/2 top-3.5 h-0.5 w-full"
+        class="absolute left-1/2 top-3.5 h-0.5 w-full transition-colors duration-ui-slow ease-ui-out"
         :class="index < modelValue ? 'bg-ui-primary' : 'bg-ui-border-accented'"
       />
     </li>

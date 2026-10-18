@@ -40,6 +40,14 @@ const sampleText = ref('');
 const sampleSelect = ref<string | undefined>();
 const formula = ref('price * quantity * (1 + taxRate)');
 
+// Motion demo: the three duration tokens, and a key that re-mounts the entrance demo on demand.
+const motionKey = ref(0);
+const motionDurations = [
+  { label: 'Fast', name: 'duration-ui-fast', value: '120ms' },
+  { label: 'Base', name: 'duration-ui', value: '180ms' },
+  { label: 'Slow', name: 'duration-ui-slow', value: '280ms' },
+];
+
 const choices = [
   { value: 'draft', label: 'Draft' },
   { value: 'active', label: 'Active' },
@@ -1109,6 +1117,75 @@ const buttonColors = ['primary', 'secondary', 'success', 'info', 'warning', 'err
         </div>
         <p class="text-xs text-ui-text-muted">
           Every component also ships under the aliases NxFormField, NxSelectMenu, NxReferenceSelect, NxCalendar and NxSegmented.
+        </p>
+      </section>
+
+      <section
+        id="motion"
+        class="space-y-4"
+      >
+        <h2 class="text-xl font-semibold text-ui-text-highlighted">
+          Motion
+        </h2>
+        <p class="text-sm text-ui-text-toned">
+          One motion system for the library. Durations are tokens exposed as the <code>duration-ui*</code> and
+          <code>ease-ui-*</code> utilities, overlays and anchored panels play their own enter/exit keyframes through
+          Reka's <code>data-state</code>, and controls transition colour, shadow and transform. Point a card to see
+          each duration.
+        </p>
+        <div class="group grid gap-4 sm:grid-cols-3">
+          <NxCard
+            v-for="item in motionDurations"
+            :key="item.name"
+            :title="item.label"
+          >
+            <p class="font-mono text-xs text-ui-text-muted">
+              {{ item.name }} · {{ item.value }}
+            </p>
+            <div class="mt-3 h-2 overflow-hidden rounded-full bg-ui-bg-accented">
+              <div
+                class="h-full w-1/6 rounded-full bg-ui-primary transition-[width] ease-ui-out group-hover:w-full"
+                :class="item.name"
+              />
+            </div>
+          </NxCard>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <NxButton
+            color="neutral"
+            variant="outline"
+            @click="motionKey += 1"
+          >
+            Replay entrances
+          </NxButton>
+          <NxTooltip text="Tooltips pop in and out">
+            <NxIconButton
+              :icon="CircleHelp"
+              label="Motion help"
+              color="neutral"
+              variant="outline"
+            />
+          </NxTooltip>
+          <NxButton
+            color="neutral"
+            variant="outline"
+            @click="pushToast({ title: 'Motion', description: 'Toasts join and leave the stack.', color: 'info' })"
+          >
+            Push a toast
+          </NxButton>
+        </div>
+        <div
+          :key="motionKey"
+          class="flex flex-wrap items-center gap-3"
+        >
+          <span class="animate-ui-pop rounded-ui-lg border border-ui-border bg-ui-bg px-3 py-2 text-sm text-ui-text-toned">pop</span>
+          <span class="animate-ui-rise-in rounded-ui-lg border border-ui-border bg-ui-bg px-3 py-2 text-sm text-ui-text-toned">rise</span>
+          <span class="animate-ui-drop-in rounded-ui-lg border border-ui-border bg-ui-bg px-3 py-2 text-sm text-ui-text-toned">drop</span>
+          <span class="animate-ui-fade-in rounded-ui-lg border border-ui-border bg-ui-bg px-3 py-2 text-sm text-ui-text-toned">fade</span>
+          <span class="animate-ui-pop-in rounded-ui-lg border border-ui-border bg-ui-bg px-3 py-2 text-sm text-ui-text-toned">pop-in</span>
+        </div>
+        <p class="text-xs text-ui-text-muted">
+          Under <code>prefers-reduced-motion: reduce</code> every duration collapses to zero, so nothing moves.
         </p>
       </section>
     </div>

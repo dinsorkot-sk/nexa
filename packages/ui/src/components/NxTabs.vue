@@ -14,7 +14,7 @@ export interface NxTabItem {
 export type TabSize = 'sm' | 'md';
 
 const tab = tv({
-  base: 'group -mb-px inline-flex items-center border-b-2 border-transparent font-medium text-ui-text-muted outline-none hover:text-ui-text-highlighted focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50 data-[state=active]:border-ui-primary data-[state=active]:text-ui-text-highlighted',
+  base: 'group -mb-px inline-flex items-center border-b-2 border-transparent font-medium text-ui-text-muted outline-none transition-colors duration-ui-fast ease-ui-out hover:text-ui-text-highlighted focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50 data-[state=active]:border-ui-primary data-[state=active]:text-ui-text-highlighted',
   variants: {
     size: {
       sm: 'gap-1.5 px-2.5 py-1.5 text-xs [&_svg]:size-3.5',

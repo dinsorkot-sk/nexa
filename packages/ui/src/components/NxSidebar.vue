@@ -30,7 +30,7 @@ const toggleLabel = computed(() => props.collapsed ? 'Expand sidebar' : 'Collaps
   <aside
     :aria-label="label"
     :class="[
-      'flex h-full flex-col border-r border-ui-border bg-ui-bg-muted transition-[width]',
+      'flex h-full flex-col border-r border-ui-border bg-ui-bg-muted transition-[width] duration-ui-slow ease-ui-out',
       collapsed ? 'w-16' : 'w-62',
     ]"
   >
@@ -45,7 +45,7 @@ const toggleLabel = computed(() => props.collapsed ? 'Expand sidebar' : 'Collaps
         type="button"
         :aria-label="toggleLabel"
         :aria-expanded="!collapsed"
-        class="rounded p-1.5 text-ui-text-muted outline-none hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary"
+        class="rounded p-1.5 text-ui-text-muted outline-none transition-colors duration-ui-fast ease-ui-out hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary"
         @click="emit('update:collapsed', !collapsed)"
       >
         <ChevronRight

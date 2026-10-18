@@ -54,7 +54,7 @@ function onKeydown(event: KeyboardEvent) {
       :aria-expanded="open"
       :aria-label="label"
       :disabled="disabled"
-      class="flex w-full items-center gap-2.5 rounded-ui-lg border border-ui-border bg-ui-bg px-2.5 py-2 text-left outline-none hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50"
+      class="flex w-full items-center gap-2.5 rounded-ui-lg border border-ui-border bg-ui-bg px-2.5 py-2 text-left outline-none transition-colors duration-ui-fast ease-ui-out hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50"
       @click="toggle"
     >
       <NxAvatar
@@ -73,7 +73,7 @@ function onKeydown(event: KeyboardEvent) {
       v-if="open"
       role="menu"
       :aria-label="label"
-      class="absolute left-0 z-40 mt-1 w-full min-w-54 rounded-ui-lg border border-ui-border bg-ui-bg p-1 shadow-md"
+      class="absolute left-0 z-40 mt-1 w-full min-w-54 animate-ui-rise-in rounded-ui-lg border border-ui-border bg-ui-bg p-1 shadow-md"
     >
       <li
         v-for="organization in organizations"
@@ -85,7 +85,7 @@ function onKeydown(event: KeyboardEvent) {
           role="menuitemradio"
           :aria-checked="organization.value === modelValue"
           :disabled="organization.disabled"
-          class="flex w-full items-center gap-2 rounded-ui px-2 py-1.5 text-left text-sm outline-none hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50"
+          class="flex w-full items-center gap-2 rounded-ui px-2 py-1.5 text-left text-sm outline-none transition-colors duration-ui-fast hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50"
           @click="select(organization)"
         >
           <span class="flex-1 truncate text-ui-text-highlighted">{{ organization.label }}</span>

@@ -178,10 +178,10 @@ onBeforeUnmount(() => {
       <ComboboxTrigger
         :aria-label="messages.openList"
         :disabled="disabled"
-        class="rounded px-1 text-ui-text-dimmed outline-none focus-visible:ring-2 focus-visible:ring-ui-primary"
+        class="group rounded px-1 text-ui-text-dimmed outline-none transition-colors duration-ui-fast focus-visible:ring-2 focus-visible:ring-ui-primary"
       >
         <ChevronsUpDown
-          class="size-4"
+          class="size-4 transition-transform duration-ui ease-ui-out group-data-[state=open]:rotate-180"
           aria-hidden="true"
         />
       </ComboboxTrigger>
@@ -190,7 +190,7 @@ onBeforeUnmount(() => {
       <ComboboxContent
         position="popper"
         :side-offset="4"
-        class="z-50 w-[var(--reka-combobox-trigger-width)] overflow-hidden rounded-ui-lg border border-ui-border bg-ui-bg text-ui-text shadow-lg"
+        class="z-50 w-[var(--reka-combobox-trigger-width)] overflow-hidden rounded-ui-lg border border-ui-border bg-ui-bg text-ui-text shadow-lg data-[state=closed]:animate-ui-rise-out data-[state=open]:animate-ui-rise-in"
       >
         <ComboboxViewport class="flex max-h-64 flex-col gap-0.5 overflow-y-auto p-1">
           <div

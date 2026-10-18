@@ -34,7 +34,7 @@ const dotClass = computed(() => dots[props.kind]);
     :disabled="disabled"
     :aria-pressed="selected"
     :class="[
-      'flex w-45 flex-col gap-1.5 rounded-ui-lg border bg-ui-bg px-3.5 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50',
+      'flex w-45 flex-col gap-1.5 rounded-ui-lg border bg-ui-bg px-3.5 py-3 text-left outline-none transition-[background-color,border-color,box-shadow,scale] duration-ui ease-ui-out active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50',
       selected ? 'border-ui-primary ring-1 ring-ui-primary' : 'border-ui-border-accented',
     ]"
     @click="emit('click')"

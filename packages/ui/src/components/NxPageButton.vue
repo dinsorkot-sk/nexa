@@ -25,7 +25,7 @@ const emit = defineEmits<{ click: [page: number] }>();
     :aria-current="current ? 'page' : undefined"
     :disabled="disabled"
     :class="[
-      'inline-flex items-center justify-center rounded-ui tabular-nums outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50',
+      'inline-flex items-center justify-center rounded-ui tabular-nums outline-none transition-colors duration-ui-fast ease-ui-out focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50',
       box[size],
       current ? 'bg-ui-primary text-ui-on-solid' : 'text-ui-text-toned hover:bg-ui-bg-elevated',
     ]"

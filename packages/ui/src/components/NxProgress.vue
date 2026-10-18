@@ -43,7 +43,7 @@ const percentage = computed(() => {
       :class="trackSize[size]"
     >
       <div
-        class="h-full rounded-full bg-ui-primary transition-[width]"
+        class="h-full rounded-full bg-ui-primary transition-[width] duration-ui-slow ease-ui-out"
         :style="{ width: `${percentage}%` }"
       />
     </div>

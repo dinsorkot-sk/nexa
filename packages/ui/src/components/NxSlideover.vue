@@ -32,11 +32,13 @@ const messages = useNxMessages();
     @update:open="emit('update:open', $event)"
   >
     <DialogPortal>
-      <DialogOverlay class="fixed inset-0 z-50 bg-ui-overlay" />
+      <DialogOverlay class="fixed inset-0 z-50 bg-ui-overlay data-[state=open]:animate-ui-fade-in data-[state=closed]:animate-ui-fade-out" />
       <DialogContent
         :class="[
           'fixed inset-y-0 z-50 flex w-[min(28rem,calc(100%-1rem))] flex-col border-ui-border bg-ui-bg shadow-xl outline-none',
-          side === 'right' ? 'right-0 border-l' : 'left-0 border-r',
+          side === 'right'
+            ? 'right-0 border-l data-[state=open]:animate-ui-slide-in-right data-[state=closed]:animate-ui-slide-out-right'
+            : 'left-0 border-r data-[state=open]:animate-ui-slide-in-left data-[state=closed]:animate-ui-slide-out-left',
         ]"
       >
         <header class="flex items-center justify-between gap-2 border-b border-ui-border px-5 py-4">

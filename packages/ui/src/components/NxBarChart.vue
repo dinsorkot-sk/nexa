@@ -74,9 +74,12 @@ const bars = ['bg-ui-primary', 'bg-ui-secondary', 'bg-ui-warning', 'bg-ui-succes
             <div
               v-for="(item, seriesIndex) in props.series"
               :key="`${tick}-${item.label}`"
-              class="w-3.5 rounded-t-[3px]"
+              class="w-3.5 origin-bottom animate-ui-grow rounded-t-[3px]"
               :class="bars[seriesIndex % bars.length]"
-              :style="{ height: `${heightOf(item.values[index] ?? 0)}%` }"
+              :style="{
+                height: `${heightOf(item.values[index] ?? 0)}%`,
+                animationDelay: `${Math.min(index, 10) * 40 + seriesIndex * 25}ms`,
+              }"
             />
           </div>
         </div>

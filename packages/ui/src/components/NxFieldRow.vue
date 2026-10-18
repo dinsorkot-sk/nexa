@@ -38,7 +38,7 @@ const rowClass = computed(() => rows[props.state]);
 
 <template>
   <div
-    class="flex w-full items-center gap-3 rounded-ui-lg border px-3 py-2.5"
+    class="flex w-full items-center gap-3 rounded-ui-lg border px-3 py-2.5 transition-[background-color,border-color,box-shadow] duration-ui ease-ui-out"
     :class="rowClass"
   >
     <GripVertical

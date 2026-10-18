@@ -7,7 +7,7 @@ export type SwitchSize = 'sm' | 'md' | 'lg';
 
 // Track and knob are the mockup's SW table; the knob sits 2px in, so the checked offset is track - 4 - knob.
 const track = tv({
-  base: 'relative inline-flex shrink-0 items-center rounded-full bg-ui-border-accented p-0.5 outline-none transition-colors hover:bg-ui-text-dimmed focus-visible:ring-[3px] focus-visible:ring-ui-primary-outline data-[state=checked]:bg-ui-primary hover:data-[state=checked]:bg-ui-primary-hover',
+  base: 'relative inline-flex shrink-0 items-center rounded-full bg-ui-border-accented p-0.5 outline-none transition-colors duration-ui-fast ease-ui-out hover:bg-ui-text-dimmed focus-visible:ring-[3px] focus-visible:ring-ui-primary-outline data-[state=checked]:bg-ui-primary hover:data-[state=checked]:bg-ui-primary-hover',
   variants: {
     size: { sm: 'h-4 w-7', md: 'h-5 w-9', lg: 'h-6 w-11' },
   },
@@ -44,7 +44,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>();
       @update:model-value="(value) => emit('update:modelValue', value)"
     >
       <SwitchThumb
-        class="pointer-events-none block translate-x-0 rounded-full bg-ui-bg shadow transition-transform"
+        class="pointer-events-none block translate-x-0 rounded-full bg-ui-bg shadow transition-transform duration-ui ease-ui-out"
         :class="[knobSize[size], knobChecked[size]]"
       />
     </SwitchRoot>

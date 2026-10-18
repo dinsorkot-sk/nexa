@@ -48,8 +48,9 @@ function over(fg: string, alpha: number, bg: string): string {
 
 describe('design tokens', () => {
   it('defines the same token names in Light and Dark', () => {
-    // The radius is shared by both modes, so it is declared once, in :root.
-    const colours = (names: string[]) => names.filter((name) => name !== '--ui-radius').sort();
+    // Radius and motion are mode-independent, so they are declared once, in :root.
+    const shared = ['--ui-radius'];
+    const colours = (names: string[]) => names.filter((name) => !shared.includes(name) && !name.startsWith('--ui-motion') && !name.startsWith('--ui-ease')).sort();
     expect(colours(Object.keys(dark))).toEqual(colours(Object.keys(light)));
   });
 

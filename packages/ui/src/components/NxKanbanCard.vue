@@ -35,8 +35,8 @@ const card = computed(() => ({
 
 <template>
   <article
-    class="flex flex-col gap-2.5 rounded-ui-lg border bg-ui-bg p-3"
-    :class="card"
+    class="flex flex-col gap-2.5 rounded-ui-lg border bg-ui-bg p-3 transition-[border-color,box-shadow,scale] duration-ui ease-ui-out"
+    :class="[card, state === 'dragging' && 'scale-[1.02]']"
   >
     <div class="flex items-start gap-2">
       <button

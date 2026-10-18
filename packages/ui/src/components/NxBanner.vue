@@ -51,7 +51,7 @@ const iconClass = computed(() => marks[props.color]);
 <template>
   <div
     :role="role ?? (color === 'error' ? 'alert' : 'status')"
-    :class="['flex w-full flex-wrap items-center gap-3 border-b px-6 py-2.5 text-sm', toneClass]"
+    :class="['flex w-full flex-wrap items-center gap-3 border-b px-6 py-2.5 text-sm animate-ui-drop-in', toneClass]"
   >
     <component
       :is="icon"
@@ -78,7 +78,7 @@ const iconClass = computed(() => marks[props.color]);
       v-if="dismissible"
       type="button"
       :aria-label="messages.close"
-      class="shrink-0 rounded-ui p-1 text-ui-text-muted outline-none hover:bg-ui-bg-elevated hover:text-ui-text-highlighted focus-visible:ring-2 focus-visible:ring-ui-primary"
+      class="shrink-0 rounded-ui p-1 text-ui-text-muted outline-none transition-colors duration-ui-fast ease-ui-out hover:bg-ui-bg-elevated hover:text-ui-text-highlighted focus-visible:ring-2 focus-visible:ring-ui-primary"
       @click="emit('dismiss')"
     >
       <X

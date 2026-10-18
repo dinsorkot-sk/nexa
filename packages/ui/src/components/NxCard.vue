@@ -5,7 +5,7 @@ import { tv } from 'tailwind-variants';
 export type CardVariant = 'outline' | 'soft' | 'subtle' | 'solid';
 
 const card = tv({
-  base: 'overflow-hidden rounded-ui-xl',
+  base: 'overflow-hidden rounded-ui-xl transition-shadow duration-ui ease-ui-out',
   variants: {
     variant: {
       outline: 'border border-ui-border bg-ui-bg',

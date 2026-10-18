@@ -25,7 +25,7 @@ const TrendIcon: Record<'up' | 'down', Component> = { up: TrendingUp, down: Tren
 </script>
 
 <template>
-  <section class="flex flex-col gap-3 rounded-ui-xl border border-ui-border bg-ui-bg p-4">
+  <section class="flex flex-col gap-3 rounded-ui-xl border border-ui-border bg-ui-bg p-4 transition-shadow duration-ui ease-ui-out hover:shadow-md">
     <div class="flex items-center justify-between gap-3">
       <span
         v-if="icon"

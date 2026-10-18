@@ -27,7 +27,7 @@ const tag = computed(() => (props.href ? 'a' : 'button'));
     :disabled="href ? undefined : disabled"
     :aria-current="href && active ? 'page' : undefined"
     :class="[
-      'inline-flex items-center gap-2.5 rounded-ui py-2 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0',
+      'inline-flex items-center gap-2.5 rounded-ui py-2 text-sm font-medium outline-none transition-colors duration-ui-fast ease-ui-out focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0',
       iconOnly ? 'size-9 justify-center p-0' : 'px-2.5',
       active
         ? 'bg-ui-primary-soft text-ui-text-highlighted [&_svg]:text-ui-primary-text'

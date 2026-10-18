@@ -83,9 +83,9 @@ function onKeydown(event: KeyboardEvent) {
     @update:open="emit('update:open', $event)"
   >
     <DialogPortal>
-      <DialogOverlay class="fixed inset-0 z-50 bg-ui-overlay" />
+      <DialogOverlay class="fixed inset-0 z-50 bg-ui-overlay data-[state=open]:animate-ui-fade-in data-[state=closed]:animate-ui-fade-out" />
       <DialogContent
-        class="fixed left-1/2 top-[15vh] z-50 w-[min(35rem,calc(100%-2rem))] -translate-x-1/2 overflow-hidden rounded-ui-xl border border-ui-border bg-ui-bg shadow-lg outline-none"
+        class="fixed left-1/2 top-[15vh] z-50 w-[min(35rem,calc(100%-2rem))] -translate-x-1/2 overflow-hidden rounded-ui-xl border border-ui-border bg-ui-bg shadow-lg outline-none data-[state=open]:animate-ui-pop-in data-[state=closed]:animate-ui-pop-out"
       >
         <DialogTitle class="sr-only">
           {{ label }}
@@ -139,7 +139,7 @@ function onKeydown(event: KeyboardEvent) {
               role="option"
               :aria-selected="filtered.indexOf(command) === activeIndex"
               :class="[
-                'flex cursor-pointer items-center gap-2 rounded-ui px-2 py-1.5 outline-none',
+                'flex cursor-pointer items-center gap-2 rounded-ui px-2 py-1.5 outline-none transition-colors duration-ui-fast ease-ui-out',
                 filtered.indexOf(command) === activeIndex ? 'bg-ui-bg-elevated' : 'hover:bg-ui-bg-elevated',
               ]"
               @mouseenter="activeIndex = filtered.indexOf(command)"

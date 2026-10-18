@@ -72,7 +72,7 @@ function go(next: number) {
         :aria-label="messages.previous"
         :disabled="disabled || page <= 1"
         :class="[
-          'inline-flex items-center justify-center rounded-ui text-ui-text-toned outline-none hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50',
+          'inline-flex items-center justify-center rounded-ui text-ui-text-toned outline-none transition-colors duration-ui-fast ease-ui-out hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50',
           arrow,
         ]"
         @click="go(page - 1)"
@@ -105,7 +105,7 @@ function go(next: number) {
         :aria-label="messages.next"
         :disabled="disabled || page >= pageCount"
         :class="[
-          'inline-flex items-center justify-center rounded-ui text-ui-text-toned outline-none hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50',
+          'inline-flex items-center justify-center rounded-ui text-ui-text-toned outline-none transition-colors duration-ui-fast ease-ui-out hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50',
           arrow,
         ]"
         @click="go(page + 1)"

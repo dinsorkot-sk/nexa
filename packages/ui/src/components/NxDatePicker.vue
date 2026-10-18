@@ -110,23 +110,23 @@ function onPick(value: DateValue | undefined) {
       <DatePickerTrigger
         :aria-label="messages.openCalendar"
         :disabled="disabled"
-        class="ml-auto rounded px-1 text-ui-text-dimmed outline-none focus-visible:ring-2 focus-visible:ring-ui-primary"
+        class="group ml-auto rounded px-1 text-ui-text-dimmed outline-none transition-colors duration-ui-fast focus-visible:ring-2 focus-visible:ring-ui-primary"
       >
         <ChevronsUpDown
-          class="size-4"
+          class="size-4 transition-transform duration-ui ease-ui-out group-data-[state=open]:rotate-180"
           aria-hidden="true"
         />
       </DatePickerTrigger>
     </DatePickerField>
     <DatePickerContent
       :side-offset="4"
-      class="z-50 w-72 rounded-ui-xl border border-ui-border bg-ui-bg p-3 text-ui-text shadow-md"
+      class="z-50 w-72 rounded-ui-xl border border-ui-border bg-ui-bg p-3 text-ui-text shadow-md data-[state=closed]:animate-ui-pop-out data-[state=open]:animate-ui-pop-in"
     >
       <DatePickerCalendar v-slot="{ weekDays, grid }">
         <DatePickerHeader class="mb-2 flex items-center justify-between">
           <DatePickerPrev
             :aria-label="messages.prevMonth"
-            class="rounded-ui p-1 text-ui-text-muted outline-none hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary"
+            class="rounded-ui p-1 text-ui-text-muted outline-none transition-colors duration-ui-fast hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary"
           >
             <ChevronLeft
               class="size-4"
@@ -138,7 +138,7 @@ function onPick(value: DateValue | undefined) {
           </DatePickerHeading>
           <DatePickerNext
             :aria-label="messages.nextMonth"
-            class="rounded p-1 text-ui-text-muted outline-none hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary"
+            class="rounded p-1 text-ui-text-muted outline-none transition-colors duration-ui-fast hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary"
           >
             <ChevronRight
               class="size-4"
@@ -177,7 +177,7 @@ function onPick(value: DateValue | undefined) {
                 <DatePickerCellTrigger
                   :day="weekDate"
                   :month="month.value"
-                  class="flex size-9 items-center justify-center rounded-ui text-sm font-normal text-ui-text outline-none transition-colors hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary data-[outside-view]:text-ui-text-dimmed data-[disabled]:text-ui-text-dimmed data-[disabled]:opacity-50 data-[selected]:bg-ui-primary data-[selected]:font-medium data-[selected]:text-ui-on-solid data-[today]:font-medium data-[today]:text-ui-text-highlighted data-[today]:ring-1 data-[today]:ring-inset data-[today]:ring-ui-primary-outline"
+                  class="flex size-9 items-center justify-center rounded-ui text-sm font-normal text-ui-text outline-none transition-colors duration-ui-fast hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary data-[outside-view]:text-ui-text-dimmed data-[disabled]:text-ui-text-dimmed data-[disabled]:opacity-50 data-[selected]:bg-ui-primary data-[selected]:font-medium data-[selected]:text-ui-on-solid data-[today]:font-medium data-[today]:text-ui-text-highlighted data-[today]:ring-1 data-[today]:ring-inset data-[today]:ring-ui-primary-outline"
                 />
               </DatePickerCell>
             </DatePickerGridRow>

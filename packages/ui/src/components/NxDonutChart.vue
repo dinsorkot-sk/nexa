@@ -42,7 +42,7 @@ const circumference = computed(() => 2 * Math.PI * radius.value);
 <template>
   <div class="flex flex-col items-center gap-4">
     <div
-      class="relative"
+      class="relative animate-ui-pop-in"
       :style="{ width: `${size}px`, height: `${size}px` }"
     >
       <svg

@@ -26,7 +26,7 @@ const emit = defineEmits<{ select: [date: string] }>();
     :aria-label="label"
     :aria-pressed="selected || undefined"
     :class="[
-      'flex h-26 min-w-0 flex-col items-stretch gap-1 border-r border-b border-ui-border p-1.5 text-left outline-none hover:bg-ui-bg-muted focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-ui-primary',
+      'flex h-26 min-w-0 flex-col items-stretch gap-1 border-r border-b border-ui-border p-1.5 text-left outline-none transition-colors duration-ui-fast ease-ui-out hover:bg-ui-bg-muted focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-ui-primary',
       outside && 'bg-ui-bg-muted',
     ]"
     @click="emit('select', isoDate)"

@@ -12,7 +12,7 @@ export interface NxSegmentItem {
 export type SegmentSize = 'sm' | 'md';
 
 const segment = tv({
-  base: 'inline-flex items-center justify-center rounded-ui font-medium text-ui-text-muted outline-none hover:text-ui-text-highlighted focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50 data-[state=on]:bg-ui-bg data-[state=on]:text-ui-text-highlighted data-[state=on]:shadow-sm',
+  base: 'inline-flex items-center justify-center rounded-ui font-medium text-ui-text-muted outline-none transition-[background-color,box-shadow,color] duration-ui-fast ease-ui-out hover:text-ui-text-highlighted focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50 data-[state=on]:bg-ui-bg data-[state=on]:text-ui-text-highlighted data-[state=on]:shadow-sm',
   variants: {
     size: {
       sm: 'px-2 py-1 text-xs',

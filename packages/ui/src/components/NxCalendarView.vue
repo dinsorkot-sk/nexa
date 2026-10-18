@@ -97,7 +97,7 @@ function eventsFor(date: string) {
         <button
           type="button"
           :aria-label="messages.prevMonth"
-          class="rounded p-1.5 text-ui-text-toned outline-none hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary"
+          class="rounded p-1.5 text-ui-text-toned outline-none transition-colors duration-ui-fast ease-ui-out hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary"
           @click="moveMonth(-1)"
         >
           <ChevronLeft
@@ -108,7 +108,7 @@ function eventsFor(date: string) {
         <button
           type="button"
           :aria-label="messages.nextMonth"
-          class="rounded p-1.5 text-ui-text-toned outline-none hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary"
+          class="rounded p-1.5 text-ui-text-toned outline-none transition-colors duration-ui-fast ease-ui-out hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary"
           @click="moveMonth(1)"
         >
           <ChevronRight

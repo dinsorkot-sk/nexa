@@ -13,7 +13,7 @@ export type RadioSize = 'sm' | 'md' | 'lg';
 
 // Box and dot follow the mockup's CTRL table; the dot is rounded to 40% of the box (6 / 6 / 8 px).
 const dot = tv({
-  base: 'flex shrink-0 items-center justify-center rounded-full border bg-ui-bg outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ui-primary-outline data-[state=checked]:border-ui-primary data-[state=checked]:bg-ui-primary hover:data-[state=checked]:border-ui-primary hover:data-[state=checked]:bg-ui-primary-hover',
+  base: 'flex shrink-0 items-center justify-center rounded-full border bg-ui-bg outline-none transition-colors duration-ui-fast ease-ui-out focus-visible:ring-[3px] focus-visible:ring-ui-primary-outline data-[state=checked]:border-ui-primary data-[state=checked]:bg-ui-primary hover:data-[state=checked]:border-ui-primary hover:data-[state=checked]:bg-ui-primary-hover',
   variants: {
     size: { sm: 'size-3.5', md: 'size-4', lg: 'size-5' },
     checked: {
@@ -63,7 +63,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
       >
         <RadioGroupIndicator class="flex items-center justify-center">
           <span
-            class="rounded-full bg-ui-on-solid"
+            class="animate-ui-pop rounded-full bg-ui-on-solid"
             :class="markSize[size]"
           />
         </RadioGroupIndicator>

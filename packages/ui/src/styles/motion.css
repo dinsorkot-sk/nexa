@@ -1,0 +1,193 @@
+/*
+ * Motion system for the component library.
+ *
+ * Two rules keep every animation in the library consistent and cheap to turn off:
+ *  - Durations and easings are tokens (see tokens.css), so one `prefers-reduced-motion` block disables the set;
+ *    components use the `duration-ui*` and `ease-ui-*` utilities rather than Tailwind's fixed scale.
+ *  - Enter and exit keyframes never share a name. Reka UI compares the computed `animation-name` before and
+ *    after `data-state` flips to decide whether it must wait for `animationend` before it unmounts the node.
+ *
+ * Everything here is presentation only: no colour literals, so the token scan in test/tokens.test.ts still holds.
+ */
+
+@theme {
+  --ease-ui-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-ui-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-ui-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Surfaces: scrims fade, floating panels pop. */
+  --animate-ui-fade-in: ui-fade-in var(--ui-motion-base) var(--ui-ease-out) both;
+  --animate-ui-fade-out: ui-fade-out var(--ui-motion-fast) var(--ui-ease-in-out) both;
+  --animate-ui-pop-in: ui-pop-in var(--ui-motion-base) var(--ui-ease-out) both;
+  --animate-ui-pop-out: ui-pop-out var(--ui-motion-fast) var(--ui-ease-in-out) both;
+
+  /* Edge panels slide in from their own side. */
+  --animate-ui-slide-in-right: ui-slide-in-right var(--ui-motion-slow) var(--ui-ease-out) both;
+  --animate-ui-slide-out-right: ui-slide-out-right var(--ui-motion-base) var(--ui-ease-in-out) both;
+  --animate-ui-slide-in-left: ui-slide-in-left var(--ui-motion-slow) var(--ui-ease-out) both;
+  --animate-ui-slide-out-left: ui-slide-out-left var(--ui-motion-base) var(--ui-ease-in-out) both;
+
+  /* Anchored lists (menus, banners) rise the few pixels from their trigger. */
+  --animate-ui-rise-in: ui-rise-in var(--ui-motion-base) var(--ui-ease-out) both;
+  --animate-ui-rise-out: ui-rise-out var(--ui-motion-fast) var(--ui-ease-in-out) both;
+
+  /* A full-width bar announcing itself above the page. */
+  --animate-ui-drop-in: ui-drop-in var(--ui-motion-slow) var(--ui-ease-out) both;
+
+  /* Data viz: bars grow from the axis, the line is wiped in behind its points. */
+  --animate-ui-grow: ui-grow var(--ui-motion-slow) var(--ui-ease-out) both;
+  --animate-ui-wipe: ui-wipe var(--ui-motion-slow) var(--ui-ease-out) both;
+
+  /* Counters and badges that appear after an action. */
+  --animate-ui-pop: ui-pop var(--ui-motion-base) var(--ui-ease-spring) both;
+
+  /* Reka exposes the measured height of a disclosure region as a custom property. */
+  --animate-ui-collapse-down: ui-collapse-down var(--ui-motion-base) var(--ui-ease-out);
+  --animate-ui-collapse-up: ui-collapse-up var(--ui-motion-fast) var(--ui-ease-in-out);
+}
+
+@utility duration-ui-fast {
+  --tw-duration: var(--ui-motion-fast);
+  transition-duration: var(--ui-motion-fast);
+}
+
+@utility duration-ui {
+  --tw-duration: var(--ui-motion-base);
+  transition-duration: var(--ui-motion-base);
+}
+
+@utility duration-ui-slow {
+  --tw-duration: var(--ui-motion-slow);
+  transition-duration: var(--ui-motion-slow);
+}
+
+@keyframes ui-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes ui-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes ui-pop-in {
+  from { opacity: 0; transform: scale(0.96) translateY(-2px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes ui-pop-out {
+  from { opacity: 1; transform: scale(1) translateY(0); }
+  to { opacity: 0; transform: scale(0.96) translateY(-2px); }
+}
+
+@keyframes ui-slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes ui-slide-out-right {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+
+@keyframes ui-slide-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes ui-slide-out-left {
+  from { transform: translateX(0); }
+  to { transform: translateX(-100%); }
+}
+
+@keyframes ui-rise-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes ui-rise-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(4px) scale(0.98); }
+}
+
+@keyframes ui-drop-in {
+  from { opacity: 0; transform: translateY(-100%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ui-grow {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+@keyframes ui-wipe {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+
+@keyframes ui-pop {
+  0% { opacity: 0; transform: scale(0.6); }
+  60% { transform: scale(1.08); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes ui-collapse-down {
+  from { height: 0; }
+  to { height: var(--reka-accordion-content-height); }
+}
+
+@keyframes ui-collapse-up {
+  from { height: var(--reka-accordion-content-height); }
+  to { height: 0; }
+}
+
+/*
+ * Toasts join and leave the stack with Vue's TransitionGroup (see NxToaster). A leaving toast is taken out of
+ * the flow so the ones above it can slide down, which is the pattern Vue documents for list transitions.
+ */
+.nx-toast-enter-from,
+.nx-toast-leave-to {
+  opacity: 0;
+  transform: translateX(16px) scale(0.97);
+}
+
+.nx-toast-enter-active {
+  transition:
+    opacity var(--ui-motion-slow) var(--ui-ease-out),
+    transform var(--ui-motion-slow) var(--ui-ease-out);
+}
+
+.nx-toast-leave-active {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  transition:
+    opacity var(--ui-motion-base) var(--ui-ease-in-out),
+    transform var(--ui-motion-base) var(--ui-ease-in-out);
+}
+
+.nx-toast-move {
+  transition: transform var(--ui-motion-base) var(--ui-ease-out);
+}
+
+/*
+ * Turning motion down: the tokens collapse to zero, and the blanket rule also covers the few animations that do
+ * not read them (Tailwind's `animate-spin` on a loading button, for example).
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ui-motion-fast: 0ms;
+    --ui-motion-base: 0ms;
+    --ui-motion-slow: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
