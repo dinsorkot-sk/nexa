@@ -1,4 +1,5 @@
 <script setup lang="ts">
+/** Small caps heading above a group of NavItems, as the mockup's NavGroupLabel section. */
 defineProps<{
   collapsed?: boolean;
 }>();
@@ -7,7 +8,7 @@ defineProps<{
 <template>
   <h2
     v-if="!collapsed"
-    class="px-3 py-1 text-xs font-medium text-ui-text-muted"
+    class="px-2.5 pb-1 text-[11px] font-medium text-ui-text-dimmed"
   >
     <slot />
   </h2>

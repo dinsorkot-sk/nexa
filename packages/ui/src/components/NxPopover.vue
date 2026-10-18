@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui';
 
+/**
+ * The mockup's Popover section: a floating panel for help text or a small form. Pass `title` for the panel
+ * heading, or use the default slot for free content.
+ */
 withDefaults(defineProps<{
   open?: boolean;
   side?: 'top' | 'right' | 'bottom' | 'left';
   align?: 'start' | 'center' | 'end';
-}>(), { open: false, side: 'bottom', align: 'center' });
+  title?: string;
+}>(), { open: false, side: 'bottom', align: 'center', title: undefined });
 
 const emit = defineEmits<{ 'update:open': [value: boolean] }>();
 </script>
@@ -23,8 +28,14 @@ const emit = defineEmits<{ 'update:open': [value: boolean] }>();
         :side="side"
         :align="align"
         :side-offset="6"
-        class="z-50 rounded-ui border border-ui-border bg-ui-bg p-3 text-sm text-ui-text shadow-lg outline-none"
+        class="z-50 flex w-70 flex-col gap-3 rounded-ui-lg border border-ui-border bg-ui-bg p-4 text-sm text-ui-text shadow-md outline-none"
       >
+        <h2
+          v-if="title"
+          class="text-base font-semibold text-ui-text-highlighted"
+        >
+          {{ title }}
+        </h2>
         <slot />
       </PopoverContent>
     </PopoverPortal>

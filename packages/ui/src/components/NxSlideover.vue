@@ -32,14 +32,14 @@ const messages = useNxMessages();
     @update:open="emit('update:open', $event)"
   >
     <DialogPortal>
-      <DialogOverlay class="fixed inset-0 z-50 bg-ui-bg-inverted/40" />
+      <DialogOverlay class="fixed inset-0 z-50 bg-ui-overlay" />
       <DialogContent
         :class="[
           'fixed inset-y-0 z-50 flex w-[min(28rem,calc(100%-1rem))] flex-col border-ui-border bg-ui-bg shadow-xl outline-none',
           side === 'right' ? 'right-0 border-l' : 'left-0 border-r',
         ]"
       >
-        <header class="flex items-start justify-between gap-4 border-b border-ui-border px-5 py-4">
+        <header class="flex items-center justify-between gap-2 border-b border-ui-border px-5 py-4">
           <div class="min-w-0">
             <DialogTitle class="text-base font-semibold text-ui-text-highlighted">
               {{ title }}
@@ -55,15 +55,18 @@ const messages = useNxMessages();
             <NxIconButton
               :icon="X"
               :label="messages.close"
+              color="neutral"
+              variant="ghost"
+              size="sm"
             />
           </DialogClose>
         </header>
-        <div class="min-h-0 flex-1 overflow-y-auto p-5">
+        <div class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-3">
           <slot />
         </div>
         <footer
           v-if="$slots.footer"
-          class="border-t border-ui-border px-5 py-4"
+          class="flex items-center justify-end gap-2 border-t border-ui-border bg-ui-bg-muted px-5 py-3"
         >
           <slot name="footer" />
         </footer>

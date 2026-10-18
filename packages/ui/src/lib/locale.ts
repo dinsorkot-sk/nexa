@@ -24,6 +24,7 @@ export interface NxMessages {
   previous: string;
   next: string;
   pagination: string;
+  range: (start: number, end: number, total: number) => string;
   search: string;
   copy: string;
   copied: string;
@@ -53,6 +54,7 @@ export const messages: Record<NxLocale, NxMessages> = {
     previous: 'Previous page',
     next: 'Next page',
     pagination: 'Pagination',
+    range: (start: number, end: number, total: number) => `Showing ${start}-${end} of ${total}`,
     search: 'Search',
     copy: 'Copy',
     copied: 'Copied',
@@ -80,6 +82,7 @@ export const messages: Record<NxLocale, NxMessages> = {
     previous: 'หน้าก่อนหน้า',
     next: 'หน้าถัดไป',
     pagination: 'การแบ่งหน้า',
+    range: (start: number, end: number, total: number) => `แสดง ${start}-${end} จาก ${total}`,
     search: 'ค้นหา',
     copy: 'คัดลอก',
     copied: 'คัดลอกแล้ว',

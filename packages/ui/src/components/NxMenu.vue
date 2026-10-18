@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { Check, ChevronDown } from 'lucide-vue-next';
+import type { Component } from 'vue';
 
+/** A row of the menu, as the mockup's MenuItem section: an optional leading icon and a destructive tone. */
 export interface NxMenuItem {
   value: string;
   label: string;
   disabled?: boolean;
   destructive?: boolean;
   selected?: boolean;
+  icon?: Component;
 }
 
 const props = withDefaults(defineProps<{
@@ -33,18 +36,19 @@ function toggle() {
   emit('update:open', next);
 }
 
-function select(item: NxMenuItem) {
-  if (item.disabled) return;
-  emit('select', item.value);
+function close() {
   if (props.open === undefined) internalOpen.value = false;
   emit('update:open', false);
 }
 
+function select(item: NxMenuItem) {
+  if (item.disabled) return;
+  emit('select', item.value);
+  close();
+}
+
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') {
-    if (props.open === undefined) internalOpen.value = false;
-    emit('update:open', false);
-  }
+  if (event.key === 'Escape') close();
 }
 </script>
 
@@ -73,7 +77,7 @@ function onKeydown(event: KeyboardEvent) {
       v-if="isOpen"
       role="menu"
       :class="[
-        'absolute z-40 mt-1 min-w-48 rounded-ui border border-ui-border bg-ui-bg p-1 shadow-lg',
+        'absolute z-40 mt-1 min-w-54 rounded-ui-lg border border-ui-border bg-ui-bg p-1 shadow-md',
         align === 'end' ? 'right-0' : 'left-0',
       ]"
     >
@@ -87,15 +91,24 @@ function onKeydown(event: KeyboardEvent) {
           role="menuitem"
           :disabled="item.disabled"
           :class="[
-            'flex w-full items-center justify-between gap-3 rounded px-3 py-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50',
-            item.destructive ? 'text-ui-error-text hover:bg-ui-error/10' : 'text-ui-text hover:bg-ui-bg-muted',
+            'flex w-full items-center gap-2 rounded-ui px-2 py-1.5 text-left text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50',
+            item.destructive
+              ? 'text-ui-error-text hover:bg-ui-error-soft'
+              : 'text-ui-text-highlighted hover:bg-ui-bg-elevated',
           ]"
           @click="select(item)"
         >
-          {{ item.label }}
+          <component
+            :is="item.icon"
+            v-if="item.icon"
+            class="size-4 shrink-0"
+            :class="item.destructive ? 'text-ui-error-text' : 'text-ui-text-muted'"
+            aria-hidden="true"
+          />
+          <span class="flex-1 truncate">{{ item.label }}</span>
           <Check
             v-if="item.selected"
-            class="size-4"
+            class="size-4 shrink-0 text-ui-primary-text"
             aria-hidden="true"
           />
         </button>

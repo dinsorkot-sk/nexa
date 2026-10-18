@@ -41,9 +41,25 @@ describe('NxTable', () => {
 describe('NxPagination and NxProgress', () => {
   it('does not move past the final page', async () => {
     const wrapper = mount(NxPagination, { props: { modelValue: 2, pageSize: 10, total: 20 } });
-    expect(wrapper.text()).toContain('2 / 2');
+    expect(wrapper.text()).toContain('Showing 11-20 of 20');
     await wrapper.find('button[aria-label="Next page"]').trigger('click');
     expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+  });
+
+  it('shows a page button per page and emits the page that was clicked', async () => {
+    const wrapper = mount(NxPagination, { props: { modelValue: 1, pageSize: 10, total: 50, size: 'sm' } });
+    const buttons = wrapper.findAll('button[aria-label^="Page "]');
+    expect(buttons).toHaveLength(5);
+    expect(buttons[0].classes()).toContain('bg-ui-primary');
+    expect(buttons[0].classes()).toContain('size-7');
+    await buttons[2].trigger('click');
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([3]);
+  });
+
+  it('collapses a long page list into an ellipsis', () => {
+    const wrapper = mount(NxPagination, { props: { modelValue: 6, pageSize: 10, total: 120 } });
+    expect(wrapper.text()).toContain('…');
+    expect(wrapper.find('button[aria-current="page"]').text()).toBe('6');
   });
 
   it('clamps progress to the declared range', () => {

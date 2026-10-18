@@ -3,24 +3,38 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { Info } from 'lucide-vue-next';
 import { nextTick } from 'vue';
 import NxAlert from '../src/components/NxAlert.vue';
+import NxBanner from '../src/components/NxBanner.vue';
 import NxBadge from '../src/components/NxBadge.vue';
+import NxBreadcrumb from '../src/components/NxBreadcrumb.vue';
 import NxButton from '../src/components/NxButton.vue';
 import NxCard from '../src/components/NxCard.vue';
 import NxCheckbox from '../src/components/NxCheckbox.vue';
 import NxChip from '../src/components/NxChip.vue';
 import NxCombobox from '../src/components/NxCombobox.vue';
+import NxCommandPalette from '../src/components/NxCommandPalette.vue';
 import NxDatePicker from '../src/components/NxDatePicker.vue';
+import NxEmptyState from '../src/components/NxEmptyState.vue';
 import NxFieldWrapper from '../src/components/NxFieldWrapper.vue';
 import NxIconButton from '../src/components/NxIconButton.vue';
 import NxIndicator from '../src/components/NxIndicator.vue';
 import NxInput from '../src/components/NxInput.vue';
 import NxKbd from '../src/components/NxKbd.vue';
 import NxLogo from '../src/components/NxLogo.vue';
+import NxMenu from '../src/components/NxMenu.vue';
+import NxModal from '../src/components/NxModal.vue';
+import NxNavGroupLabel from '../src/components/NxNavGroupLabel.vue';
+import NxNavItem from '../src/components/NxNavItem.vue';
+import NxPageButton from '../src/components/NxPageButton.vue';
+import NxPagination from '../src/components/NxPagination.vue';
+import NxPopover from '../src/components/NxPopover.vue';
 import NxRadio from '../src/components/NxRadio.vue';
+import NxSegment from '../src/components/NxSegment.vue';
 import NxSelect from '../src/components/NxSelect.vue';
 import NxSeparator from '../src/components/NxSeparator.vue';
 import NxSkeleton from '../src/components/NxSkeleton.vue';
+import NxSlideover from '../src/components/NxSlideover.vue';
 import NxSwitch from '../src/components/NxSwitch.vue';
+import NxTabs from '../src/components/NxTabs.vue';
 import NxTextarea from '../src/components/NxTextarea.vue';
 import NxToast from '../src/components/NxToast.vue';
 import { buttonClasses } from '../src/lib/button';
@@ -376,6 +390,197 @@ describe('picker variants', () => {
     const wrapper = mount(NxDatePicker, { props: { modelValue: null, label: 'Due', invalid: true }, attachTo: document.body });
     const field = wrapper.find('[aria-label="Open calendar"]').element.parentElement as HTMLElement;
     expect(field.className).toContain('border-ui-error');
+  });
+});
+
+describe('navigation variants', () => {
+  it('NxTabs covers the two sizes and the leading icon of the mockup Tab section', () => {
+    const items = [{ value: 'a', label: 'A', icon: Info }];
+    const sm = mount(NxTabs, { props: { modelValue: 'a', label: 'Sections', items, size: 'sm' } });
+    const trigger = sm.find('[role="tab"]');
+    expect(trigger.classes()).toContain('px-2.5');
+    expect(trigger.classes()).toContain('text-xs');
+    expect(trigger.classes()).toContain('border-b-2');
+    expect(trigger.find('svg').classes()).toContain('group-data-[state=active]:text-ui-primary-text');
+    expect(mount(NxTabs, { props: { modelValue: 'a', label: 'Sections', items, size: 'md' } }).find('[role="tab"]').classes()).toContain('text-sm');
+  });
+
+  it('NxSegment covers the two sizes and lifts the active segment onto the surface', () => {
+    const items = [{ value: 'a', label: 'A' }];
+    const md = mount(NxSegment, { props: { modelValue: 'a', label: 'View', items } });
+    expect(md.classes()).toContain('bg-ui-bg-elevated');
+    expect(md.classes()).toContain('rounded-ui-lg');
+    const item = md.find('button');
+    expect(item.classes()).toContain('px-2.5');
+    expect(item.classes()).toContain('data-[state=on]:shadow-sm');
+    expect(mount(NxSegment, { props: { modelValue: 'a', label: 'View', items, size: 'sm' } }).find('button').classes()).toContain('text-xs');
+  });
+
+  it('NxNavItem marks the active page with the primary soft fill, count and icon-only forms', () => {
+    const active = mount(NxNavItem, { props: { active: true, icon: Info }, slots: { default: 'Home' } });
+    const inactive = mount(NxNavItem, { props: { icon: Info }, slots: { default: 'Home' } });
+    expect(active.classes()).toContain('bg-ui-primary-soft');
+    expect(active.classes()).toContain('[&_svg]:text-ui-primary-text');
+    expect(inactive.classes()).toContain('text-ui-text-toned');
+    expect(inactive.classes()).toContain('hover:bg-ui-bg-elevated');
+    const counted = mount(NxNavItem, { props: { active: true, icon: Info, count: 12 }, slots: { default: 'Home' } });
+    expect(counted.find('span.bg-ui-bg-accented').text()).toBe('12');
+    const iconOnly = mount(NxNavItem, { props: { icon: Info, iconOnly: true } });
+    expect(iconOnly.classes()).toContain('size-9');
+    expect(iconOnly.text()).toBe('');
+  });
+
+  it('NxNavGroupLabel is the mockup small-caps caption, hidden when collapsed', () => {
+    const wrapper = mount(NxNavGroupLabel, { slots: { default: 'WORKSPACE' } });
+    expect(wrapper.classes()).toContain('text-[11px]');
+    expect(wrapper.classes()).toContain('text-ui-text-dimmed');
+    expect(wrapper.text()).toBe('WORKSPACE');
+    expect(mount(NxNavGroupLabel, { props: { collapsed: true }, slots: { default: 'WORKSPACE' } }).find('h2').exists()).toBe(false);
+  });
+
+  it('NxBreadcrumb marks the last crumb as the current page and underlines the links on hover', () => {
+    const wrapper = mount(NxBreadcrumb, {
+      props: { label: 'Breadcrumb', items: [{ label: 'Builder', href: '/builder' }, { label: 'Vehicles' }] },
+    });
+    expect(wrapper.find('[aria-current="page"]').text()).toBe('Vehicles');
+    expect(wrapper.find('[aria-current="page"]').classes()).toContain('font-medium');
+    expect(wrapper.find('a').classes()).toContain('hover:underline');
+    expect(wrapper.findAll('svg')).toHaveLength(1);
+  });
+
+  it('NxPageButton covers the two sizes and the active page fill', () => {
+    const sm = mount(NxPageButton, { props: { page: 3, size: 'sm' } });
+    expect(sm.classes()).toContain('size-7');
+    expect(sm.classes()).toContain('text-xs');
+    expect(mount(NxPageButton, { props: { page: 3, current: true } }).classes()).toContain('bg-ui-primary');
+  });
+
+  it('NxPagination follows the mockup sizes and shows the ellipsis for a long list', () => {
+    const wrapper = mount(NxPagination, { props: { modelValue: 1, pageSize: 10, total: 200, size: 'sm' } });
+    expect(wrapper.find('nav').classes()).toContain('border-t');
+    expect(wrapper.text()).toContain('Showing 1-10 of 200');
+    expect(wrapper.text()).toContain('…');
+    expect(wrapper.find('button[aria-current="page"]').classes()).toContain('size-7');
+  });
+});
+
+describe('overlay variants', () => {
+  it('NxMenu follows the mockup MenuItem states', async () => {
+    const wrapper = mount(NxMenu, {
+      props: {
+        label: 'Actions',
+        items: [
+          { value: 'edit', label: 'Edit', icon: Info },
+          { value: 'chosen', label: 'Vehicles', selected: true },
+          { value: 'delete', label: 'Delete', destructive: true },
+        ],
+      },
+    });
+    await wrapper.find('button[aria-haspopup="menu"]').trigger('click');
+    const menu = wrapper.find('[role="menu"]');
+    expect(menu.classes()).toContain('rounded-ui-lg');
+    expect(menu.classes()).toContain('shadow-md');
+    const items = wrapper.findAll('[role="menuitem"]');
+    expect(items[0].find('svg').classes()).toContain('text-ui-text-muted');
+    expect(items[1].find('svg').classes()).toContain('text-ui-primary-text');
+    expect(items[2].classes()).toContain('text-ui-error-text');
+    expect(items[2].classes()).toContain('hover:bg-ui-error-soft');
+  });
+
+  it('NxModal covers the three widths, the destructive tone and the scrim token', async () => {
+    const modal = mount(NxModal, { props: { open: true, title: 'Delete vehicle?', size: 'lg', tone: 'destructive', description: 'Cannot be undone' }, attachTo: document.body });
+    await flushPromises();
+    await nextTick();
+    const dialog = document.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog.className).toContain('max-w-[640px]');
+    expect(dialog.className).toContain('rounded-ui-xl');
+    expect(dialog.querySelector('.bg-ui-error-soft')).toBeTruthy();
+    expect(document.querySelector('.bg-ui-overlay')).toBeTruthy();
+    expect(dialog.textContent).toContain('Cannot be undone');
+    modal.unmount();
+    await nextTick();
+  });
+
+  it('NxSlideover uses the mockup header, padded body and muted footer bar', async () => {
+    const slideover = mount(
+      NxSlideover,
+      {
+        props: { open: true, title: 'Notifications' },
+        slots: { default: 'Body', footer: 'Footer' },
+        attachTo: document.body,
+      },
+    );
+    await flushPromises();
+    await nextTick();
+    const dialog = document.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog.textContent).toContain('Notifications');
+    expect(dialog.querySelector('footer')?.className).toContain('bg-ui-bg-muted');
+    expect(document.querySelector('.bg-ui-overlay')).toBeTruthy();
+    slideover.unmount();
+    await nextTick();
+  });
+
+  it('NxPopover renders the mockup panel with its title', async () => {
+    const popover = mount(
+      NxPopover,
+      {
+        props: { open: true, title: 'About this field' },
+        slots: { default: 'Computed from price and tax.', trigger: '<button>Help</button>' },
+        attachTo: document.body,
+      },
+    );
+    await flushPromises();
+    await nextTick();
+    const panel = document.querySelector('[data-reka-popper-content-wrapper] > div') as HTMLElement | null;
+    expect(panel?.className).toContain('rounded-ui-lg');
+    expect(document.body.textContent).toContain('About this field');
+    popover.unmount();
+    await nextTick();
+  });
+
+  it('NxCommandPalette shows the search row, group caption and result rows', async () => {
+    const palette = mount(
+      NxCommandPalette,
+      {
+        props: {
+          open: true,
+          label: 'Command palette',
+          commands: [
+            { id: 'a', label: 'Vehicle Management', icon: Info, group: 'Modules' },
+            { id: 'b', label: 'Drivers', group: 'Modules' },
+          ],
+        },
+        attachTo: document.body,
+      },
+    );
+    await flushPromises();
+    await nextTick();
+    const dialog = document.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog.className).toContain('rounded-ui-xl');
+    expect(dialog.textContent).toContain('Modules');
+    expect(dialog.textContent).toContain('Esc');
+    expect(dialog.querySelectorAll('[role="option"]')).toHaveLength(2);
+    expect(document.querySelector('.bg-ui-overlay')).toBeTruthy();
+    palette.unmount();
+    await nextTick();
+  });
+
+  it('NxBanner uses the colour soft fill and ring, and dismisses', async () => {
+    const wrapper = mount(NxBanner, { props: { color: 'warning', title: 'You are offline', dismissible: true } });
+    expect(wrapper.classes()).toContain('bg-ui-warning-soft-hover');
+    expect(wrapper.classes()).toContain('border-ui-warning-ring');
+    expect(wrapper.attributes('role')).toBe('status');
+    expect(wrapper.find('svg').classes()).toContain('text-ui-text-highlighted');
+    await wrapper.find('button').trigger('click');
+    expect(wrapper.emitted('dismiss')).toHaveLength(1);
+  });
+
+  it('NxEmptyState keeps the mockup icon well, title and action row', () => {
+    const wrapper = mount(NxEmptyState, { props: { title: 'Nothing here yet', description: 'Add the first item.', icon: Info }, slots: { default: '<button>Add item</button>' } });
+    expect(wrapper.find('span').classes()).toContain('size-14');
+    expect(wrapper.find('span').classes()).toContain('bg-ui-bg-elevated');
+    expect(wrapper.find('h2').classes()).toContain('text-base');
+    expect(wrapper.find('button').text()).toBe('Add item');
   });
 });
 
