@@ -2,7 +2,9 @@
 - Backs up files before major rebuilds using a `.backup-before-rebuild` naming convention. Confidence: 0.9
 - Creates `.v2` snapshot copies of files so that the user can be asked to open a fresh copy if the live editor shows stale/cached state. Confidence: 0.9
 - Validates work through dual checking: structural/file integrity validation (expects "0 error") AND visual rendering via Chromium browser, in both Light and Dark modes. Confidence: 0.95
-- Cross-references existing design systems (specifically Nuxt UI v4 Community .fig files) as the structural basis for component sets, variant properties, and token usage. Confidence: 0.85
+- Cross-references existing design systems (specifically Nuxt UI v4 Community .fig files) as the structural basis for component sets, variant properties, and token usage. Confidence: 0.9
 - Keeps generator/rebuild scripts in a `mockup/_generator/` directory alongside the files they produce, so work is reproducible. Confidence: 0.8
 - Keeps generator script paths pointing to scratchpads/session directories by default, expecting to fix them before real runs — favors rapid iteration over polished reproducibility initially. Confidence: 0.75
 - Provides detailed before/after analysis of source files, cataloging exact counts (pages, icons, component sets, variants, tokens) to enable verification and cross-checking. Confidence: 0.85
+- Reimports screens from source by remapping component instance IDs to existing component sets, creating any missing component sets modeled on the Nuxt UI v4 Community .fig file. Confidence: 0.85
+- Is comfortable delegating the full git commit workflow to the assistant autonomously — when simply instructed to "commit", the assistant should handle file selection/staging, craft conventional-commit messages (with Co-authored-by trailers), and exclude system-managed files (e.g. taste files) without asking for confirmation or further detail. Confidence: 0.8

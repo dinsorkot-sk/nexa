@@ -2,3 +2,5 @@
 - Names semantic design tokens with a `--ui-*` convention matching the `tokens.css` file (e.g., `--ui-text-highlighted`, `--ui-on-solid`), with Light/Dark variable modes. Confidence: 0.95
 - Composes components via instance references rather than duplication — e.g., Modal uses Button, Table uses Badge and Avatar, Sidebar uses Logo/OrgSwitcher/NavItem. Confidence: 0.85
 - Defines variant properties consistently as Color, Variant, Size, and State (matching Nuxt UI conventions), plus editable Label (text) and Icon (swap) properties. Confidence: 0.85
+- When fixing a prop-wiring bug, moves the prop binding to the correct framework component rather than removing it — preserves intended functionality and follows the framework's API conventions. Confidence: 0.85
+- Adds new tests to existing test files that already have matching imports and `afterEach` cleanup, rather than creating new test files for the same domain. Confidence: 0.8

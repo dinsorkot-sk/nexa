@@ -1,3 +1,5 @@
 - Communicates primarily in Thai, mixing in English for technical terms and tool names. Confidence: 0.9
 - Prefers concise short-answer summaries (tagged "ตอบสั้น ๆ") embedded within longer detailed reports. Confidence: 0.8
+- References file paths with an `@` prefix in communication (e.g., `@mockup/Nexa.figcraft`). Confidence: 0.7
 - Produces highly structured progress reports with categorized bullet-point breakdowns, "ที่ผมตัดสินใจแทน" (decisions made) sections, and systematic issue/solution documentation. Confidence: 0.85
+- Fixes bugs discovered during investigation alongside the planned work (e.g., finding incorrect prop wiring in a framework component and correcting it in-place), rather than merely noting them and moving on. Confidence: 0.85
