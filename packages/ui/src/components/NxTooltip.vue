@@ -20,7 +20,7 @@ withDefaults(defineProps<{
 
 <template>
   <TooltipProvider>
-    <TooltipRoot>
+    <TooltipRoot :delay-duration="delayDuration">
       <TooltipTrigger as-child>
         <slot />
       </TooltipTrigger>
@@ -28,7 +28,6 @@ withDefaults(defineProps<{
         <TooltipContent
           :side="side"
           :side-offset="6"
-          :delay-duration="delayDuration"
           class="z-50 flex items-center gap-2 rounded-ui-sm bg-ui-bg-inverted px-2 py-1 text-xs text-ui-text-inverted data-[state=closed]:animate-ui-pop-out data-[state=delayed-open]:animate-ui-pop-in data-[state=instant-open]:animate-ui-pop-in"
         >
           {{ text }}

@@ -14,10 +14,13 @@ import NxModal from '../src/components/NxModal.vue';
 import NxRadio from '../src/components/NxRadio.vue';
 import NxSegment from '../src/components/NxSegment.vue';
 import NxSelect from '../src/components/NxSelect.vue';
+import NxSpinner from '../src/components/NxSpinner.vue';
 import NxSwitch from '../src/components/NxSwitch.vue';
 import NxTabs from '../src/components/NxTabs.vue';
 import NxTextarea from '../src/components/NxTextarea.vue';
+import NxTimeline from '../src/components/NxTimeline.vue';
 import NxToaster from '../src/components/NxToaster.vue';
+import NxTooltip from '../src/components/NxTooltip.vue';
 import { dismissToast, pushToast, toastQueue } from '../src/lib/toast';
 import { Star, X } from 'lucide-vue-next';
 
@@ -200,6 +203,87 @@ describe('navigation and overlays', () => {
     dismissToast(id);
     await nextTick();
     expect(toastQueue.some((item) => item.id === id)).toBe(false);
+    wrapper.unmount();
+  });
+});
+
+describe('NxSpinner', () => {
+  it('renders a spinning loader with role=status and an explicit aria-label', () => {
+    const wrapper = mount(NxSpinner, { props: { label: 'Loading data' } });
+    expect(wrapper.attributes('role')).toBe('status');
+    expect(wrapper.attributes('aria-label')).toBe('Loading data');
+    expect(wrapper.find('svg').classes()).toContain('animate-spin');
+  });
+
+  it('falls back to the locale loading label when none is given', () => {
+    const wrapper = mount(NxSpinner);
+    expect(wrapper.attributes('role')).toBe('status');
+    expect(wrapper.attributes('aria-label')).toBe('Loading');
+    expect(wrapper.find('svg').classes()).toContain('animate-spin');
+  });
+});
+
+describe('NxTimeline', () => {
+  const items = [
+    { id: '1', actor: 'Somchai K.', action: 'changed Status', time: '2 h ago', kind: 'update' as const, oldValue: 'Draft', newValue: 'Active' },
+    { id: '2', actor: 'Nok S.', action: 'commented', time: '5 h ago', kind: 'comment' as const, description: 'Service booked for next Monday.' },
+  ];
+
+  it('renders a labelled timeline with one article per entry', () => {
+    const wrapper = mount(NxTimeline, { props: { label: 'Activity', items } });
+    expect(wrapper.attributes('aria-label')).toBe('Activity');
+    expect(wrapper.findAll('article')).toHaveLength(2);
+    expect(wrapper.text()).toContain('Somchai K.');
+    expect(wrapper.text()).toContain('Nok S.');
+  });
+
+  it('draws a connector line below each item except the last', () => {
+    const wrapper = mount(NxTimeline, { props: { label: 'Activity', items } });
+    expect(wrapper.html().match(/bg-ui-border-accented/g) || []).toHaveLength(items.length - 1);
+  });
+
+  it('passes item props through to NxActivityItem', () => {
+    const single = [{ id: '1', actor: 'Grace', action: 'created this record', time: '1 d ago', kind: 'create' as const }];
+    const wrapper = mount(NxTimeline, { props: { label: 'Activity', items: single } });
+    expect(wrapper.text()).toContain('Grace');
+    expect(wrapper.text()).toContain('created this record');
+    expect(wrapper.text()).toContain('1 d ago');
+  });
+});
+
+describe('NxTooltip', () => {
+  it('renders the trigger slot', () => {
+    const wrapper = mount(NxTooltip, { props: { text: 'Hint' }, slots: { default: '<button>Help</button>' } });
+    expect(wrapper.find('button').text()).toBe('Help');
+  });
+
+  it('shows the text, kbd shortcut and motion classes on focus', async () => {
+    const wrapper = mount(NxTooltip, {
+      props: { text: 'Helpful hint', kbd: '⌘K', delayDuration: 0 },
+      slots: { default: '<button>Help</button>' },
+      attachTo: document.body,
+    });
+    await wrapper.find('button').trigger('focus');
+    await flushPromises();
+    await nextTick();
+    expect(document.body.textContent).toContain('Helpful hint');
+    expect(document.body.textContent).toContain('⌘K');
+    const tip = document.body.querySelector('[class*="bg-ui-bg-inverted"]');
+    expect(tip?.className).toMatch(/animate-ui-pop-(in|out)/);
+    wrapper.unmount();
+  });
+
+  it('respects the side prop for placement', async () => {
+    const wrapper = mount(NxTooltip, {
+      props: { text: 'Hint', side: 'bottom', delayDuration: 0 },
+      slots: { default: '<button>Help</button>' },
+      attachTo: document.body,
+    });
+    await wrapper.find('button').trigger('focus');
+    await flushPromises();
+    await nextTick();
+    const tip = document.body.querySelector('[data-side]');
+    expect(tip?.getAttribute('data-side')).toBe('bottom');
     wrapper.unmount();
   });
 });

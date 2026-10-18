@@ -129,3 +129,49 @@ describe('no hardcoded colours in components', () => {
     expect(text.match(/\b(bg|text|border|ring|fill|stroke|from|to|via|outline|shadow|placeholder|divide|decoration)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/g) ?? []).toEqual([]);
   });
 });
+
+describe('motion system', () => {
+  function vueFiles(dir: string): string[] {
+    return readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name);
+      return statSync(path).isDirectory() ? vueFiles(path) : [path];
+    }).filter((path) => path.endsWith('.vue'));
+  }
+
+  const motion = read('src/styles/motion.css');
+  // Every motion utility class motion.css declares: @theme --animate-ui-* → animate-ui-*,
+  // @theme --ease-ui-* → ease-ui-*, @utility duration-ui* → duration-ui*.
+  const defined = new Set<string>([
+    ...motion.matchAll(/--animate-ui-[a-z-]+(?=:)/g),
+    ...motion.matchAll(/--ease-ui-[a-z-]+(?=:)/g),
+  ].map((m) => m[0].slice(2)));
+  for (const m of motion.matchAll(/@utility (duration-ui[a-z-]*)/g)) defined.add(m[1]);
+
+  const components = vueFiles(join(root, 'src/components'));
+
+  it('motion.css declares the expected utility set', () => {
+    expect(defined.size).toBeGreaterThan(10);
+    for (const expected of [
+      'animate-ui-fade-in', 'animate-ui-fade-out', 'animate-ui-pop-in', 'animate-ui-pop-out',
+      'animate-ui-slide-in-left', 'animate-ui-slide-out-left', 'animate-ui-slide-in-right',
+      'animate-ui-slide-out-right', 'animate-ui-rise-in', 'animate-ui-rise-out',
+      'animate-ui-drop-in', 'animate-ui-grow', 'animate-ui-wipe', 'animate-ui-pop',
+      'animate-ui-collapse-down', 'animate-ui-collapse-up',
+      'ease-ui-out', 'ease-ui-in-out', 'ease-ui-spring',
+      'duration-ui-fast', 'duration-ui', 'duration-ui-slow',
+    ]) {
+      expect(defined, `missing ${expected}`).toContain(expected);
+    }
+  });
+
+  it.each(components.map((p) => [p.slice(root.length + 1), p] as const))(
+    '%s only references classes defined in motion.css',
+    (_name, path) => {
+      const text = readFileSync(path, 'utf8');
+      const refs = new Set([...text.matchAll(/\b(?:animate-ui-[a-z-]+|duration-ui[a-z-]*|ease-ui-[a-z-]+)\b/g)].map((m) => m[0]));
+      for (const ref of refs) {
+        expect(defined, `${path} uses "${ref}" which is not declared in motion.css`).toContain(ref);
+      }
+    },
+  );
+});
