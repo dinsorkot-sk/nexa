@@ -11,7 +11,7 @@ import {
   NxCombobox, NxCommandPalette, NxDatePicker, NxDiffRow, NxDonutChart, NxEmptyState, NxFieldInput, NxFieldRow, NxFieldValue,
   NxFieldWrapper, NxFileUpload, NxFormulaEditor, NxIconButton, NxIndicator, NxInput, NxKanbanCard, NxKbd, NxLineChart,
   NxLink, NxLogo, NxMenu, NxModal, NxNavGroupLabel, NxNavItem, NxNavbar, NxOrgSwitcher, NxPackageDiff, NxPageButton,
-  NxPageHeader, NxPagination, NxPermissionCell, NxPermissionsTable, NxPopover, NxProgress, NxRadio, NxSegment, NxSelect,
+  NxPageHeader, NxPagination, NxPermissionCell, NxPermissionsTable, NxPopover, NxProgress, NxRadio, NxSegment, NxSelectMenu,
   NxSeparator, NxSidebar, NxSkeleton, NxSlideover, NxSpinner, NxStatCard, NxStepper, NxSwitch, NxTable, NxTableRow, NxTabs,
   NxTextarea, NxTimeline, NxToast, NxToaster, NxTooltip, NxWorkflowEdge, NxWorkflowNode, pushToast, provideNxLocale,
   type ComboboxOption,
@@ -579,11 +579,11 @@ const buttonColors = ['primary', 'secondary', 'success', 'info', 'warning', 'err
               invalid
               aria-label="Invalid input"
             />
-            <NxSelect
+            <NxSelectMenu
               v-model="sampleSelect"
               :options="choices"
               placeholder="Choose status"
-              aria-label="Status"
+              label="Status"
             />
             <NxTextarea
               placeholder="Notes"

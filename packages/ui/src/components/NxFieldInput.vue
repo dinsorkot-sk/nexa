@@ -12,7 +12,6 @@ import NxDatePicker from './NxDatePicker.vue';
 import NxFieldValue from './NxFieldValue.vue';
 import NxFieldWrapper from './NxFieldWrapper.vue';
 import NxInput from './NxInput.vue';
-import NxSelect from './NxSelect.vue';
 import NxSkeleton from './NxSkeleton.vue';
 import NxSwitch from './NxSwitch.vue';
 import NxTextarea from './NxTextarea.vue';
@@ -237,15 +236,16 @@ const inputType = computed(() => {
         @update:model-value="(value) => emit('update:modelValue', value)"
       />
 
-      <NxSelect
+      <NxCombobox
         v-else-if="kind === 'select'"
         :id="fieldId"
+        :label="field.label"
         :model-value="typeof modelValue === 'string' ? modelValue : undefined"
-        :options="selectOptions"
+        :options="choices"
         :placeholder="messages.empty"
         :disabled="readOnly"
         :invalid="invalid"
-        :aria-describedby="describedBy"
+        :described-by="describedBy"
         @update:model-value="(value) => emit('update:modelValue', value)"
       />
 
