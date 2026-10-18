@@ -5,15 +5,19 @@ import NxAlert from '../src/components/NxAlert.vue';
 import NxBadge from '../src/components/NxBadge.vue';
 import NxButton from '../src/components/NxButton.vue';
 import NxCard from '../src/components/NxCard.vue';
+import NxCheckbox from '../src/components/NxCheckbox.vue';
 import NxChip from '../src/components/NxChip.vue';
+import NxFieldWrapper from '../src/components/NxFieldWrapper.vue';
 import NxIconButton from '../src/components/NxIconButton.vue';
 import NxIndicator from '../src/components/NxIndicator.vue';
 import NxInput from '../src/components/NxInput.vue';
 import NxKbd from '../src/components/NxKbd.vue';
 import NxLogo from '../src/components/NxLogo.vue';
+import NxRadio from '../src/components/NxRadio.vue';
 import NxSelect from '../src/components/NxSelect.vue';
 import NxSeparator from '../src/components/NxSeparator.vue';
 import NxSkeleton from '../src/components/NxSkeleton.vue';
+import NxSwitch from '../src/components/NxSwitch.vue';
 import NxTextarea from '../src/components/NxTextarea.vue';
 import NxToast from '../src/components/NxToast.vue';
 import { buttonClasses } from '../src/lib/button';
@@ -209,6 +213,84 @@ describe('field variants', () => {
     expect(wrapper.find('select').classes()).toContain('h-7');
     expect(wrapper.find('select').classes()).toContain('pl-8');
     expect(wrapper.findAll('svg')).toHaveLength(2);
+  });
+});
+
+describe('control variants', () => {
+  it('NxCheckbox covers the 3 box sizes of the mockup CTRL table', () => {
+    for (const [size, box] of [['sm', 'size-3.5'], ['md', 'size-4'], ['lg', 'size-5']] as const) {
+      expect(mount(NxCheckbox, { props: { size }, slots: { default: 'Label' } }).find('button').classes(), size).toContain(box);
+    }
+  });
+
+  it('NxCheckbox paints the checked and indeterminate box, and marks the indeterminate state', () => {
+    const checked = mount(NxCheckbox, { props: { modelValue: true } });
+    expect(checked.find('button').classes()).toContain('hover:data-[state=checked]:bg-ui-primary-hover');
+    const mixed = mount(NxCheckbox, { props: { modelValue: 'indeterminate' } });
+    expect(mixed.find('button').classes()).toContain('data-[state=indeterminate]:bg-ui-primary');
+    expect(mixed.find('button').classes()).toContain('border-ui-primary');
+    expect(checked.find('button').classes()).toContain('border-ui-primary');
+    expect(mount(NxCheckbox).find('button').classes()).toContain('hover:border-ui-text-dimmed');
+  });
+
+  it('NxCheckbox sizes its label text with the box', () => {
+    const sizes = { sm: 'text-xs', md: 'text-sm', lg: 'text-base' } as const;
+    for (const [size, text] of Object.entries(sizes) as [keyof typeof sizes, string][]) {
+      const wrapper = mount(NxCheckbox, { props: { size }, slots: { default: 'Label' } });
+      expect(wrapper.find('label').classes(), size).toContain(text);
+    }
+  });
+
+  it('NxRadio covers the 3 sizes and fills the checked circle with the on-solid dot', () => {
+    const sizes = { sm: 'size-3.5', md: 'size-4', lg: 'size-5' } as const;
+    for (const [size, box] of Object.entries(sizes) as [keyof typeof sizes, string][]) {
+      const wrapper = mount(NxRadio, { props: { size, options: [{ value: 'a', label: 'A' }], label: 'Group' } });
+      expect(wrapper.find('button').classes(), size).toContain(box);
+    }
+    const checked = mount(NxRadio, { props: { modelValue: 'a', size: 'lg', options: [{ value: 'a', label: 'A' }], label: 'Group' } });
+    expect(checked.find('button').classes()).toContain('data-[state=checked]:bg-ui-primary');
+    expect(checked.find('span span').classes()).toContain('bg-ui-on-solid');
+    expect(checked.find('span span').classes()).toContain('size-2');
+    expect(checked.find('button').attributes('role')).toBe('radio');
+  });
+
+  it('NxRadio keeps the group name and disables single options', () => {
+    const wrapper = mount(NxRadio, {
+      props: { name: 'choice', options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B', disabled: true }], label: 'Group' },
+    });
+    expect(wrapper.findAll('button')[1].attributes('disabled')).toBeDefined();
+  });
+
+  it('NxSwitch covers the 3 track sizes of the mockup SW table', () => {
+    for (const [size, box] of [['sm', ['h-4', 'w-7']], ['md', ['h-5', 'w-9']], ['lg', ['h-6', 'w-11']]] as const) {
+      const classes = mount(NxSwitch, { props: { size } }).find('button').classes();
+      for (const one of box) expect(classes, size).toContain(one);
+    }
+  });
+
+  it('NxSwitch moves a knob that grows with the track, and uses the on/off fills', () => {
+    const off = mount(NxSwitch);
+    expect(off.find('button').classes()).toContain('bg-ui-border-accented');
+    expect(off.find('button').classes()).toContain('hover:bg-ui-text-dimmed');
+    expect(off.find('button').classes()).toContain('focus-visible:ring-[3px]');
+    const on = mount(NxSwitch, { props: { modelValue: true, size: 'lg' } });
+    expect(on.find('button').classes()).toContain('data-[state=checked]:bg-ui-primary');
+    expect(on.find('button').classes()).toContain('hover:data-[state=checked]:bg-ui-primary-hover');
+    const knob = on.find('button > span');
+    expect(knob.classes()).toContain('size-5');
+    expect(knob.classes()).toContain('data-[state=checked]:translate-x-[22px]');
+    expect(knob.classes()).toContain('bg-ui-bg');
+  });
+
+  it('NxFieldWrapper labels at the two mockup sizes and links hint and error to the control', () => {
+    const wrapper = mount(NxFieldWrapper, { props: { id: 'email', label: 'Email', required: true, hint: 'Work address', size: 'sm' } });
+    expect(wrapper.find('label').classes()).toContain('text-xs');
+    expect(wrapper.find('label').classes()).toContain('font-medium');
+    expect(wrapper.find('label').text()).toContain('*');
+    expect(wrapper.find('p').classes()).toContain('text-ui-text-muted');
+    const md = mount(NxFieldWrapper, { props: { id: 'email', label: 'Email', error: 'Required' } });
+    expect(md.find('label').classes()).toContain('text-sm');
+    expect(md.find('p[role=alert]').text()).toBe('Required');
   });
 });
 

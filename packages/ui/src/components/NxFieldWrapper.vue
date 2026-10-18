@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
+/** Label sizes from the mockup's FormField section: Nexa/Small Medium and Nexa/Body Medium. */
+export type FieldWrapperSize = 'sm' | 'md';
+
 /**
  * Label, hint and error around a control. The slot receives `describedBy` (ids of the hint and error, for
  * aria-describedby) and `invalid` (for aria-invalid) so the control is linked to both.
@@ -11,7 +14,10 @@ const props = withDefaults(defineProps<{
   required?: boolean;
   hint?: string;
   error?: string;
-}>(), { required: false, hint: undefined, error: undefined });
+  size?: FieldWrapperSize;
+}>(), { required: false, hint: undefined, error: undefined, size: 'md' });
+
+const labelSize: Record<FieldWrapperSize, string> = { sm: 'text-xs', md: 'text-sm' };
 
 const describedBy = computed(() => {
   const ids = [props.hint ? `${props.id}-hint` : '', props.error ? `${props.id}-error` : ''].filter(Boolean);
@@ -23,7 +29,8 @@ const describedBy = computed(() => {
   <div class="flex flex-col gap-1.5">
     <label
       :for="id"
-      class="text-sm font-medium text-ui-text-highlighted"
+      class="font-medium text-ui-text-highlighted"
+      :class="labelSize[size]"
     >
       {{ label }}<span
         v-if="required"
