@@ -10,6 +10,10 @@ export interface NxMessages {
   close: string;
   loading: string;
   noResults: string;
+  noMatches: string;
+  noMatchesHint: string;
+  selectedCount: (count: number) => string;
+  clear: string;
   comboboxError: string;
   retry: string;
   openList: string;
@@ -35,6 +39,10 @@ export const messages: Record<NxLocale, NxMessages> = {
     close: 'Close',
     loading: 'Loading',
     noResults: 'No results',
+    noMatches: 'No matches',
+    noMatchesHint: 'Try a different search term.',
+    selectedCount: (count: number) => `${count} selected`,
+    clear: 'Clear',
     comboboxError: 'Could not load options',
     retry: 'Try again',
     openList: 'Open list',
@@ -58,6 +66,10 @@ export const messages: Record<NxLocale, NxMessages> = {
     close: 'ปิด',
     loading: 'กำลังโหลด',
     noResults: 'ไม่พบรายการ',
+    noMatches: 'ไม่พบรายการที่ตรงกัน',
+    noMatchesHint: 'ลองใช้คำค้นอื่น',
+    selectedCount: (count: number) => `เลือก ${count} รายการ`,
+    clear: 'ล้าง',
     comboboxError: 'โหลดรายการไม่สำเร็จ',
     retry: 'ลองอีกครั้ง',
     openList: 'เปิดรายการ',

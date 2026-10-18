@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import { Info } from 'lucide-vue-next';
+import { nextTick } from 'vue';
 import NxAlert from '../src/components/NxAlert.vue';
 import NxBadge from '../src/components/NxBadge.vue';
 import NxButton from '../src/components/NxButton.vue';
 import NxCard from '../src/components/NxCard.vue';
 import NxCheckbox from '../src/components/NxCheckbox.vue';
 import NxChip from '../src/components/NxChip.vue';
+import NxCombobox from '../src/components/NxCombobox.vue';
+import NxDatePicker from '../src/components/NxDatePicker.vue';
 import NxFieldWrapper from '../src/components/NxFieldWrapper.vue';
 import NxIconButton from '../src/components/NxIconButton.vue';
 import NxIndicator from '../src/components/NxIndicator.vue';
@@ -291,6 +294,88 @@ describe('control variants', () => {
     const md = mount(NxFieldWrapper, { props: { id: 'email', label: 'Email', error: 'Required' } });
     expect(md.find('label').classes()).toContain('text-sm');
     expect(md.find('p[role=alert]').text()).toBe('Required');
+  });
+});
+
+describe('picker variants', () => {
+  it('NxCombobox paints the trigger focus, error and disabled states with the mockup tokens', () => {
+    const base = mount(NxCombobox, { props: { label: 'Owner' } });
+    const anchor = base.find('input').element.parentElement as HTMLElement;
+    expect(anchor.className).toContain('rounded-ui');
+    expect(anchor.className).toContain('focus-within:ring-ui-primary');
+    expect(anchor.className).toContain('hover:border-ui-text-dimmed');
+    expect(anchor.querySelectorAll('svg')).toHaveLength(1);
+
+    const error = mount(NxCombobox, { props: { label: 'Owner', invalid: true } });
+    expect((error.find('input').element.parentElement as HTMLElement).className).toContain('border-ui-error');
+    const disabled = mount(NxCombobox, { props: { label: 'Owner', disabled: true } });
+    expect((disabled.find('input').element.parentElement as HTMLElement).className).toContain('opacity-50');
+  });
+
+  it('NxCombobox opens the mockup empty search state, and the multiple list counts and clears', async () => {
+    const wrapper = mount(NxCombobox, { props: { label: 'Owner' }, attachTo: document.body });
+    const input = wrapper.find('input');
+    await input.trigger('focus');
+    input.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    await flushPromises();
+    await nextTick();
+    expect(document.body.textContent).toContain('No matches');
+    expect(document.body.textContent).toContain('Try a different search term.');
+    wrapper.unmount();
+    await nextTick();
+
+    const multi = mount(NxCombobox, {
+      props: {
+        label: 'Owners',
+        multiple: true,
+        modelValue: ['a'],
+        selected: [{ value: 'a', label: 'Alpha' }],
+        options: [{ value: 'a', label: 'Alpha' }],
+      },
+      attachTo: document.body,
+    });
+    const multiInput = multi.find('input');
+    await multiInput.trigger('focus');
+    multiInput.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    await flushPromises();
+    await nextTick();
+    expect(document.body.textContent).toContain('1 selected');
+    const clear = Array.from(document.body.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Clear');
+    expect(clear).toBeTruthy();
+    clear?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushPromises();
+    await nextTick();
+    expect(multi.emitted('update:modelValue')?.at(-1)).toEqual([[]]);
+    multi.unmount();
+    await nextTick();
+  });
+
+  it('NxDatePicker shows the calendar and chevron affordances and the mockup day cell states', async () => {
+    const wrapper = mount(NxDatePicker, { props: { modelValue: '2026-10-16', label: 'Due' }, attachTo: document.body });
+    await flushPromises();
+    const field = wrapper.find('[aria-label="Open calendar"]').element.parentElement as HTMLElement;
+    expect(field.className).toContain('rounded-ui');
+    expect(field.className).toContain('focus-within:ring-ui-primary');
+    expect(field.querySelectorAll('svg')).toHaveLength(2);
+    expect((field.querySelector('svg') as SVGElement).getAttribute('class')).toContain('text-ui-text-dimmed');
+
+    await wrapper.find('[aria-label="Open calendar"]').trigger('click');
+    await flushPromises();
+    await nextTick();
+    const cell = document.body.querySelector('[data-reka-calendar-cell-trigger]') as HTMLElement | null;
+    expect(cell?.className).toContain('size-9');
+    expect(cell?.className).toContain('text-ui-text');
+    expect(cell?.className).toContain('data-[today]:ring-ui-primary-outline');
+    expect(cell?.className).toContain('data-[selected]:bg-ui-primary');
+    expect(document.body.textContent).toContain('October 2026');
+    wrapper.unmount();
+    await nextTick();
+  });
+
+  it('NxDatePicker swaps the border and focus ring for the error colours when invalid', () => {
+    const wrapper = mount(NxDatePicker, { props: { modelValue: null, label: 'Due', invalid: true }, attachTo: document.body });
+    const field = wrapper.find('[aria-label="Open calendar"]').element.parentElement as HTMLElement;
+    expect(field.className).toContain('border-ui-error');
   });
 });
 

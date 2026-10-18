@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { DateValue } from '@internationalized/date';
-import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-vue-next';
+import { CalendarDays, ChevronLeft, ChevronRight, ChevronsUpDown } from 'lucide-vue-next';
 import {
   DatePickerCalendar, DatePickerCell, DatePickerCellTrigger, DatePickerContent, DatePickerField, DatePickerGrid, DatePickerGridBody,
   DatePickerGridHead, DatePickerGridRow, DatePickerHeadCell, DatePickerHeader, DatePickerHeading, DatePickerInput, DatePickerNext,
@@ -75,11 +75,15 @@ function onPick(value: DateValue | undefined) {
     <DatePickerField
       v-slot="{ segments }"
       :class="[
-        'flex h-9 w-full items-center gap-1 rounded-ui border bg-ui-bg px-3 text-sm text-ui-text-highlighted focus-within:ring-2 focus-within:ring-ui-primary/50',
-        invalid ? 'border-ui-error' : 'border-ui-border-accented',
-        disabled && 'cursor-not-allowed opacity-50',
+        'flex h-9 w-full items-center gap-2 rounded-ui border bg-ui-bg px-3 text-sm text-ui-text-highlighted transition-colors focus-within:ring-2 focus-within:ring-ui-primary',
+        invalid ? 'border-ui-error' : 'border-ui-border-accented hover:border-ui-text-dimmed',
+        disabled && 'cursor-not-allowed bg-ui-bg-muted opacity-50',
       ]"
     >
+      <CalendarDays
+        class="size-4 shrink-0 text-ui-text-dimmed"
+        aria-hidden="true"
+      />
       <template
         v-for="item in segments"
         :key="item.part"
@@ -106,9 +110,9 @@ function onPick(value: DateValue | undefined) {
       <DatePickerTrigger
         :aria-label="messages.openCalendar"
         :disabled="disabled"
-        class="ml-auto rounded px-1 text-ui-text-muted outline-none focus-visible:ring-2 focus-visible:ring-ui-primary"
+        class="ml-auto rounded px-1 text-ui-text-dimmed outline-none focus-visible:ring-2 focus-visible:ring-ui-primary"
       >
-        <CalendarDays
+        <ChevronsUpDown
           class="size-4"
           aria-hidden="true"
         />
@@ -116,13 +120,13 @@ function onPick(value: DateValue | undefined) {
     </DatePickerField>
     <DatePickerContent
       :side-offset="4"
-      class="z-50 rounded-ui border border-ui-border bg-ui-bg p-3 text-ui-text shadow-lg"
+      class="z-50 w-72 rounded-ui-xl border border-ui-border bg-ui-bg p-3 text-ui-text shadow-md"
     >
       <DatePickerCalendar v-slot="{ weekDays, grid }">
         <DatePickerHeader class="mb-2 flex items-center justify-between">
           <DatePickerPrev
             :aria-label="messages.prevMonth"
-            class="rounded p-1 text-ui-text-muted outline-none hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary"
+            class="rounded-ui p-1 text-ui-text-muted outline-none hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary"
           >
             <ChevronLeft
               class="size-4"
@@ -152,7 +156,7 @@ function onPick(value: DateValue | undefined) {
               <DatePickerHeadCell
                 v-for="day in weekDays"
                 :key="day"
-                class="w-9 text-center text-xs text-ui-text-muted"
+                class="h-6 w-9 text-center text-[11px] font-medium text-ui-text-muted"
               >
                 {{ day }}
               </DatePickerHeadCell>
@@ -173,7 +177,7 @@ function onPick(value: DateValue | undefined) {
                 <DatePickerCellTrigger
                   :day="weekDate"
                   :month="month.value"
-                  class="flex h-8 w-8 items-center justify-center rounded-ui-sm text-sm text-ui-text outline-none hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary data-[outside-view]:text-ui-text-muted data-[disabled]:opacity-40 data-[selected]:bg-ui-primary data-[selected]:text-ui-on-solid data-[today]:font-semibold"
+                  class="flex size-9 items-center justify-center rounded-ui text-sm font-normal text-ui-text outline-none transition-colors hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary data-[outside-view]:text-ui-text-dimmed data-[disabled]:text-ui-text-dimmed data-[disabled]:opacity-50 data-[selected]:bg-ui-primary data-[selected]:font-medium data-[selected]:text-ui-on-solid data-[today]:font-medium data-[today]:text-ui-text-highlighted data-[today]:ring-1 data-[today]:ring-inset data-[today]:ring-ui-primary-outline"
                 />
               </DatePickerCell>
             </DatePickerGridRow>

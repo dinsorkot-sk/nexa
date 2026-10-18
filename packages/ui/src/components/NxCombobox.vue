@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Check, ChevronDown } from 'lucide-vue-next';
+import { Check, ChevronsUpDown, Search } from 'lucide-vue-next';
 import {
   ComboboxAnchor, ComboboxContent, ComboboxInput, ComboboxItem, ComboboxItemIndicator, ComboboxPortal, ComboboxRoot,
   ComboboxTrigger, ComboboxViewport,
@@ -75,9 +75,9 @@ const displayValue = (value: unknown) => (typeof value === 'string' ? labelOf(va
 const keepAll = (list: unknown) => list as never;
 
 const anchorClass = computed(() => [
-  'flex min-h-9 w-full flex-wrap items-center gap-1 rounded-ui border bg-ui-bg px-2 py-1 text-sm text-ui-text-highlighted focus-within:ring-2 focus-within:ring-ui-primary/50',
-  props.invalid ? 'border-ui-error' : 'border-ui-border-accented',
-  props.disabled && 'cursor-not-allowed opacity-50',
+  'flex min-h-9 w-full flex-wrap items-center gap-1 rounded-ui border bg-ui-bg px-2 py-1 text-sm text-ui-text-highlighted transition-colors focus-within:ring-2 focus-within:ring-ui-primary',
+  props.invalid ? 'border-ui-error' : 'border-ui-border-accented hover:border-ui-text-dimmed',
+  props.disabled && 'cursor-not-allowed bg-ui-bg-muted opacity-50',
 ]);
 
 // Each request gets a sequence number and an AbortController. Only the newest may update the list, so a slow response
@@ -178,9 +178,9 @@ onBeforeUnmount(() => {
       <ComboboxTrigger
         :aria-label="messages.openList"
         :disabled="disabled"
-        class="rounded px-1 text-ui-text-muted outline-none focus-visible:ring-2 focus-visible:ring-ui-primary"
+        class="rounded px-1 text-ui-text-dimmed outline-none focus-visible:ring-2 focus-visible:ring-ui-primary"
       >
-        <ChevronDown
+        <ChevronsUpDown
           class="size-4"
           aria-hidden="true"
         />
@@ -190,9 +190,9 @@ onBeforeUnmount(() => {
       <ComboboxContent
         position="popper"
         :side-offset="4"
-        class="z-50 w-[var(--reka-combobox-trigger-width)] overflow-hidden rounded-ui border border-ui-border bg-ui-bg text-ui-text shadow-lg"
+        class="z-50 w-[var(--reka-combobox-trigger-width)] overflow-hidden rounded-ui-lg border border-ui-border bg-ui-bg text-ui-text shadow-lg"
       >
-        <ComboboxViewport class="max-h-64 overflow-y-auto p-1">
+        <ComboboxViewport class="flex max-h-64 flex-col gap-0.5 overflow-y-auto p-1">
           <div
             v-if="status === 'loading'"
             role="status"
@@ -216,25 +216,58 @@ onBeforeUnmount(() => {
           </div>
           <div
             v-else-if="status === 'ready' && !items.length"
-            class="px-3 py-2 text-sm text-ui-text-muted"
+            class="flex flex-col items-center gap-1 px-3 py-5 text-center"
           >
-            {{ messages.noResults }}
+            <Search
+              class="size-5 text-ui-text-dimmed"
+              aria-hidden="true"
+            />
+            <p class="text-sm font-medium text-ui-text-highlighted">
+              {{ messages.noMatches }}
+            </p>
+            <p class="text-xs text-ui-text-muted">
+              {{ messages.noMatchesHint }}
+            </p>
           </div>
           <ComboboxItem
             v-for="option in items"
             :key="option.value"
             :value="option.value"
-            class="flex cursor-pointer items-center justify-between gap-2 rounded-ui px-3 py-2 text-sm text-ui-text outline-none data-[highlighted]:bg-ui-bg-muted data-[state=checked]:font-medium data-[state=checked]:text-ui-text-highlighted"
+            class="group flex cursor-pointer items-center gap-2 rounded-ui px-2 py-1.5 text-sm text-ui-text outline-none data-[highlighted]:bg-ui-bg-elevated data-[state=checked]:text-ui-text-highlighted"
           >
-            {{ option.label }}
-            <ComboboxItemIndicator>
+            <span
+              v-if="multiple"
+              class="flex size-3.5 shrink-0 items-center justify-center rounded-ui-sm border border-ui-border-accented bg-ui-bg group-data-[state=checked]:border-ui-primary group-data-[state=checked]:bg-ui-primary"
+            >
+              <ComboboxItemIndicator>
+                <Check
+                  class="size-2.5 text-ui-on-solid"
+                  aria-hidden="true"
+                />
+              </ComboboxItemIndicator>
+            </span>
+            <span class="flex-1 truncate">{{ option.label }}</span>
+            <ComboboxItemIndicator v-if="!multiple">
               <Check
-                class="size-4 text-ui-text-highlighted"
+                class="size-4 text-ui-primary-text"
                 aria-hidden="true"
               />
             </ComboboxItemIndicator>
           </ComboboxItem>
         </ComboboxViewport>
+        <div
+          v-if="multiple && selectedValues.length"
+          class="flex items-center justify-between gap-2 border-t border-ui-border px-2 py-1.5 pl-2.5"
+        >
+          <span class="text-xs text-ui-text-muted">{{ messages.selectedCount(selectedValues.length) }}</span>
+          <button
+            type="button"
+            class="rounded-ui px-2 py-1 text-xs font-medium text-ui-text-muted outline-none hover:bg-ui-bg-elevated hover:text-ui-text-highlighted focus-visible:ring-2 focus-visible:ring-ui-primary"
+            @click="emit('update:modelValue', [])"
+          >
+            {{ messages.clear }}
+          </button>
+        </div>
       </ComboboxContent>
     </ComboboxPortal>
   </ComboboxRoot>
