@@ -3,22 +3,31 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { Info } from 'lucide-vue-next';
 import { nextTick } from 'vue';
 import NxAlert from '../src/components/NxAlert.vue';
-import NxBanner from '../src/components/NxBanner.vue';
+import NxActivityItem from '../src/components/NxActivityItem.vue';
+import NxAvatarGroup from '../src/components/NxAvatarGroup.vue';
 import NxBadge from '../src/components/NxBadge.vue';
+import NxBanner from '../src/components/NxBanner.vue';
 import NxBreadcrumb from '../src/components/NxBreadcrumb.vue';
 import NxButton from '../src/components/NxButton.vue';
+import NxCalendarDay from '../src/components/NxCalendarDay.vue';
+import NxCalendarEvent from '../src/components/NxCalendarEvent.vue';
 import NxCard from '../src/components/NxCard.vue';
 import NxCheckbox from '../src/components/NxCheckbox.vue';
 import NxChip from '../src/components/NxChip.vue';
 import NxCombobox from '../src/components/NxCombobox.vue';
 import NxCommandPalette from '../src/components/NxCommandPalette.vue';
 import NxDatePicker from '../src/components/NxDatePicker.vue';
+import NxDiffRow from '../src/components/NxDiffRow.vue';
 import NxEmptyState from '../src/components/NxEmptyState.vue';
+import NxFieldRow from '../src/components/NxFieldRow.vue';
 import NxFieldWrapper from '../src/components/NxFieldWrapper.vue';
+import NxFileUpload from '../src/components/NxFileUpload.vue';
 import NxIconButton from '../src/components/NxIconButton.vue';
 import NxIndicator from '../src/components/NxIndicator.vue';
 import NxInput from '../src/components/NxInput.vue';
+import NxKanbanCard from '../src/components/NxKanbanCard.vue';
 import NxKbd from '../src/components/NxKbd.vue';
+import NxLink from '../src/components/NxLink.vue';
 import NxLogo from '../src/components/NxLogo.vue';
 import NxMenu from '../src/components/NxMenu.vue';
 import NxModal from '../src/components/NxModal.vue';
@@ -26,17 +35,24 @@ import NxNavGroupLabel from '../src/components/NxNavGroupLabel.vue';
 import NxNavItem from '../src/components/NxNavItem.vue';
 import NxPageButton from '../src/components/NxPageButton.vue';
 import NxPagination from '../src/components/NxPagination.vue';
+import NxPermissionCell from '../src/components/NxPermissionCell.vue';
 import NxPopover from '../src/components/NxPopover.vue';
+import NxProgress from '../src/components/NxProgress.vue';
 import NxRadio from '../src/components/NxRadio.vue';
 import NxSegment from '../src/components/NxSegment.vue';
 import NxSelect from '../src/components/NxSelect.vue';
 import NxSeparator from '../src/components/NxSeparator.vue';
 import NxSkeleton from '../src/components/NxSkeleton.vue';
 import NxSlideover from '../src/components/NxSlideover.vue';
+import NxStatCard from '../src/components/NxStatCard.vue';
+import NxStepper from '../src/components/NxStepper.vue';
 import NxSwitch from '../src/components/NxSwitch.vue';
+import NxTableRow from '../src/components/NxTableRow.vue';
 import NxTabs from '../src/components/NxTabs.vue';
 import NxTextarea from '../src/components/NxTextarea.vue';
 import NxToast from '../src/components/NxToast.vue';
+import NxWorkflowEdge from '../src/components/NxWorkflowEdge.vue';
+import NxWorkflowNode from '../src/components/NxWorkflowNode.vue';
 import { buttonClasses } from '../src/lib/button';
 import { fieldStyles } from '../src/lib/input';
 import { dotColor, tone, nxColors, nxSizes, nxVariants, } from '../src/lib/tone';
@@ -581,6 +597,184 @@ describe('overlay variants', () => {
     expect(wrapper.find('span').classes()).toContain('bg-ui-bg-elevated');
     expect(wrapper.find('h2').classes()).toContain('text-base');
     expect(wrapper.find('button').text()).toBe('Add item');
+  });
+});
+
+describe('data variants', () => {
+  it('NxTableRow is 40px on the muted fill for a header and 48px with the state fills for a body row', () => {
+    const head = mount(NxTableRow, { props: { head: true } });
+    expect(head.classes()).toContain('h-10');
+    expect(head.classes()).toContain('bg-ui-bg-muted');
+    const selected = mount(NxTableRow, { props: { selected: true, clickable: true } });
+    expect(selected.classes()).toContain('h-12');
+    expect(selected.classes()).toContain('bg-ui-primary-soft');
+    const body = mount(NxTableRow, { props: { clickable: true } });
+    expect(body.classes()).toContain('hover:bg-ui-bg-elevated');
+    expect(body.classes()).toContain('cursor-pointer');
+  });
+
+  it('NxStatCard shows the icon well and the trend badge at the mockup sizes', () => {
+    const wrapper = mount(NxStatCard, { props: { label: 'Total vehicles', value: '1,204', change: '+12%', trend: 'up', icon: Info } });
+    expect(wrapper.classes()).toContain('rounded-ui-xl');
+    const well = wrapper.find('span');
+    expect(well.classes()).toContain('size-9');
+    expect(well.classes()).toContain('bg-ui-primary-soft');
+    expect(wrapper.find('.bg-ui-success-soft').text()).toContain('+12%');
+    expect(wrapper.find('p').classes()).toContain('text-[32px]');
+    const down = mount(NxStatCard, { props: { label: 'Overdue', value: 4, change: '-4%', trend: 'down' } });
+    expect(down.find('.bg-ui-error-soft').exists()).toBe(true);
+  });
+
+  it('NxProgress covers the two bar heights of the mockup', () => {
+    expect(mount(NxProgress, { props: { value: 25, label: 'Import', size: 'sm' } }).find('[role="progressbar"]').classes()).toContain('h-1');
+    expect(mount(NxProgress, { props: { value: 25, label: 'Import' } }).find('[role="progressbar"]').classes()).toContain('h-2');
+  });
+
+  it('NxStepper checks the done steps and fills the connector up to the current one', () => {
+    const wrapper = mount(NxStepper, { props: { label: 'Import', modelValue: 1, steps: [{ label: 'Upload' }, { label: 'Map' }, { label: 'Result' }] } });
+    const markers = wrapper.findAll('li > div.z-10');
+    expect(markers).toHaveLength(3);
+    expect(markers[0].classes()).toContain('bg-ui-primary');
+    expect(markers[0].find('svg').exists()).toBe(true);
+    expect(markers[1].classes()).toContain('bg-ui-primary');
+    expect(markers[1].find('svg').exists()).toBe(false);
+    expect(markers[2].classes()).toContain('border-ui-border-accented');
+    expect(markers[2].find('svg').exists()).toBe(false);
+    expect(markers[0].find('svg').attributes('class')).toContain('size-3.5');
+    const connectors = wrapper.findAll('li > div.absolute');
+    expect(connectors[0].classes()).toContain('bg-ui-primary');
+    expect(connectors[1].classes()).toContain('bg-ui-border-accented');
+  });
+
+  it('NxKanbanCard lifts the dragging card with the primary border', () => {
+    expect(mount(NxKanbanCard, { props: { title: 'AB-1234' } }).find('article').classes()).toContain('border-ui-border');
+    const dragging = mount(NxKanbanCard, { props: { title: 'AB-1234', state: 'dragging' } });
+    expect(dragging.find('article').classes()).toContain('border-ui-primary');
+    expect(dragging.find('article').classes()).toContain('shadow-md');
+    expect(dragging.find('article').classes()).toContain('rounded-ui-lg');
+  });
+
+  it('NxFileUpload turns primary on hover and shows the error colours when invalid', () => {
+    const box = () => mount(NxFileUpload, { props: { label: 'Drop a CSV file here', hint: 'Max 10 MB' } }).find('button');
+    expect(box().classes()).toContain('hover:border-ui-primary');
+    expect(box().classes()).toContain('border-dashed');
+    const invalid = mount(NxFileUpload, { props: { label: 'Drop a CSV file here', hint: 'Only .csv files are accepted.', invalid: true } });
+    expect(invalid.find('button').classes()).toContain('border-ui-error');
+    expect(invalid.findAll('.text-ui-error-text')).toHaveLength(2);
+  });
+
+  it('NxActivityItem draws the kind marker, the connector and the value diff', () => {
+    const wrapper = mount(NxActivityItem, { props: { actor: 'Somchai K.', action: 'changed Status', time: '2 h ago', kind: 'update', oldValue: 'Draft', newValue: 'Active', last: false } });
+    const marker = wrapper.find('article > div');
+    expect(marker.find('span').classes()).toContain('size-7');
+    expect(marker.find('span').classes()).toContain('bg-ui-bg-elevated');
+    expect(marker.find('svg').attributes('class')).toContain('size-3.5');
+    expect(wrapper.find('.bg-ui-border-accented').exists()).toBe(true);
+    expect(wrapper.findAllComponents(NxBadge)).toHaveLength(2);
+    expect(wrapper.find('time').classes()).toContain('text-ui-text-dimmed');
+    expect(mount(NxActivityItem, { props: { actor: 'A', action: 'created this record', time: 'now', kind: 'create' } }).find('.bg-ui-border-accented').exists()).toBe(false);
+  });
+
+  it('NxLink covers the primary and muted tones, the external mark and the disabled state', () => {
+    const primary = mount(NxLink, { props: { href: 'https://example.com/records' }, slots: { default: 'Records' } });
+    expect(primary.classes()).toContain('text-ui-primary-text');
+    expect(primary.classes()).toContain('hover:underline');
+    const muted = mount(NxLink, { props: { href: 'https://example.com/records', tone: 'muted', external: true }, slots: { default: 'Records' } });
+    expect(muted.classes()).toContain('text-ui-text-muted');
+    expect(muted.attributes('target')).toBe('_blank');
+    expect(muted.findAll('svg')).toHaveLength(1);
+    const disabled = mount(NxLink, { props: { href: 'https://example.com/records', disabled: true }, slots: { default: 'Records' } });
+    expect(disabled.find('a').exists()).toBe(false);
+    expect(disabled.classes()).toContain('opacity-50');
+  });
+
+  it('NxAvatarGroup covers the two sizes and the counter that matches', () => {
+    const items = [{ name: 'Ada' }, { name: 'Bob' }, { name: 'Cy' }, { name: 'Dee' }, { name: 'Eve' }];
+    const md = mount(NxAvatarGroup, { props: { items, label: 'Owners' } });
+    const mdCounter = md.get('[aria-label="1 more"]');
+    expect(mdCounter.classes()).toContain('size-8');
+    expect(mdCounter.text()).toBe('+1');
+    const sm = mount(NxAvatarGroup, { props: { items, label: 'Owners', size: 'sm', max: 3 } });
+    const smCounter = sm.get('[aria-label="2 more"]');
+    expect(smCounter.classes()).toContain('size-6');
+    expect(smCounter.text()).toBe('+2');
+    expect(sm.findAll('span.ring-2.ring-ui-bg')).toHaveLength(4);
+  });
+
+  it('NxWorkflowNode covers the start, step and end kinds and the selected ring', () => {
+    const kinds = { start: 'bg-ui-text-dimmed', step: 'bg-ui-primary', end: 'bg-ui-success' } as const;
+    for (const [kind, dot] of Object.entries(kinds) as [keyof typeof kinds, string][]) {
+      const wrapper = mount(NxWorkflowNode, { props: { title: 'In review', kind, meta: '12 records' } });
+      expect(wrapper.find('span span').classes(), kind).toContain(dot);
+      expect(wrapper.classes()).toContain('w-45');
+      expect(wrapper.find('.uppercase').text()).toBe(kind);
+    }
+    const selected = mount(NxWorkflowNode, { props: { title: 'In review', selected: true } });
+    expect(selected.classes()).toContain('border-ui-primary');
+    expect(selected.attributes('aria-pressed')).toBe('true');
+  });
+
+  it('NxWorkflowEdge shows the guard role as a badge', () => {
+    const plain = mount(NxWorkflowEdge);
+    expect(plain.find('svg').exists()).toBe(true);
+    expect(plain.attributes('role')).toBe('img');
+    const guarded = mount(NxWorkflowEdge, { props: { guard: 'admin' } });
+    expect(guarded.text()).toBe('admin');
+    const vertical = mount(NxWorkflowEdge, { props: { direction: 'vertical' } });
+    expect(vertical.classes()).toContain('flex-col');
+  });
+
+  it('NxDiffRow paints the row by kind and shows the marker, path and badge', () => {
+    const added = mount(NxDiffRow, { props: { path: 'fields.plateNumber', status: 'added', detail: 'new field (text, required)' } });
+    expect(added.classes()).toContain('bg-ui-success-soft');
+    expect(added.find('span').text()).toBe('+');
+    expect(added.find('code').text()).toBe('fields.plateNumber');
+    expect(added.text()).toContain('Added');
+    const changed = mount(NxDiffRow, { props: { path: 'fields.notes', status: 'changed', before: 'maxLength 20', after: 'maxLength 30' } });
+    expect(changed.text()).toContain('maxLength 20 → maxLength 30');
+    expect(changed.text()).toContain('Changed');
+    const removed = mount(NxDiffRow, { props: { path: 'fields.old', status: 'removed' } });
+    expect(removed.classes()).toContain('bg-ui-error-soft');
+    expect(removed.find('span').text()).toBe('-');
+  });
+
+  it('NxCalendarEvent paints the soft hover fill with the tone dot', () => {
+    const wrapper = mount(NxCalendarEvent, { props: { label: 'AB-1234', color: 'warning' } });
+    expect(wrapper.classes()).toContain('bg-ui-warning-soft-hover');
+    expect(wrapper.find('.rounded-full').classes()).toContain('bg-ui-warning');
+    expect(wrapper.classes()).toContain('rounded-ui-sm');
+  });
+
+  it('NxCalendarDay follows the mockup day block states', () => {
+    const today = mount(NxCalendarDay, { props: { date: 15, isoDate: '2026-10-15', today: true, label: '15' } });
+    expect(today.classes()).toContain('h-26');
+    expect(today.find('span').classes()).toContain('bg-ui-primary');
+    expect(today.find('span').classes()).toContain('size-[22px]');
+    const outside = mount(NxCalendarDay, { props: { date: 30, isoDate: '2026-09-30', outside: true, label: '30' } });
+    expect(outside.classes()).toContain('bg-ui-bg-muted');
+    expect(outside.find('span').classes()).toContain('text-ui-text-dimmed');
+  });
+
+  it('NxPermissionCell locks a default-deny cell', () => {
+    const locked = mount(NxPermissionCell, { props: { modelValue: false, label: 'manage', locked: true } });
+    expect(locked.find('input').exists()).toBe(false);
+    expect(locked.findAll('svg')).toHaveLength(1);
+    const editable = mount(NxPermissionCell, { props: { modelValue: true, label: 'read' } });
+    expect(editable.find('input').exists()).toBe(true);
+  });
+
+  it('NxFieldRow covers the four mockup states and shows the flags', () => {
+    const base = mount(NxFieldRow, { props: { label: 'Plate number', name: 'plateNumber', type: 'text', required: true } });
+    expect(base.classes()).toContain('bg-ui-bg');
+    expect(base.text()).toContain('Required');
+    expect(base.find('code').exists()).toBe(false);
+    expect(base.findAll('svg').length).toBeGreaterThanOrEqual(2);
+    const selected = mount(NxFieldRow, { props: { label: 'Plate', name: 'plate', type: 'text', state: 'selected' } });
+    expect(selected.classes()).toContain('bg-ui-primary-soft');
+    expect(selected.classes()).toContain('border-ui-primary-outline');
+    const error = mount(NxFieldRow, { props: { label: 'Plate', name: 'plate', type: 'text', state: 'error' } });
+    expect(error.classes()).toContain('border-ui-error');
+    expect(error.find('.text-ui-error-text').exists()).toBe(true);
   });
 });
 

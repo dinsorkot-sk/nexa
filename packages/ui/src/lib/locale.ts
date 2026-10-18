@@ -14,6 +14,7 @@ export interface NxMessages {
   noMatchesHint: string;
   selectedCount: (count: number) => string;
   clear: string;
+  options: string;
   comboboxError: string;
   retry: string;
   openList: string;
@@ -44,6 +45,7 @@ export const messages: Record<NxLocale, NxMessages> = {
     noMatchesHint: 'Try a different search term.',
     selectedCount: (count: number) => `${count} selected`,
     clear: 'Clear',
+    options: 'Options',
     comboboxError: 'Could not load options',
     retry: 'Try again',
     openList: 'Open list',
@@ -72,6 +74,7 @@ export const messages: Record<NxLocale, NxMessages> = {
     noMatchesHint: 'ลองใช้คำค้นอื่น',
     selectedCount: (count: number) => `เลือก ${count} รายการ`,
     clear: 'ล้าง',
+    options: 'ตัวเลือก',
     comboboxError: 'โหลดรายการไม่สำเร็จ',
     retry: 'ลองอีกครั้ง',
     openList: 'เปิดรายการ',

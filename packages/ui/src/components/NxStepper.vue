@@ -1,9 +1,15 @@
 <script setup lang="ts">
+import { Check } from 'lucide-vue-next';
+
 export interface NxStep {
   label: string;
   description?: string;
 }
 
+/**
+ * Multi-step flow such as the CSV import, as the mockup's Stepper section: a 28px circle per step, a check on the
+ * steps already done and a 2px connector that turns primary once the step before it is done.
+ */
 defineProps<{
   steps: NxStep[];
   modelValue: number;
@@ -25,15 +31,22 @@ defineProps<{
       <div
         aria-hidden="true"
         :class="[
-          'z-10 flex size-8 items-center justify-center rounded-full border text-sm font-medium',
-          index < modelValue && 'border-ui-primary bg-ui-primary text-ui-on-solid',
-          index === modelValue && 'border-ui-primary bg-ui-bg text-ui-primary-text ring-2 ring-ui-primary/20',
-          index > modelValue && 'border-ui-border-accented bg-ui-bg text-ui-text-muted',
+          'z-10 flex size-7 items-center justify-center rounded-full text-xs font-medium',
+          index <= modelValue ? 'bg-ui-primary text-ui-on-solid' : 'border border-ui-border-accented bg-ui-bg text-ui-text-muted',
         ]"
       >
-        {{ index + 1 }}
+        <Check
+          v-if="index < modelValue"
+          class="size-3.5"
+        />
+        <template v-else>
+          {{ index + 1 }}
+        </template>
       </div>
-      <span class="mt-2 text-xs font-medium text-ui-text-highlighted">
+      <span
+        class="mt-2 text-sm font-medium"
+        :class="index <= modelValue ? 'text-ui-text-highlighted' : 'text-ui-text-muted'"
+      >
         {{ step.label }}
       </span>
       <span
@@ -43,7 +56,8 @@ defineProps<{
       <div
         v-if="index < steps.length - 1"
         aria-hidden="true"
-        class="absolute left-1/2 top-4 h-px w-full bg-ui-border-accented"
+        class="absolute left-1/2 top-3.5 h-0.5 w-full"
+        :class="index < modelValue ? 'bg-ui-primary' : 'bg-ui-border-accented'"
       />
     </li>
   </ol>

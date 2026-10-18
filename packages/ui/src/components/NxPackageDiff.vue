@@ -9,9 +9,11 @@ export interface NxPackageDiffEntry {
   after?: string;
 }
 
+/** The mockup's PackageDiff section: what an import or upgrade will add, change or remove, before confirming. */
 defineProps<{
   items: NxPackageDiffEntry[];
   label: string;
+  title?: string;
 }>();
 const messages = useNxMessages();
 </script>
@@ -19,8 +21,14 @@ const messages = useNxMessages();
 <template>
   <section
     :aria-label="label"
-    class="overflow-hidden rounded-ui border border-ui-border"
+    class="overflow-hidden rounded-ui-lg border border-ui-border bg-ui-bg"
   >
+    <h2
+      v-if="title"
+      class="border-b border-ui-border px-4 py-3 text-base font-semibold text-ui-text-highlighted"
+    >
+      {{ title }}
+    </h2>
     <NxDiffRow
       v-for="(item, index) in items"
       :key="`${item.path}-${index}`"

@@ -6,25 +6,28 @@ defineProps<{
 </script>
 
 <template>
-  <section class="rounded-ui border border-ui-border bg-ui-bg p-4">
-    <header class="mb-4 flex items-start justify-between gap-3">
-      <div>
-        <h2 class="text-sm font-semibold text-ui-text-highlighted">
+  <section class="flex flex-col gap-4 rounded-ui-xl border border-ui-border bg-ui-bg p-4">
+    <header class="flex items-center justify-between gap-3">
+      <div class="min-w-0">
+        <h2 class="text-base font-semibold text-ui-text-highlighted">
           {{ title }}
         </h2>
         <p
           v-if="description"
-          class="mt-1 text-xs text-ui-text-muted"
+          class="mt-0.5 text-sm text-ui-text-muted"
         >
           {{ description }}
         </p>
       </div>
-      <slot name="actions" />
+      <div class="flex shrink-0 items-center gap-2">
+        <slot name="legend" />
+        <slot name="actions" />
+      </div>
     </header>
     <slot />
     <div
       v-if="$slots.footer"
-      class="mt-4 border-t border-ui-border pt-3"
+      class="border-t border-ui-border pt-3"
     >
       <slot name="footer" />
     </div>

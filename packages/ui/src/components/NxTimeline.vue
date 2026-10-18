@@ -12,6 +12,7 @@ export interface NxTimelineEntry {
   newValue?: string;
 }
 
+/** Vertical activity list, as the mockup's Timeline section: each entry draws its own connecting line. */
 defineProps<{
   items: NxTimelineEntry[];
   label: string;
@@ -21,20 +22,17 @@ defineProps<{
 <template>
   <ol
     :aria-label="label"
-    class="space-y-0"
+    class="flex flex-col"
   >
     <li
       v-for="(item, index) in items"
       :key="item.id"
-      class="relative pb-5 pl-1"
+      class="flex"
     >
-      <div
-        v-if="index < items.length - 1"
-        aria-hidden="true"
-        class="absolute bottom-0 left-[0.4375rem] top-4 w-px bg-ui-border"
-      />
       <NxActivityItem
         v-bind="item"
+        :last="index === items.length - 1"
+        class="w-full"
       >
         <template
           v-if="$slots.item"

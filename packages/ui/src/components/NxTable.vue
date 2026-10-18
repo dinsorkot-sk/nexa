@@ -51,7 +51,7 @@ function displayValue(value: unknown): string {
 </script>
 
 <template>
-  <div class="overflow-x-auto rounded-ui border border-ui-border">
+  <div class="overflow-x-auto rounded-ui-lg border border-ui-border">
     <table
       class="w-full border-collapse text-left text-sm text-ui-text"
       :aria-busy="props.loading || undefined"
@@ -69,7 +69,7 @@ function displayValue(value: unknown): string {
             :key="column.key"
             scope="col"
             :class="[
-              'whitespace-nowrap px-3 py-2.5',
+              'whitespace-nowrap px-3 py-3',
               column.align === 'center' && 'text-center',
               column.align === 'end' && 'text-right',
             ]"
@@ -95,13 +95,13 @@ function displayValue(value: unknown): string {
         <tr
           v-for="(row, rowIndex) in props.rows"
           :key="keyOf(row, rowIndex)"
-          class="bg-ui-bg hover:bg-ui-bg-muted"
+          class="bg-ui-bg hover:bg-ui-bg-elevated"
         >
           <td
             v-for="column in props.columns"
             :key="column.key"
             :class="[
-              'max-w-80 px-3 py-2.5',
+              'max-w-80 px-3 py-3.5',
               column.align === 'center' && 'text-center',
               column.align === 'end' && 'text-right',
             ]"

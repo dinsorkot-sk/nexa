@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { GripVertical } from 'lucide-vue-next';
+import { computed } from 'vue';
 import NxAvatar from './NxAvatar.vue';
 import NxBadge from './NxBadge.vue';
 
@@ -7,61 +9,81 @@ export interface NxKanbanAssignee {
   src?: string;
 }
 
-withDefaults(defineProps<{
+/** The mockup's KanbanCard section: dragging lifts the card with a primary border and a shadow. */
+const props = withDefaults(defineProps<{
   title: string;
   description?: string;
   status?: string;
   assignee?: NxKanbanAssignee;
   meta?: string;
+  state?: 'default' | 'hover' | 'dragging';
 }>(), {
   description: undefined,
   status: undefined,
   assignee: undefined,
   meta: undefined,
+  state: 'default',
 });
 
 const emit = defineEmits<{ click: [] }>();
+const card = computed(() => ({
+  default: 'border-ui-border shadow-sm',
+  hover: 'border-ui-border-accented shadow-sm',
+  dragging: 'border-ui-primary shadow-md',
+}[props.state]));
 </script>
 
 <template>
-  <article class="rounded-ui border border-ui-border bg-ui-bg p-3 shadow-sm">
-    <button
-      type="button"
-      class="w-full rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ui-primary"
-      @click="emit('click')"
-    >
-      <div class="flex items-start justify-between gap-2">
+  <article
+    class="flex flex-col gap-2.5 rounded-ui-lg border bg-ui-bg p-3"
+    :class="card"
+  >
+    <div class="flex items-start gap-2">
+      <button
+        type="button"
+        class="min-w-0 flex-1 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ui-primary"
+        @click="emit('click')"
+      >
         <h3 class="text-sm font-medium text-ui-text-highlighted">
           {{ title }}
         </h3>
-        <NxBadge
-          v-if="status"
-          color="neutral"
-        >
-          {{ status }}
-        </NxBadge>
-      </div>
-      <p
-        v-if="description"
-        class="mt-2 line-clamp-2 text-xs text-ui-text-toned"
-      >
-        {{ description }}
-      </p>
-    </button>
-    <div
-      v-if="meta || assignee || $slots.default"
-      class="mt-3 flex items-center justify-between gap-2"
+      </button>
+      <GripVertical
+        class="size-3.5 shrink-0 text-ui-text-dimmed"
+        aria-hidden="true"
+      />
+    </div>
+    <p
+      v-if="meta"
+      class="text-xs text-ui-text-muted"
     >
-      <span
-        v-if="meta"
-        class="truncate text-xs text-ui-text-muted"
-      >{{ meta }}</span>
+      {{ meta }}
+    </p>
+    <p
+      v-if="description"
+      class="line-clamp-2 text-xs text-ui-text-muted"
+    >
+      {{ description }}
+    </p>
+    <div
+      v-if="status || assignee || $slots.default"
+      class="flex items-center justify-between gap-2"
+    >
+      <NxBadge
+        v-if="status"
+        color="warning"
+        variant="soft"
+        size="sm"
+        dot
+      >
+        {{ status }}
+      </NxBadge>
       <slot />
       <NxAvatar
         v-if="assignee"
         :name="assignee.name"
         :src="assignee.src"
-        size="sm"
+        size="xs"
       />
     </div>
   </article>
