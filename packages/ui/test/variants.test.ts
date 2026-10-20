@@ -255,8 +255,8 @@ describe('field variants', () => {
 
   it('NxSelect covers the variants and keeps the leading icon inside the field', () => {
     const wrapper = mount(NxSelect, { props: { options: [], variant: 'subtle', size: 'sm', icon: Info } });
-    expect(wrapper.find('select').classes()).toContain('h-7');
-    expect(wrapper.find('select').classes()).toContain('pl-8');
+    expect(wrapper.find('button').classes()).toContain('h-7');
+    expect(wrapper.find('button').classes()).toContain('pl-8');
     expect(wrapper.findAll('svg')).toHaveLength(2);
   });
 });

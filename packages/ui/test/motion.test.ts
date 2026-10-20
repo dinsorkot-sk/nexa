@@ -15,11 +15,11 @@ const motion = read('src/styles/motion.css');
 const tokens = read('src/styles/tokens.css');
 const stylesheet = read('src/styles/index.css');
 
-/** Every .vue/.ts/.css under `dir`, without build output. */
+/** Every .vue/.ts/.css under `dir`, without build output or installed packages. */
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
-    if (name === 'dist' || name === 'dist-check') return [];
+    if (name === 'dist' || name === 'dist-check' || name === 'node_modules') return [];
     return statSync(path).isDirectory() ? sources(path) : [path];
   }).filter((path) => /\.(vue|ts|css)$/.test(path));
 }

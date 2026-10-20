@@ -111,6 +111,7 @@ describe('no hardcoded colours in components', () => {
   function files(dir: string): string[] {
     return readdirSync(dir).flatMap((name) => {
       const path = join(dir, name);
+      if (name === 'node_modules') return [];
       return statSync(path).isDirectory() ? files(path) : [path];
     }).filter((path) => /\.(vue|ts|css)$/.test(path));
   }

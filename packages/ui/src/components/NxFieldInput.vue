@@ -52,7 +52,6 @@ const systemValue = computed(() => kind.value === 'readonly' || !isEditableField
 const hint = computed(() => props.field.options.helpText);
 const precision = computed(() => (props.field.type === 'integer' ? 0 : props.field.options.precision));
 const choices = computed<ComboboxOption[]>(() => props.field.options.choices ?? []);
-const selectOptions = computed(() => choices.value.map((choice) => ({ value: choice.value, label: choice.label })));
 const numericValue = computed(() => (typeof props.modelValue === 'number' ? String(props.modelValue) : ''));
 const stringValue = computed(() => (typeof props.modelValue === 'string' ? props.modelValue : ''));
 

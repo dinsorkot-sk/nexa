@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { FieldTypeSchema, type EntityDefinition, type FieldDefinition } from '@nexa/meta';
 import { validateRecordData } from '../../engine/entity/index';
@@ -115,8 +115,17 @@ describe('values the editors emit are accepted by the engine', () => {
 
   it('select and multi-select emit the choice ids', async () => {
     const select = mount(NxFieldInput, { props: { field: makeField('select', extra.select), modelValue: undefined }, attachTo: document.body });
-    await select.find('select').setValue('b');
+    // The select field renders the searchable combobox: typing searches, and the list renders in a portal
+    // on the body, so it is queried from the document rather than from the wrapper.
+    const input = select.find('input');
+    await input.trigger('focus');
+    await input.setValue('B');
+    await vi.waitFor(() => expect(document.querySelectorAll('[role="option"]').length).toBeGreaterThan(0));
+    const options = document.querySelectorAll('[role="option"]');
+    options[0].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await flushPromises();
     expect(accepted('select', select.emitted('update:modelValue')?.at(-1)?.[0], extra.select)).toEqual({ f: 'b' });
+    select.unmount();
   });
 
   it('json emits parsed objects and refuses invalid JSON', async () => {

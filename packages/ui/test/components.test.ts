@@ -109,15 +109,24 @@ describe('form controls', () => {
     const wrapper = mount(NxSelect, {
       props: { options: [{ value: 'a', label: 'Alpha' }, { value: 'b', label: 'Beta' }], placeholder: 'Choose' },
       attrs: { 'aria-label': 'Status' },
+      attachTo: document.body,
     });
     expect(wrapper.find('button').attributes('aria-label')).toBe('Status');
-    await wrapper.find('button').trigger('click');
+    // Reka opens the list on pointerdown, and the placeholder is the value slot rather than an item,
+    // because Reka reserves the empty string for "no selection".
+    expect(wrapper.find('[data-placeholder]').text()).toBe('Choose');
+    await wrapper.find('button').trigger('pointerdown');
     await flushPromises();
-    await wrapper.find('[role="option"]:nth-child(2)').trigger('click');
+    // The list renders in a portal on the body, so it is queried from the document rather than the wrapper.
+    const options = document.querySelectorAll('[role="option"]');
+    expect(options.length).toBe(2);
+    // Reka selects on Enter, which is the keyboard path the component documents.
+    options[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await nextTick();
     await flushPromises();
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['b']);
+    wrapper.unmount();
   });
-
   it('NxCheckbox toggles through Reka and emits a boolean', async () => {
     const wrapper = mount(NxCheckbox, { props: { modelValue: false }, slots: { default: 'Remember' } });
     await wrapper.find('button[role="checkbox"]').trigger('click');

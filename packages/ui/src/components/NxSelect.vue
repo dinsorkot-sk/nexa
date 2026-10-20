@@ -14,7 +14,7 @@ export interface NxSelectOption {
 defineOptions({ inheritAttrs: false });
 
 /** Dropdown select. Three Variants and three Sizes with an optional leading icon, as the mockup's Select section. Opens a styled list of options. */
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   modelValue?: string | null;
   options: NxSelectOption[];
   /** Shown as a disabled first option while nothing is selected. */
@@ -90,14 +90,6 @@ function onChange(value: string | undefined) {
           :side-offset="4"
         >
           <SelectViewport class="p-1">
-            <SelectItem
-              v-if="placeholder"
-              value=""
-              disabled
-              class="relative flex cursor-default select-none items-center rounded-ui px-2 py-1.5 text-sm text-ui-text-muted outline-none data-[highlighted]:bg-ui-bg-elevated"
-            >
-              <SelectItemText>{{ placeholder }}</SelectItemText>
-            </SelectItem>
             <SelectItem
               v-for="option in options"
               :key="option.value"
