@@ -2,6 +2,7 @@
 import { computed, ref, useId, watch } from 'vue';
 import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui';
 import { Search } from 'lucide-vue-next';
+import { useFuse } from '@vueuse/integrations/useFuse';
 import type { Component } from 'vue';
 import { useNxMessages } from '../lib/locale';
 import NxKbd from './NxKbd.vue';
@@ -30,25 +31,45 @@ const messages = useNxMessages();
 const id = `nx-command-${useId()}`;
 const search = ref('');
 const activeIndex = ref(0);
-const filtered = computed(() => {
-  const query = search.value.trim().toLocaleLowerCase();
-  if (!query) return props.commands;
-  return props.commands.filter((command) =>
-    [command.label, command.description, ...(command.keywords ?? [])]
-      .some((value) => value?.toLocaleLowerCase().includes(query)),
-  );
+
+/**
+ * The fuzzy search is the same one Nuxt UI's command palette uses, so a partial or misspelled term still finds its
+ * command. The keyword list of a command is searched next to its label and its description.
+ */
+const { results } = useFuse(search, () => props.commands, {
+  fuseOptions: {
+    keys: ['label', 'description', 'keywords'],
+    threshold: 0.3,
+    ignoreLocation: true,
+  },
+  matchAllWhenSearchEmpty: true,
 });
 
-/** Results keep their order, but consecutive rows that share a `group` sit under one small caption. */
-const groups = computed(() => {
+/** The commands split into consecutive runs that share a `group`; each run sits under one small caption. */
+const runs = computed(() => {
   const out: Array<{ group?: string; items: NxCommand[] }> = [];
-  for (const command of filtered.value) {
+  for (const command of props.commands) {
     const last = out.at(-1);
     if (last && last.group === command.group) last.items.push(command);
     else out.push({ group: command.group, items: [command] });
   }
   return out;
 });
+
+/** The ranking orders the rows inside a group. The groups themselves keep the order the commands came in. */
+const groups = computed(() => {
+  const rank = new Map(results.value.map((result, index) => [result.item, index]));
+  const out: Array<{ group?: string; items: NxCommand[] }> = [];
+  for (const run of runs.value) {
+    const items = run.items
+      .filter((command) => rank.has(command))
+      .sort((a, b) => (rank.get(a) ?? 0) - (rank.get(b) ?? 0));
+    if (items.length) out.push({ group: run.group, items });
+  }
+  return out;
+});
+
+const filtered = computed(() => groups.value.flatMap((group) => group.items));
 
 watch(() => props.open, (open) => {
   if (open) {

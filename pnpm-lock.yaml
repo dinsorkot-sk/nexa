@@ -164,6 +164,9 @@ importers:
       '@nuxt/ui':
         specifier: ^4.12.0
         version: 4.12.0(6dr5w43qewdbulreiq6ac463dm)
+      '@vueuse/integrations':
+        specifier: ^14.4.0
+        version: 14.4.0(fuse.js@7.5.0)(vue@3.5.43(typescript@5.9.3))
       lucide-vue-next:
         specifier: ^0.475.0
         version: 0.475.0(vue@3.5.43(typescript@5.9.3))

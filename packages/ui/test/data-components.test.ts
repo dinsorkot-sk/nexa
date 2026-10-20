@@ -160,4 +160,28 @@ describe('NxCommandPalette', () => {
     expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
     wrapper.unmount();
   });
+
+  it('finds a command by a partial or misspelled term', async () => {
+    const wrapper = mount(NxCommandPalette, {
+      attachTo: document.body,
+      props: {
+        open: true,
+        label: 'Commands',
+        commands: [
+          { id: 'home', label: 'Go home' },
+          { id: 'settings', label: 'Open settings' },
+        ],
+      },
+    });
+    await flushPromises();
+    const input = document.body.querySelector<HTMLInputElement>('input[type="search"]');
+    if (!input) throw new Error('Command palette search input was not teleported to the document');
+    input.value = 'setings';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    const options = document.querySelectorAll('[role="option"]');
+    expect(options).toHaveLength(1);
+    expect(options[0].textContent).toContain('Open settings');
+    wrapper.unmount();
+  });
 });
