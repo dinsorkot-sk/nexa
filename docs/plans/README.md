@@ -135,8 +135,44 @@ Two things needed care:
 **Bugs found and fixed on this pass.**
 - `NxProgress`'s bar grew by its width; Nuxt UI's grows by a transform, so the assertion now reads the transform and the bar's duration comes from the motion tokens like the rest of the library.
 
-**Gate.** `vue-tsc` typecheck 0 errors; Vitest 424/424 across 8 files; ESLint 0 errors and 0 warnings; `vite build` of the playground passes. Only one assertion had to change, in `data-components.test.ts`.
+**Gate for this pass.** `vue-tsc` typecheck 0 errors; Vitest 424/424 across 8 files; ESLint 0 errors and 0 warnings; `vite build` of the playground passes. Only one assertion had to change, in `data-components.test.ts`.
 
 The playground was checked in headless Chromium against the render from before the swap: 0.67% of the pixels differ, and a pixel probe shows the difference is anti-aliasing from the extra wrapper elements, not a layout shift — the text starts and ends on the same pixel column and the colours are identical (the alert's title `#0f172b` and description `#45556c`, the card's 12px radius, the progress bar's 8px and 4px tracks). The console is clean.
 
-**Not done.** The form controls and the overlays are still ours: `NxInput`, `NxTextarea`, `NxSelect`, `NxCheckbox`, `NxRadio`, `NxSwitch`, `NxModal`, `NxSlideover`, `NxPopover`, `NxTooltip`, `NxTabs`, `NxAccordion`, `NxCommandPalette`, `NxDatePicker` and `NxCombobox`. These are the components where Nuxt UI has the most to add — keyboard handling, focus management, positioning — and the next pass should take them in that order.
+### The form controls and the overlays
+
+**Swapped onto `U*` (7 more).** `NxInput` and `NxTextarea` (`UInput`, `UTextarea`), `NxSwitch` (`USwitch`), `NxSelect` (`USelect`), `NxPopover` (`UPopover`), `NxTooltip` (`UTooltip`) and `NxAccordion` (`UAccordion`). `NxAccordion` maps its `items` array onto Nuxt UI's `items` and keeps its own slot names; `NxSelect` maps its `options` array onto Nuxt UI's `items`, which use the same `value` and `label` keys.
+
+**Deliberately not swapped (4 more), and why.**
+- `NxModal` and `NxSlideover`: Nuxt UI builds the dialog content through a reusable template, which detaches slot content from the dialog's context. A Reka `DialogTitle` or `DialogClose` inside a slot then cannot resolve `DialogRootContext`, and this package's modal needs both — the accessible name and the close button — plus its own icon slot. Attempted and reverted.
+- `NxCheckbox` and `NxRadio`: Nuxt UI draws the check and the radio dot through Iconify, which resolves at runtime through the Iconify API unless the consuming app sets `icon.clientBundle`. That setting is build time and does not travel with this package, so the marks would break offline. This package draws Lucide components directly.
+
+**The duplicate Reka UI.** `packages/ui` resolved `reka-ui` to 2.10.5 while `@nuxt/ui` pins 2.11.0, so two copies of the library were installed and the two `Symbol(TooltipProviderContext)` keys did not match — `UTooltip` could not find the provider it injects. The dependency is now `^2.11.0`, which resolves both packages to the same copy.
+
+**Two contracts Nuxt UI wanted to change, and how they were kept.**
+- Nuxt UI's input turns a `type="number"` value into a number on the way out. This package keeps the raw text, because the number parsing lives in `lib/number.ts` and has to accept a half-typed value such as `-` or `1e`. `NxInput` therefore converts the value back to a string before emitting it.
+- `NxTooltip` is documented as usable on its own, while Nuxt UI's tooltip reads the provider's defaults. The provider stays inside `NxTooltip`, so the component still works without `UApp`.
+
+**Bugs found and fixed on this pass.**
+- `NxSelect` was exported but never exercised in the playground, so the swap had no visual coverage. The gallery now renders it next to `NxSelectMenu`.
+
+**Gate for this pass.** `vue-tsc` typecheck 0 errors; Vitest 424/424 across 8 files; ESLint 0 errors and 0 warnings; `vite build` of the playground passes. No assertion had to change.
+
+The playground was checked in headless Chromium: the form controls and the overlays render with the mockup's colours and sizes, the accordion expands, the popover opens, the modal opens with its title, and the select opens its three options and takes a pick. The console is clean.
+
+### The tabs, the command palette, the date picker and the combobox
+
+**Swapped onto `U*` (1 more).** `NxTabs` (`UTabs`) keeps its "triggers only" contract through Nuxt UI's `content: false`, so the caller still renders the panel for the active value. Two of Nuxt UI's classes needed to be pushed out of the way: its tab list carries a background, a radius and padding, and its trigger centres its label and rounds its corners. The mockup's own classes go in through the `ui` prop, and `bg-transparent p-0 rounded-none` and `justify-start rounded-none` cancel the rest. Nuxt UI's sliding indicator is hidden rather than removed, because its presence is what switches off the `in-[[data-slot=list]:not(:has(...))]` variants Nuxt UI uses to paint the active tab.
+
+**The command palette takes Nuxt UI's search.** Nuxt UI's palette owns its search field, and that field's leading icon resolves through Iconify, so the whole palette was not swapped. The search itself was: the component now uses `useFuse`, the same composable Nuxt UI's own palette uses, with the label, the description and the keyword list as the searched keys. A partial or misspelled term finds its command now, where the old substring match did not. The ranking orders the rows inside a group, and the groups keep the order the commands came in.
+
+**Deliberately not swapped (3 more), and why.**
+- `NxDatePicker`: Nuxt UI v4 has no date picker at all. `UInputDate` is a date field without a calendar, and `UCalendar` is a calendar without the field, so the two halves of this component are not available as one.
+- `NxCombobox`: this package's combobox searches on the server through `loadOptions`, with a request sequence number and an abort controller so a slow answer can never overwrite a newer one. Nuxt UI's select menu filters a list it already holds, so the server search has no equivalent.
+- `NxCommandPalette`: as above — it keeps its own markup and its own search field, and takes only Nuxt UI's fuzzy search.
+
+**A contract that moved.** `NxTabs` puts its `label` on the tab list. Nuxt UI's tab list takes no `aria-label`, so the name lands on the wrapper around the list instead.
+
+**Gate for this pass.** `vue-tsc` typecheck 0 errors; Vitest 425/425 across 8 files; ESLint 0 errors and 0 warnings; `vite build` of the playground passes. One test was added, for the fuzzy search.
+
+The playground was checked in headless Chromium: the tab strip renders with the mockup's rule, the active tab's 2px green underline and left-aligned labels, clicking a tab switches it, and the command palette filters to a single row for a partial term. The console is clean.

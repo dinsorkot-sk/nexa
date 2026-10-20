@@ -33,11 +33,30 @@ The package accepts data and callbacks as props/events. It does not call the SDK
 
 ## How the components are built
 
-`NxButton`, `NxIconButton`, `NxBadge`, `NxCard`, `NxAvatar`, `NxAlert` and `NxProgress` are rendered by the matching
-Nuxt UI v4 component, with the mockup's own classes handed over through Nuxt UI's `ui` prop. Nuxt UI therefore owns
-the markup, the disabled and loading behaviour, the focus handling and the accessibility wiring, while the rendered
-element keeps the mockup's colours, heights and radius. The other components are this package's own, because Nuxt UI
-has no equivalent for them.
+`NxButton`, `NxIconButton`, `NxBadge`, `NxCard`, `NxAvatar`, `NxAlert`, `NxProgress`, `NxInput`, `NxTextarea`, `NxSwitch`,
+`NxSelect`, `NxPopover`, `NxTooltip`, `NxAccordion` and `NxTabs` are rendered by the matching Nuxt UI v4 component, with
+the mockup's own classes handed over through Nuxt UI's `ui` prop. Nuxt UI therefore owns the markup, the disabled and
+loading behaviour, the focus handling, the keyboard interaction and the accessibility wiring, while the rendered
+element keeps the mockup's colours, heights and radius.
+
+`NxCommandPalette` stays this package's own, because Nuxt UI's palette owns its search field, whose leading icon
+resolves through Iconify; this package draws Lucide components directly. It does take Nuxt UI's fuzzy search, the same
+`useFuse` composable Nuxt UI's own palette uses, so a partial or misspelled term still finds its command.
+
+The remaining components are this package's own, because Nuxt UI has no equivalent for them, or because adopting it
+would break a contract this package keeps:
+
+| Component | Why it stays here |
+| --- | --- |
+| `NxCheckbox`, `NxRadio` | Nuxt UI draws the check and the radio dot through Iconify, which resolves at runtime through the Iconify API unless the consuming app sets `icon.clientBundle`. That setting is build time and does not travel with this package, so the marks would break offline. This package draws Lucide components directly. |
+| `NxModal`, `NxSlideover` | Nuxt UI builds the dialog content through a reusable template, which detaches slot content from the dialog context. A Reka `DialogTitle` or `DialogClose` inside a slot then cannot resolve the dialog context, and this package's modal needs both, plus its own icon slot. |
+| `NxDatePicker` | Nuxt UI v4 has no date picker. `UInputDate` is a date field without a calendar and `UCalendar` is a calendar without the field, so the two halves of this component are not available as one. |
+| `NxCombobox` | This package's combobox searches on the server through `loadOptions`, with a request sequence and an abort controller. Nuxt UI's select menu filters a list it already holds. |
+| `NxSkeleton` | Nuxt UI's skeleton is a live region (`role="alert"`), which is wrong for a decorative placeholder. |
+| `NxSeparator` | This package already emits the correct `role` and `aria-orientation`. |
+| `NxFieldWrapper` | This package's contract is that the caller owns the control's `id`; Nuxt UI's form field generates its own. |
+| `NxToast`, `NxToaster` | Reka's toast root needs a provider ancestor, and this package's toast is documented as usable on its own. |
+
 
 ## Records and fields
 
