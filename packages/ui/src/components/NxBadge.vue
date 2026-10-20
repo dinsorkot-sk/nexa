@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { Component } from 'vue';
+import { computed } from 'vue';
+import UBadge from '@nuxt/ui/components/Badge.vue';
 import { dotColor, tone, type NxColor, type NxSize, type NxVariant } from '../lib/tone';
 
 /** Short status or count label: 7 colours x 4 variants x 3 sizes, as the mockup's Badge section. */
@@ -35,11 +37,17 @@ const props = withDefaults(defineProps<{
 });
 
 const t = () => tone(props.color, props.variant);
+const ui = computed(() => ({
+  base: `inline-flex items-center rounded-full font-medium ${sizes[props.size]} ${t().surface} ${t().border} ${t().label}`,
+}));
 </script>
 
 <template>
-  <span
-    :class="['inline-flex items-center rounded-full font-medium', sizes[size], t().surface, t().border, t().label]"
+  <UBadge
+    :color="color"
+    :variant="variant"
+    :size="size"
+    :ui="ui"
   >
     <span
       v-if="dot"
@@ -53,5 +61,5 @@ const t = () => tone(props.color, props.variant);
       :class="t().icon"
     />
     <slot />
-  </span>
+  </UBadge>
 </template>

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { Component } from 'vue';
 import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from 'lucide-vue-next';
+import { computed } from 'vue';
+import UAlert from '@nuxt/ui/components/Alert.vue';
 import { useNxMessages } from '../lib/locale';
 import { tone, type NxColor, type NxVariant } from '../lib/tone';
 import NxIconButton from './NxIconButton.vue';
@@ -39,41 +41,61 @@ const messages = useNxMessages();
 
 const t = () => tone(props.color, props.variant);
 const isSolid = () => props.variant === 'solid';
+
+const ui = computed(() => ({
+  root: `flex w-full items-start gap-3 rounded-ui-lg px-4 py-3 ${t().surface} ${t().border}`,
+  wrapper: 'min-w-0 flex-1 space-y-0.5',
+  // The title and the description are paragraphs here, so Nuxt UI's own wrappers stay bare.
+  title: () => '',
+  description: () => '',
+  actions: 'flex shrink-0 items-start',
+}));
 </script>
 
 <template>
-  <div
+  <UAlert
+    :color="color"
+    :variant="variant"
+    :close="dismissible"
+    :ui="ui"
     :role="color === 'error' ? 'alert' : 'status'"
-    :class="['flex items-start gap-3 rounded-ui-lg px-4 py-3', t().surface, t().border]"
   >
-    <component
-      :is="icons[color]"
-      aria-hidden="true"
-      :class="['mt-0.5 size-5 shrink-0', t().icon]"
-    />
-    <div class="min-w-0 flex-1 space-y-0.5">
-      <p
-        v-if="title"
-        :class="['text-sm font-medium', t().label]"
-      >
+    <template #leading>
+      <component
+        :is="icons[color]"
+        aria-hidden="true"
+        :class="['mt-0.5 size-5 shrink-0', t().icon]"
+      />
+    </template>
+    <template
+      v-if="title"
+      #title
+    >
+      <p :class="['text-sm font-medium', t().label]">
         {{ title }}
       </p>
-      <p
-        v-if="description"
-        :class="['text-xs', isSolid() ? t().label : 'text-ui-text-toned']"
-      >
+    </template>
+    <template
+      v-if="description"
+      #description
+    >
+      <p :class="['text-xs', isSolid() ? t().label : 'text-ui-text-toned']">
         {{ description }}
       </p>
-      <slot />
-    </div>
-    <NxIconButton
+    </template>
+    <slot />
+    <template
       v-if="dismissible"
-      :icon="X"
-      :label="messages.close"
-      color="neutral"
-      variant="ghost"
-      size="sm"
-      @click="emit('close')"
-    />
-  </div>
+      #close
+    >
+      <NxIconButton
+        :icon="X"
+        :label="messages.close"
+        color="neutral"
+        variant="ghost"
+        size="sm"
+        @click="emit('close')"
+      />
+    </template>
+  </UAlert>
 </template>

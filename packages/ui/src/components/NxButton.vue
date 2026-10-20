@@ -1,9 +1,16 @@
 <script setup lang="ts">
 import type { Component } from 'vue';
 import { LoaderCircle } from 'lucide-vue-next';
+import { computed } from 'vue';
+import UButton from '@nuxt/ui/components/Button.vue';
 import { buttonClasses, type ButtonColor, type ButtonSize, type ButtonVariant } from '../lib/button';
 
-withDefaults(defineProps<{
+/**
+ * The mockup's button, rendered by Nuxt UI's button. The mockup's classes are handed to Nuxt UI through its
+ * `ui` prop, so the rendered element keeps the mockup's colours, heights and radius while Nuxt UI owns the
+ * markup, the disabled and loading behaviour and the focus handling.
+ */
+const props = withDefaults(defineProps<{
   /** Intent: primary, secondary, success, info, warning, error or neutral. */
   color?: ButtonColor;
   /** Emphasis: solid, outline, soft, subtle, ghost or link. */
@@ -25,30 +32,48 @@ withDefaults(defineProps<{
   icon: undefined,
   trailingIcon: undefined,
 });
+
+const ui = computed(() => ({ base: buttonClasses(props.color, props.variant, props.size) }));
 </script>
 
 <template>
-  <button
+  <UButton
+    :color="color"
+    :variant="variant"
+    :size="size"
     :type="type"
-    :disabled="disabled || loading"
+    :disabled="disabled"
+    :loading="loading"
+    :ui="ui"
     :aria-busy="loading || undefined"
-    :class="buttonClasses(color, variant, size)"
   >
-    <LoaderCircle
+    <template
       v-if="loading"
-      class="animate-spin"
-      aria-hidden="true"
-    />
-    <component
-      :is="icon"
+      #leading
+    >
+      <LoaderCircle
+        class="animate-spin"
+        aria-hidden="true"
+      />
+    </template>
+    <template
       v-else-if="icon"
-      aria-hidden="true"
-    />
+      #leading
+    >
+      <component
+        :is="icon"
+        aria-hidden="true"
+      />
+    </template>
     <slot />
-    <component
-      :is="trailingIcon"
+    <template
       v-if="trailingIcon"
-      aria-hidden="true"
-    />
-  </button>
+      #trailing
+    >
+      <component
+        :is="trailingIcon"
+        aria-hidden="true"
+      />
+    </template>
+  </UButton>
 </template>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import UProgress from '@nuxt/ui/components/Progress.vue';
 
 const props = withDefaults(defineProps<{
   value: number;
@@ -22,30 +23,31 @@ const percentage = computed(() => {
   if (!Number.isFinite(props.value) || !Number.isFinite(props.max) || props.max <= 0) return 0;
   return (safeValue.value / maxValue.value) * 100;
 });
+
+const ui = computed(() => ({
+  root: 'gap-2',
+  base: `relative overflow-hidden rounded-full bg-ui-bg-accented ${trackSize[props.size]}`,
+  // The bar grows by a transform, so the duration comes from the motion tokens like the rest of the library.
+  indicator: 'rounded-full size-full bg-ui-primary transition-transform duration-ui-slow ease-ui-out',
+  status: () => '',
+}));
 </script>
 
 <template>
-  <div>
-    <div
+  <UProgress
+    :model-value="safeValue"
+    :max="maxValue"
+    :get-value-label="() => label"
+    :ui="ui"
+  >
+    <template
       v-if="showValue"
-      class="mb-1 flex justify-between gap-2 text-xs text-ui-text-muted"
+      #status
     >
-      <span>{{ label }}</span>
-      <span>{{ Math.round(percentage) }}%</span>
-    </div>
-    <div
-      role="progressbar"
-      :aria-label="label"
-      :aria-valuemin="0"
-      :aria-valuemax="maxValue"
-      :aria-valuenow="safeValue"
-      class="overflow-hidden rounded-full bg-ui-bg-accented"
-      :class="trackSize[size]"
-    >
-      <div
-        class="h-full rounded-full bg-ui-primary transition-[width] duration-ui-slow ease-ui-out"
-        :style="{ width: `${percentage}%` }"
-      />
-    </div>
-  </div>
+      <div class="mb-1 flex justify-between gap-2 text-xs text-ui-text-muted">
+        <span>{{ label }}</span>
+        <span>{{ Math.round(percentage) }}%</span>
+      </div>
+    </template>
+  </UProgress>
 </template>

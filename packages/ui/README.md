@@ -6,6 +6,19 @@ Vue 3 components for Nexa. Import the stylesheet once in the app; components con
 import '@nexa/ui/styles.css';
 ```
 
+The tokens come from the Figma mockup `mockup/Nexa.figcraft` and are exposed as CSS variables, so the same values drive
+both this package's `Nx*` components and the `@nuxt/ui` v4 components that are available alongside them. `@nuxt/ui`
+is wired as a Vite plugin (not a Nuxt module), so the package stays a plain Vue library and needs no Nuxt host app:
+
+```ts
+// vite.config.ts
+import ui from '@nuxt/ui/vite';
+
+export default defineConfig({
+  plugins: [ui({ router: false, ui: { colors: { primary: 'green', neutral: 'slate' } } })],
+});
+```
+
 Set the locale from the root component's setup so it is provided to descendant controls:
 
 ```vue
@@ -17,6 +30,14 @@ provideNxLocale('en'); // or 'th'
 ```
 
 The package accepts data and callbacks as props/events. It does not call the SDK or persist application data.
+
+## How the components are built
+
+`NxButton`, `NxIconButton`, `NxBadge`, `NxCard`, `NxAvatar`, `NxAlert` and `NxProgress` are rendered by the matching
+Nuxt UI v4 component, with the mockup's own classes handed over through Nuxt UI's `ui` prop. Nuxt UI therefore owns
+the markup, the disabled and loading behaviour, the focus handling and the accessibility wiring, while the rendered
+element keeps the mockup's colours, heights and radius. The other components are this package's own, because Nuxt UI
+has no equivalent for them.
 
 ## Records and fields
 

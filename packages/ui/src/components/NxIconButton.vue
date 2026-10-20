@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import type { Component } from 'vue';
 import { LoaderCircle } from 'lucide-vue-next';
+import { computed } from 'vue';
+import UButton from '@nuxt/ui/components/Button.vue';
 import { buttonClasses, type ButtonColor, type ButtonSize, type ButtonVariant } from '../lib/button';
 
-/** An icon-only button. `label` is the accessible name and the tooltip text; it is required. */
-withDefaults(defineProps<{
+/**
+ * An icon-only button. `label` is the accessible name and the tooltip text; it is required. Rendered by Nuxt UI's
+ * button in its square form, with the mockup's classes supplied through the `ui` prop.
+ */
+const props = withDefaults(defineProps<{
   icon: Component;
   label: string;
   color?: ButtonColor;
@@ -22,26 +27,41 @@ withDefaults(defineProps<{
   disabled: false,
   loading: false,
 });
+
+const ui = computed(() => ({ base: buttonClasses(props.color, props.variant, props.size, true) }));
 </script>
 
 <template>
-  <button
+  <UButton
+    square
+    :color="color"
+    :variant="variant"
+    :size="size"
     :type="type"
-    :disabled="disabled || loading"
-    :aria-busy="loading || undefined"
+    :disabled="disabled"
+    :loading="loading"
+    :ui="ui"
     :aria-label="label"
     :title="label"
-    :class="buttonClasses(color, variant, size, true)"
+    :aria-busy="loading || undefined"
   >
-    <LoaderCircle
+    <template
       v-if="loading"
-      class="animate-spin"
-      aria-hidden="true"
-    />
-    <component
-      :is="icon"
+      #leading
+    >
+      <LoaderCircle
+        class="animate-spin"
+        aria-hidden="true"
+      />
+    </template>
+    <template
       v-else
-      aria-hidden="true"
-    />
-  </button>
+      #leading
+    >
+      <component
+        :is="icon"
+        aria-hidden="true"
+      />
+    </template>
+  </UButton>
 </template>

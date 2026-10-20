@@ -65,7 +65,8 @@ describe('NxPagination and NxProgress', () => {
   it('clamps progress to the declared range', () => {
     const wrapper = mount(NxProgress, { props: { value: 150, max: 100, label: 'Import' } });
     expect(wrapper.find('[role="progressbar"]').attributes('aria-valuenow')).toBe('100');
-    expect(wrapper.find('[role="progressbar"] > div').attributes('style')).toContain('100%');
+    // The bar grows by a transform, so a full bar sits at a zero offset.
+    expect(wrapper.find('[role="progressbar"] > div').attributes('style')).toMatch(/translateX\(-?0%\)/);
   });
 });
 

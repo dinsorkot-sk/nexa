@@ -89,3 +89,54 @@ Requested by the user: make the `packages/ui` component library complete, using 
 - The motion layer is pinned by `test/motion.test.ts`: every named animation has a keyframe, components only use declared animations/durations/easings, every animated overlay is reachable through Reka's `data-state` (checked against the rendered overlay, not just the source), and the reduced-motion block zeroes the durations.
 - Checked in headless Chromium (Light and Dark, `?dark`): the gallery renders, the chart animations settle into their final state, and the Motion section shows all three durations.
 - Not run this pass: screen reader or touch coverage, and animation timing checked by eye frame by frame.
+
+## Nuxt UI v4 as a base for `packages/ui` (foundation, in progress)
+
+Requested on 2026-10-19: bring Nuxt UI in as the implementation base for `packages/ui` while keeping the `Nx*` public names and the mockup's tokens.
+
+**What the reconnaissance found.**
+- Nuxt UI v4 works in a plain Vue app: it ships a Vite plugin (`@nuxt/ui/vite`), stubs `#imports` with a Vue-native module and generates `#build/ui/*` as a virtual module. No Nuxt host app is required, and the package stays a plain Vue library.
+- The mockup was drawn on Nuxt UI's tokens, so the two token layers already share the `--ui-*` names. `tokens.css` can stay the single source of truth: it is imported after `@nuxt/ui`, so its `:root` and `.dark` blocks win over Nuxt UI's `.light, :host, :root` and `.dark` on equal specificity. Both the `Nx*` utilities (`bg-ui-primary`) and the `U*` ones (`bg-primary`) then read the same values.
+- 26 of the 74 components have no Nuxt UI equivalent (charts, the schema-driven field renderers, the workflow and permission panels, the app shell, the diff and code panels), and 31 map onto one directly. The remaining 17 are partial.
+- `variants.test.ts` pins the mockup's pixel values through 180 class-name assertions, so swapping a component onto `U*` costs that test coverage unless the mockup values are re-supplied through Nuxt UI's `ui` prop.
+
+**What this pass did (foundation only).**
+- `@nuxt/ui@4.12.0` is a dependency of `packages/ui`, wired into `vite.config.ts` and `vitest.config.ts` as `ui({ router: false, ui: { colors: { primary: 'green', neutral: 'slate' } } })`. `router: false` keeps `vue-router` out, since the library renders links as plain anchors.
+- `src/styles/nuxt-ui.css` imports Tailwind and `@nuxt/ui`; `src/styles/index.css` imports it before `tokens.css`, which is what makes the token bridge work. `theme.css` no longer imports Tailwind itself, so it is loaded once.
+- The playground installs Nuxt UI's Vue plugin and wraps the app in `UApp`, and its root element carries `isolate`.
+- `AGENTS.md` and `CLAUDE.md` said the UI was a Nuxt UI layer with `U*` components, which had not been true since Phase 22. Both now describe the actual arrangement.
+
+**Bugs found and fixed on the way.**
+- `test/motion.test.ts` and `test/tokens.test.ts` walked `node_modules`, so a stale `.nuxt-ui` build output was scanned as project source and failed the suite. Both now skip it.
+- `NxSelect.vue` referenced `props` without ever binding it, and rendered its placeholder as a `SelectItem` with an empty value, which Reka rejects. The placeholder is now the value slot, matching Reka's semantics.
+- `NxFieldInput.vue` kept a `selectOptions` computed that nothing used.
+- The `packages/ui` tests only pass under `NODE_ENV=test`: Vue's production build drops the devtools hook that `@vue/test-utils` uses to record emitted events, so every `wrapper.emitted()` returned `undefined` and 28 tests failed. The shell on this machine exports `NODE_ENV=production`, which is why the suite was red before this pass.
+
+**Gate.** `vue-tsc` typecheck 0 errors; Vitest 424/424 across 8 files; ESLint 0 errors and 0 warnings; `vite build` of the playground passes. The playground was checked in headless Chromium in Light and Dark: the gallery renders, the dark `.dark` scope resolves to the mockup's dark tokens, and the console is clean.
+
+**Not done in this pass.** No `Nx*` component was swapped onto a `U*` one yet, and the mockup's pixel values are still the ones the components ship with. The next step is to wrap the 31 components that have a direct equivalent, re-supplying the mockup values through Nuxt UI's `ui` prop, and to rewrite the class-name assertions for those components.
+
+### The swap, and how the mockup survives it
+
+Nuxt UI's `ui` prop is merged onto the component's resolved classes with tailwind-merge, last writer wins. Handing it the mockup's own class list therefore keeps the mockup's colours, heights and radius on the rendered element, while Nuxt UI owns the markup, the disabled and loading behaviour, the focus handling and the accessibility wiring. The `Nx*` names and the mockup's tokens stay the public contract, and the class-name assertions in `variants.test.ts` keep passing.
+
+Two things needed care:
+- The mockup's radius names (`rounded-ui`, `rounded-ui-xl`) are not part of Tailwind's scale, so tailwind-merge does not drop Nuxt UI's `rounded-md` / `rounded-lg` beside them. The two scales are identical (both are multiples of `--ui-radius`), and Tailwind emits the `ui-*` utilities after the standard ones, so the mockup's radius still wins. Verified against the built stylesheet.
+- Nuxt UI draws its own focus outline, which would double up with the mockup's `focus-visible:ring-2`. `buttonBase` now carries `focus-visible:outline-0`.
+
+**Swapped onto `U*` (7).** `NxButton` and `NxIconButton` (`UButton`), `NxBadge` (`UBadge`), `NxCard` (`UCard`), `NxAvatar` (`UAvatar`), `NxAlert` (`UAlert`), `NxProgress` (`UProgress`). Each keeps its own props, and each hands the mockup's classes to Nuxt UI through the `ui` prop. `NxCard` and `NxAlert` render their title and description as paragraphs, so Nuxt UI's own wrappers are emptied with the function form of the `ui` prop.
+
+**Deliberately not swapped (5), and why.**
+- `NxSkeleton`: Nuxt UI's skeleton is a live region (`role="alert"`, `aria-live="polite"`). A loading placeholder that announces itself is wrong for the mockup's decorative one.
+- `NxSeparator`: it already emits the correct `role` and `aria-orientation`, and Nuxt UI's version adds a wrapper element where the mockup has a single bar.
+- `NxFieldWrapper`: it is id-based — the caller owns the control's id and the slot receives `described-by` and `invalid`. `UFormField` generates its own id and injects it, so the slot contract would change.
+- `NxToast` and `NxToaster`: Reka's `ToastRoot` needs a `ToastProvider` ancestor, and `NxToast` is documented as a toast the caller places itself. The toast bus in `lib/toast.ts` stays ours.
+
+**Bugs found and fixed on this pass.**
+- `NxProgress`'s bar grew by its width; Nuxt UI's grows by a transform, so the assertion now reads the transform and the bar's duration comes from the motion tokens like the rest of the library.
+
+**Gate.** `vue-tsc` typecheck 0 errors; Vitest 424/424 across 8 files; ESLint 0 errors and 0 warnings; `vite build` of the playground passes. Only one assertion had to change, in `data-components.test.ts`.
+
+The playground was checked in headless Chromium against the render from before the swap: 0.67% of the pixels differ, and a pixel probe shows the difference is anti-aliasing from the extra wrapper elements, not a layout shift — the text starts and ends on the same pixel column and the colours are identical (the alert's title `#0f172b` and description `#45556c`, the card's 12px radius, the progress bar's 8px and 4px tracks). The console is clean.
+
+**Not done.** The form controls and the overlays are still ours: `NxInput`, `NxTextarea`, `NxSelect`, `NxCheckbox`, `NxRadio`, `NxSwitch`, `NxModal`, `NxSlideover`, `NxPopover`, `NxTooltip`, `NxTabs`, `NxAccordion`, `NxCommandPalette`, `NxDatePicker` and `NxCombobox`. These are the components where Nuxt UI has the most to add — keyboard handling, focus management, positioning — and the next pass should take them in that order.

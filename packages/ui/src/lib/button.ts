@@ -5,7 +5,7 @@ import { tone, type NxColor, type NxSize, type NxVariant } from './tone';
  * emphasis, Size the density. Heights, paddings, gaps, icon sizes and radii are the mockup's SIZES table.
  * Solid fills use the `on-solid` label colour (see tokens.css): the mockup's white label fails WCAG AA.
  */
-export const buttonBase = 'inline-flex select-none items-center justify-center whitespace-nowrap font-medium transition duration-ui-fast ease-ui-out outline-none focus-visible:ring-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50';
+export const buttonBase = 'inline-flex select-none items-center justify-center whitespace-nowrap font-medium transition duration-ui-fast ease-ui-out outline-none focus-visible:ring-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-0';
 
 export const buttonSizes: Record<NxSize, string> = {
   sm: 'h-7 gap-1.5 rounded-ui px-2.5 text-xs [&_svg]:size-3.5',

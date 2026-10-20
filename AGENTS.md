@@ -45,7 +45,9 @@ For detailed architecture and repository conventions, see [CLAUDE.md](CLAUDE.md)
 
 ## UX/UI
 
-- UI is built with Nuxt UI v4 through the `packages/ui` layer. Use its `U*` components, color tokens (`primary`/`neutral`), and locales; do not add custom design tokens or hand-built primitives.
+- UI is Nexa's own component library in `packages/ui` (Vue 3 + Tailwind v4 + Reka UI, Phase 22/23), built from the Figma mockup `mockup/Nexa.figcraft`. Components are prefixed `Nx` and the package has no Nuxt layer.
+- `@nuxt/ui` v4 is available to `packages/ui` as a Vite plugin (not a Nuxt module), and its tokens are bridged to the mockup's. Prefer it over hand-rolling an accessible primitive when it covers the need; keep the `Nx*` names and the mockup's tokens as the public contract.
 - Follow the active phase sequence in `docs/plans/README.md`. UI work does not authorize starting a new phase or branch by itself.
 - `apps/web` and `apps/cli` were intentionally removed on 2026-10-09. Do not recreate them unless explicitly asked.
 - Preserve existing user changes. Check `git status --short` before editing, run applicable checks, and report what was changed and what remains unverified.
+- The `packages/ui` tests need `NODE_ENV=test`: Vue's production build drops the devtools hook `@vue/test-utils` uses to record emitted events.
