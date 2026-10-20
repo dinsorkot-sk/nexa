@@ -249,8 +249,8 @@ describe('field variants', () => {
 
   it('NxTextarea applies the variant and size paddings', () => {
     const wrapper = mount(NxTextarea, { props: { variant: 'soft', size: 'lg' } });
-    expect(wrapper.classes()).toContain('bg-ui-bg-elevated');
-    expect(wrapper.classes()).toContain('py-2.5');
+    expect(wrapper.find('textarea').classes()).toContain('bg-ui-bg-elevated');
+    expect(wrapper.find('textarea').classes()).toContain('py-2.5');
   });
 
   it('NxSelect covers the variants and keeps the leading icon inside the field', () => {

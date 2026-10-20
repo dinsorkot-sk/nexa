@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { useId } from 'vue';
+import { computed, useId } from 'vue';
+import UTextarea from '@nuxt/ui/components/Textarea.vue';
 import { fieldArea, fieldStyles } from '../lib/input';
 
 /** Multi-line text field. Three Variants and three Sizes, as the mockup's Textarea section. */
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   modelValue?: string | null;
   id?: string;
   rows?: number;
@@ -23,16 +24,21 @@ withDefaults(defineProps<{
 
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
 const generatedId = useId();
+
+const ui = computed(() => ({
+  root: 'relative flex w-full items-center',
+  base: `${fieldStyles({ variant: props.variant, size: props.size, invalid: props.invalid })} ${fieldArea[props.size]}`,
+}));
 </script>
 
 <template>
-  <textarea
+  <UTextarea
     :id="id ?? generatedId"
     :rows="rows"
-    :value="modelValue ?? ''"
+    :model-value="modelValue ?? ''"
     :disabled="disabled"
     :aria-invalid="invalid || undefined"
-    :class="[fieldStyles({ variant, size, invalid }), fieldArea[size]]"
-    @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
+    :ui="ui"
+    @update:model-value="(value) => emit('update:modelValue', value)"
   />
 </template>

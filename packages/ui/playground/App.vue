@@ -11,9 +11,10 @@ import {
   NxCombobox, NxCommandPalette, NxDatePicker, NxDiffRow, NxDonutChart, NxEmptyState, NxFieldInput, NxFieldRow, NxFieldValue,
   NxFieldWrapper, NxFileUpload, NxFormulaEditor, NxIconButton, NxIndicator, NxInput, NxKanbanCard, NxKbd, NxLineChart,
   NxLink, NxLogo, NxMenu, NxModal, NxNavGroupLabel, NxNavItem, NxNavbar, NxOrgSwitcher, NxPackageDiff, NxPageButton,
-  NxPageHeader, NxPagination, NxPermissionCell, NxPermissionsTable, NxPopover, NxProgress, NxRadio, NxSegment, NxSelectMenu,
-  NxSeparator, NxSidebar, NxSkeleton, NxSlideover, NxSpinner, NxStatCard, NxStepper, NxSwitch, NxTable, NxTableRow, NxTabs,
-  NxTextarea, NxTimeline, NxToast, NxToaster, NxTooltip, NxWorkflowEdge, NxWorkflowNode, pushToast, provideNxLocale,
+  NxPageHeader, NxPagination, NxPermissionCell, NxPermissionsTable, NxPopover, NxProgress, NxRadio, NxSegment, NxSelect,
+  NxSelectMenu, NxSeparator, NxSidebar, NxSkeleton, NxSlideover, NxSpinner, NxStatCard, NxStepper, NxSwitch, NxTable,
+  NxTableRow, NxTabs, NxTextarea, NxTimeline, NxToast, NxToaster, NxTooltip, NxWorkflowEdge, NxWorkflowNode, pushToast,
+  provideNxLocale,
   type ComboboxOption,
 } from '../src/index';
 
@@ -38,6 +39,7 @@ const page = ref(2);
 const org = ref('acme');
 const sampleText = ref('');
 const sampleSelect = ref<string | undefined>();
+const sampleNativeSelect = ref<string | undefined>();
 const formula = ref('price * quantity * (1 + taxRate)');
 
 // Motion demo: the three duration tokens, and a key that re-mounts the entrance demo on demand.
@@ -584,6 +586,13 @@ const buttonColors = ['primary', 'secondary', 'success', 'info', 'warning', 'err
               :options="choices"
               placeholder="Choose status"
               label="Status"
+            />
+            <NxSelect
+              id="pg-native-select"
+              v-model="sampleNativeSelect"
+              :options="choices"
+              placeholder="Choose status"
+              aria-label="Native status"
             />
             <NxTextarea
               placeholder="Notes"

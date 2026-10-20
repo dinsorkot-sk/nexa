@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { AccordionContent, AccordionHeader, AccordionItem, AccordionRoot, AccordionTrigger } from 'reka-ui';
-import { ChevronDown } from 'lucide-vue-next';
+import { computed } from 'vue';
+import UAccordion from '@nuxt/ui/components/Accordion.vue';
 
 export interface NxAccordionItem {
   value: string;
@@ -9,7 +9,7 @@ export interface NxAccordionItem {
   disabled?: boolean;
 }
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   items: NxAccordionItem[];
   modelValue?: string | string[];
   type?: 'single' | 'multiple';
@@ -21,42 +21,49 @@ withDefaults(defineProps<{
 });
 
 const emit = defineEmits<{ 'update:modelValue': [value: string | string[] | undefined] }>();
+
+/** Nuxt UI's items take a `label`; this package calls it `title`. */
+const items = computed(() => props.items.map((item) => ({
+  value: item.value,
+  label: item.title,
+  content: item.content,
+  disabled: item.disabled,
+  // The slot for an item is named after the item's value.
+  slot: item.value,
+})));
+
+const ui = computed(() => ({
+  root: 'w-full',
+  item: 'border-b border-ui-border',
+  header: 'flex',
+  trigger: 'group flex w-full items-center justify-between gap-2 py-3.5 text-left text-sm font-medium text-ui-text-highlighted outline-none hover:text-ui-primary-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ui-primary focus-visible:outline-0 disabled:cursor-not-allowed disabled:opacity-50',
+  trailingIcon: 'size-4 shrink-0 text-ui-text-muted transition-transform duration-ui ease-ui-out group-data-[state=open]:rotate-180',
+  label: 'text-start break-words',
+  content: 'overflow-hidden text-sm text-ui-text-muted data-[state=closed]:animate-ui-collapse-up data-[state=open]:animate-ui-collapse-down',
+  body: 'pb-3.5',
+}));
 </script>
 
 <template>
-  <AccordionRoot
-    :type="type"
+  <UAccordion
+    :items="items"
     :model-value="modelValue"
+    :type="type"
     :collapsible="type === 'single' ? collapsible : undefined"
-    class="w-full"
-    @update:model-value="emit('update:modelValue', $event)"
+    :ui="ui"
+    @update:model-value="(value) => emit('update:modelValue', value)"
   >
-    <AccordionItem
+    <template
       v-for="item in items"
+      #[item.slot]
       :key="item.value"
-      :value="item.value"
-      :disabled="item.disabled"
-      class="border-b border-ui-border"
     >
-      <AccordionHeader>
-        <AccordionTrigger class="flex w-full items-center justify-between gap-2 py-3.5 text-left text-sm font-medium text-ui-text-highlighted outline-none hover:text-ui-primary-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ui-primary disabled:cursor-not-allowed disabled:opacity-50">
-          {{ item.title }}
-          <ChevronDown
-            class="size-4 shrink-0 text-ui-text-muted transition-transform duration-ui ease-ui-out data-[state=open]:rotate-180"
-            aria-hidden="true"
-          />
-        </AccordionTrigger>
-      </AccordionHeader>
-      <AccordionContent class="overflow-hidden text-sm text-ui-text-muted data-[state=closed]:animate-ui-collapse-up data-[state=open]:animate-ui-collapse-down">
-        <div class="pb-3.5">
-          <slot
-            :name="item.value"
-            :item="item"
-          >
-            {{ item.content }}
-          </slot>
-        </div>
-      </AccordionContent>
-    </AccordionItem>
-  </AccordionRoot>
+      <slot
+        :name="item.value"
+        :item="item"
+      >
+        {{ item.content }}
+      </slot>
+    </template>
+  </UAccordion>
 </template>
