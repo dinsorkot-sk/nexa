@@ -1,0 +1,13 @@
+/*
+ * Nuxt UI v4 integration.
+ *
+ * Nuxt UI ships its own token layer under the same `--ui-*` names Nexa uses, because the Figma mockup this
+ * package is built from was itself drawn on Nuxt UI's tokens. The two therefore share one source of truth:
+ * `tokens.css` declares the values, and because it is imported after `@nuxt/ui`, its `:root` and `.dark` blocks
+ * win over Nuxt UI's `.light, :host, :root` and `.dark` blocks on equal specificity.
+ *
+ * The `ui-*` Tailwind utilities (bg-ui-primary, text-ui-text-muted, ...) keep working untouched, because
+ * `theme.css` maps them onto the same custom properties.
+ */
+@import 'tailwindcss';
+@import '@nuxt/ui';

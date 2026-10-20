@@ -1,5 +1,6 @@
 @import '@fontsource-variable/inter';
 @import '@fontsource-variable/noto-sans-thai';
+@import './nuxt-ui.css';
 @import './tokens.css';
 @import './theme.css';
 @import './motion.css';

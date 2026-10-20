@@ -6,5 +6,5 @@
     "types": ["vite/client"],
     "jsx": "preserve"
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "test/**/*.ts", "playground/**/*.ts", "playground/**/*.vue", "*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.vue", "test/**/*.ts", "playground/**/*.ts", "playground/**/*.vue", "*.ts", "auto-imports.d.ts", "components.d.ts"]
 }
