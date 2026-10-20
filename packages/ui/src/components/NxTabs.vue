@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { TabsList, TabsRoot, TabsTrigger } from 'reka-ui';
-import { tv } from 'tailwind-variants';
 import type { Component } from 'vue';
+import { computed } from 'vue';
+import UTabs from '@nuxt/ui/components/Tabs.vue';
+import { tv } from 'tailwind-variants';
 
 export interface NxTabItem {
   value: string;
@@ -24,8 +25,7 @@ const tab = tv({
   defaultVariants: { size: 'md' },
 });
 
-/** Tab triggers only. The caller renders the matching panel for the active value. */
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   modelValue: string;
   items: NxTabItem[];
   label: string;
@@ -33,32 +33,40 @@ withDefaults(defineProps<{
 }>(), { size: 'md' });
 
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
+
+/**
+ * The mockup's tabs sit on a plain rule and mark the active tab with a border, so Nuxt UI's sliding indicator is
+ * hidden rather than removed: its presence is what switches off the `in-[[data-slot=list]:not(:has(...))]` variants
+ * Nuxt UI uses to paint the active tab.
+ */
+const ui = computed(() => ({
+  root: 'flex flex-col',
+  list: 'flex gap-1 border-b border-ui-border bg-transparent p-0 rounded-none',
+  indicator: 'hidden',
+  label: () => '',
+  trigger: [
+    tab({ size: props.size }),
+    'justify-start rounded-none focus-visible:outline-0',
+  ].join(' '),
+}));
 </script>
 
 <template>
-  <TabsRoot
+  <UTabs
     :model-value="modelValue"
+    :items="items"
+    :content="false"
+    :aria-label="label"
+    :ui="ui"
     @update:model-value="(value) => typeof value === 'string' && value && emit('update:modelValue', value)"
   >
-    <TabsList
-      :aria-label="label"
-      class="flex gap-1 border-b border-ui-border"
-    >
-      <TabsTrigger
-        v-for="item in items"
-        :key="item.value"
-        :value="item.value"
-        :disabled="item.disabled"
-        :class="tab({ size })"
-      >
-        <component
-          :is="item.icon"
-          v-if="item.icon"
-          class="shrink-0 group-data-[state=active]:text-ui-primary-text"
-          aria-hidden="true"
-        />
-        {{ item.label }}
-      </TabsTrigger>
-    </TabsList>
-  </TabsRoot>
+    <template #leading="{ item }">
+      <component
+        :is="item.icon"
+        v-if="item.icon"
+        class="shrink-0 group-data-[state=active]:text-ui-primary-text"
+        aria-hidden="true"
+      />
+    </template>
+  </UTabs>
 </template>
