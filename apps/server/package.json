@@ -16,6 +16,9 @@
     "@hono/node-server": "^1.13.8",
     "@nexa/meta": "workspace:*",
     "@nexa/db": "workspace:*",
+    "@nexa/template-crm": "workspace:*",
+    "@nexa/template-hr": "workspace:*",
+    "@nexa/template-inventory": "workspace:*",
     "hono": "^4.7.2",
     "zod": "^3.24.2"
   },

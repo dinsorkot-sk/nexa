@@ -47,6 +47,15 @@ importers:
       '@nexa/meta':
         specifier: workspace:*
         version: link:../../packages/meta
+      '@nexa/template-crm':
+        specifier: workspace:*
+        version: link:../../templates/crm
+      '@nexa/template-hr':
+        specifier: workspace:*
+        version: link:../../templates/hr
+      '@nexa/template-inventory':
+        specifier: workspace:*
+        version: link:../../templates/inventory
       hono:
         specifier: ^4.7.2
         version: 4.13.13

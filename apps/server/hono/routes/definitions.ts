@@ -4,8 +4,9 @@ import {
   ModulePackageSchema, RelationCreateInputSchema, RelationUpdateInputSchema, WorkflowDefinitionSchema,
 } from '@nexa/meta';
 import { DefinitionConflictError, ModuleConflictError, ModuleNotFoundError, createTenantContext, moduleRepository, packageRepository } from '@nexa/db';
-import { isUpgrade } from '../../../../packages/engine/pkg/index';
+import { isUpgrade, templateToPackage } from '../../../../packages/engine/pkg/index';
 import { createHelpers, errorResponse, invalid, missingDefinition, type AppDependencies } from '../shared';
+import { isMetadataTemplateId, metadataTemplates, type MetadataTemplateId } from '../templates';
 
 /**
  * The definition kinds a package carries, with the ids of each. A definition
@@ -110,6 +111,34 @@ export function definitionRoutes(dependencies: AppDependencies) {
         ? c.json(errorResponse('MODULE_NOT_FOUND', error.message, 404), 404)
         : c.json(errorResponse('EXPORT_FAILED', error instanceof Error ? error.message : 'Export failed', 500), 500);
     }
+  }));
+  app.post('/modules/:moduleId/from-template', async (c) => withTenant(c, 'module:write', async (db, tenantId, principal) => {
+    const body = await c.req.json().catch(() => undefined);
+    if (!body || typeof body !== 'object') return invalid(c, 'Template payload required');
+    const requested = body as { templateId?: unknown; name?: unknown };
+    if (typeof requested.templateId !== 'string' || !isMetadataTemplateId(requested.templateId)) {
+      return invalid(c, `Unknown template: ${String(requested.templateId)}`);
+    }
+    const templateId = requested.templateId as MetadataTemplateId;
+    if (requested.name !== undefined && typeof requested.name !== 'string') return invalid(c, 'Template name must be a string');
+    const moduleId = c.req.param('moduleId');
+    const now = new Date().toISOString();
+    const pkg = templateToPackage(metadataTemplates[templateId], {
+      moduleId,
+      ...(typeof requested.name === 'string' ? { name: requested.name } : {}),
+      tenantId,
+      owner: { id: principal.userId, type: 'user' },
+      now,
+    });
+    const repo = packageRepository(db, createTenantContext(tenantId));
+    try {
+      await repo.importPackage(pkg, principal.userId);
+    } catch (error) {
+      if (error instanceof DefinitionConflictError) return c.json(errorResponse('PACKAGE_CONFLICT', error.message, 409), 409);
+      if (error instanceof ModuleConflictError) return c.json(errorResponse('MODULE_CONFLICT', error.message, 409), 409);
+      throw error;
+    }
+    return c.json({ imported: true, template: templateId, module: pkg.module }, 201);
   }));
   app.post('/modules/:moduleId/package/import', async (c) => withTenant(c, 'module:write', async (db, tenantId, principal) => {
     const body = await c.req.json().catch(() => undefined);
