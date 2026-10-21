@@ -8,6 +8,7 @@ export const PermissionResourceSchema = z.object({
   type: z.enum(['module', 'entity', 'field', 'record', 'action']),
   id: IdSchema.optional(),
 }).strict();
+export type PermissionResource = z.infer<typeof PermissionResourceSchema>;
 
 export const PermissionCreateInputSchema = z.object({
   id: IdSchema,
