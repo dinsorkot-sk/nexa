@@ -37,6 +37,10 @@ export { default as NxKanbanCard, type NxKanbanAssignee } from './components/NxK
 export { default as NxKbd } from './components/NxKbd.vue';
 export { default as NxLink } from './components/NxLink.vue';
 export { default as NxLogo } from './components/NxLogo.vue';
+export { default as NxMetaForm } from './components/NxMetaForm.vue';
+export { default as NxMetaTable } from './components/NxMetaTable.vue';
+export { default as MetaForm } from './components/NxMetaForm.vue';
+export { default as MetaTable } from './components/NxMetaTable.vue';
 export { default as NxMenu, type NxMenuItem } from './components/NxMenu.vue';
 export { default as NxModal } from './components/NxModal.vue';
 export { default as NxNavbar } from './components/NxNavbar.vue';

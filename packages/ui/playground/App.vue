@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { FieldDefinition, FieldType } from '@nexa/meta';
+import type { FieldDefinition, FieldType, FormDefinition, ViewDefinition } from '@nexa/meta';
 import {
   ArrowUpRight, Bell, Boxes, ChevronDown, CircleHelp, Copy, Gauge, Info, LayoutGrid, MessageSquare, Pencil, Plus,
   Search, Settings, Star, Trash2, User, Wrench,
@@ -10,7 +10,7 @@ import {
   NxCalendarDay, NxCalendarEvent, NxCalendarView, NxCard, NxChartCard, NxChartLegend, NxCheckbox, NxChip, NxCodeBlock,
   NxCombobox, NxCommandPalette, NxDatePicker, NxDiffRow, NxDonutChart, NxEmptyState, NxFieldInput, NxFieldRow, NxFieldValue,
   NxFieldWrapper, NxFileUpload, NxFormulaEditor, NxIconButton, NxIndicator, NxInput, NxKanbanCard, NxKbd, NxLineChart,
-  NxLink, NxLogo, NxMenu, NxModal, NxNavGroupLabel, NxNavItem, NxNavbar, NxOrgSwitcher, NxPackageDiff, NxPageButton,
+  NxLink, NxLogo, NxMenu, NxMetaForm, NxMetaTable, NxModal, NxNavGroupLabel, NxNavItem, NxNavbar, NxOrgSwitcher, NxPackageDiff, NxPageButton,
   NxPageHeader, NxPagination, NxPermissionCell, NxPermissionsTable, NxPopover, NxProgress, NxRadio, NxSegment, NxSelect,
   NxSelectMenu, NxSeparator, NxSidebar, NxSkeleton, NxSlideover, NxSpinner, NxStatCard, NxStepper, NxSwitch, NxTable,
   NxTableRow, NxTabs, NxTextarea, NxTimeline, NxToast, NxToaster, NxTooltip, NxWorkflowEdge, NxWorkflowNode, pushToast,
@@ -55,6 +55,41 @@ const choices = [
   { value: 'active', label: 'Active' },
   { value: 'closed', label: 'Closed' },
 ];
+
+// The renderers: a view and a form over the same fields, the way a module hands them over.
+const fieldOptions = { required: false, unique: false, readonly: false, hidden: false, searchable: false, sortable: true, filterable: true, indexed: false, isStatus: false, ui: {} };
+const vehicleFields: FieldDefinition[] = [
+  { id: 'plate', entityId: 'vehicle', name: 'plate', label: 'Plate', type: 'text', position: 0, options: { ...fieldOptions, required: true } },
+  { id: 'model', entityId: 'vehicle', name: 'model', label: 'Model', type: 'text', position: 1, options: fieldOptions },
+  { id: 'odometer', entityId: 'vehicle', name: 'odometer', label: 'Odometer', type: 'integer', position: 2, options: fieldOptions },
+  { id: 'status', entityId: 'vehicle', name: 'status', label: 'Status', type: 'select', position: 3, options: { ...fieldOptions, choices } },
+];
+const vehicleView: ViewDefinition = {
+  id: 'vehicles', moduleId: 'fleet', entityId: 'vehicle', name: 'Vehicles', type: 'table', isDefault: true,
+  columns: [
+    { fieldId: 'plate', visible: true },
+    { fieldId: 'model', visible: true },
+    { fieldId: 'odometer', visible: true, width: 120 },
+    { fieldId: 'status', visible: true },
+  ],
+  sort: [{ fieldId: 'plate', direction: 'asc' }],
+  filters: {},
+  settings: {},
+};
+const vehicleRecords = [
+  { id: 'v1', data: { plate: 'AB-1234', model: 'Hilux', odometer: 42150, status: 'active' } },
+  { id: 'v2', data: { plate: 'AB-5678', model: 'Isuzu D-Max', odometer: 9800, status: 'draft' } },
+  { id: 'v3', data: { plate: 'AB-9012', model: 'Toyota Hilux', odometer: 132400, status: 'closed' } },
+];
+const vehicleForm: FormDefinition = {
+  id: 'vehicle-form', moduleId: 'fleet', entityId: 'vehicle', name: 'Vehicle',
+  sections: [
+    { id: 'identity', label: 'Identity', fieldIds: ['plate', 'model'], columns: 2, visibility: {} },
+    { id: 'condition', label: 'Condition', fieldIds: ['odometer', 'status'], columns: 2, visibility: {} },
+  ],
+  settings: {},
+};
+const vehicleValues = ref<Record<string, unknown>>({ plate: 'AB-1234', model: 'Hilux' });
 
 const people: ComboboxOption[] = [
   { value: 'u-1', label: 'Ada Lovelace' },
@@ -686,6 +721,40 @@ const buttonColors = ['primary', 'secondary', 'success', 'info', 'warning', 'err
               />
             </div>
           </template>
+        </div>
+      </section>
+
+      <!-- View and form renderers -->
+      <section class="space-y-4">
+        <h2 class="text-xl font-semibold text-ui-text-highlighted">
+          View and form renderers
+        </h2>
+        <div class="grid gap-6 lg:grid-cols-2">
+          <div class="space-y-3">
+            <h3 class="text-sm font-medium text-ui-text-muted">
+              A view over a page of records
+            </h3>
+            <NxMetaTable
+              :view="vehicleView"
+              :fields="vehicleFields"
+              :records="vehicleRecords"
+              :total="42"
+              :limit="10"
+              :page="1"
+            />
+          </div>
+          <div class="space-y-3">
+            <h3 class="text-sm font-medium text-ui-text-muted">
+              A form over the same fields
+            </h3>
+            <NxMetaForm
+              :form="vehicleForm"
+              :fields="vehicleFields"
+              :values="vehicleValues"
+              cancel-label="Cancel"
+              @update:values="vehicleValues = $event"
+            />
+          </div>
         </div>
       </section>
 

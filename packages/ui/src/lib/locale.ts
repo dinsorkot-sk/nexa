@@ -38,6 +38,8 @@ export interface NxMessages {
   statusError: string;
   statusEmpty: string;
   permission: string;
+  save: string;
+  cancel: string;
 }
 
 export const messages: Record<NxLocale, NxMessages> = {
@@ -73,6 +75,8 @@ export const messages: Record<NxLocale, NxMessages> = {
     statusError: 'Error',
     statusEmpty: 'Empty',
     permission: 'Permission',
+    save: 'Save',
+    cancel: 'Cancel',
   },
   th: {
     close: 'ปิด',
@@ -106,6 +110,8 @@ export const messages: Record<NxLocale, NxMessages> = {
     statusError: 'ผิดพลาด',
     statusEmpty: 'ว่าง',
     permission: 'สิทธิ์',
+    save: 'บันทึก',
+    cancel: 'ยกเลิก',
   },
 };
 
