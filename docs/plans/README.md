@@ -176,3 +176,30 @@ The playground was checked in headless Chromium: the form controls and the overl
 **Gate for this pass.** `vue-tsc` typecheck 0 errors; Vitest 425/425 across 8 files; ESLint 0 errors and 0 warnings; `vite build` of the playground passes. One test was added, for the fuzzy search.
 
 The playground was checked in headless Chromium: the tab strip renders with the mockup's rule, the active tab's 2px green underline and left-aligned labels, clicking a tab switches it, and the command palette filters to a single row for a partial term. The console is clean.
+
+## Making the repository's own gate trustworthy
+
+Requested on 2026-10-20, after `v0.0.24` was pushed with a red CI: the branch failed on lint and typecheck before it reached anything else, and the failures had nothing to do with the UI work. This is a maintenance pass, not a phase — it adds no SRS capability, so it stays on `v0.0.24` and the phase table does not change.
+
+**What was red.** `pnpm lint` reported 6 errors and 2 warnings, `pnpm typecheck` reported 4 errors, and `pnpm test` reported 17 files and 62 tests failed. The test failure was not a defect: the shell on this machine exports `NODE_ENV=production`, the server disables signup in production, so every test that signs up got no user, and Vue's production build drops the devtools hook `@vue/test-utils` uses to record emitted events. With `NODE_ENV=test` the suite passed 51 files and 756 tests. A gate whose result depends on an ambient environment variable cannot be trusted, so that is what this pass fixed.
+
+**The lint failures.**
+- `eslint.configs.recommended` enables `no-undef`, which knows neither the DOM lib nor the tsconfig, and reported `Headers`, `RequestInfo`, `RequestInit` and `RequestCredentials` as undefined in the SDK test. TypeScript reports an undefined name as TS2304 with both in hand, so the rule is off for TypeScript files.
+- `vue.configs['flat/recommended']` has three blocks with no `files` key, so all of its rules judged every file. That is where a Vue rule complained about a TypeScript test file. They are scoped to `.vue` now.
+- The `apps/web` block is gone with `apps/web` itself.
+- The SDK test typed its two inline fetch callbacks as implicitly any, and kept two apps that were only used through `typeof app`. The capture helper now carries the signature and answers from the app, so each test is a real round trip and reads the request the client built.
+- The membership test destructured a tenant id it never read.
+
+**The typecheck failures.** The four errors were in the SDK test. The 50 more that the blind spot below turned up were in the engine's own test files.
+
+**Two places the gate never looked.** `pnpm typecheck` runs turbo, and turbo only knows the packages that have a `package.json` with a `typecheck` script. `packages/engine` had none, so its thirteen colocated test files were in no tsconfig program at all — its source was typechecked transitively, through the server's program, but its tests were not typechecked anywhere. `templates/*` were not workspace members, so their `typecheck` script never ran.
+
+Bringing them in showed 50 type errors. The field helper in two engine tests took the whole options type, so it could not be given a partial one, which made every field in it optional and every call site an error; the sibling test already used `Partial` and was clean. The package test cast its module to `never` instead of building one, and the scheduled trigger in the automation test left out the timezone the schema defaults.
+
+**The `db:check` guard had stopped guarding.** It expected ten migrations where there are twelve, and it queried thirteen of the sixteen tables: `nexa_invitations`, `nexa_outbox` and `nexa_automation_runs` were never asked for, so a missing outbox table would have passed the check.
+
+**One duplicate.** The server's `build` script was `tsc --noEmit`, the same command as its `typecheck`, and it made turbo warn that the task produced no output files. The script is gone; the typecheck task still covers the server, and CI runs it before the tests.
+
+**Gate for this pass.** From a shell that still exports `NODE_ENV=production`: `pnpm lint` 0 errors and 0 warnings; `pnpm typecheck` 0 errors across 15 tasks, four more than before; `pnpm test` 51 files and 756 tests, all pass; `pnpm build` passes; `pnpm db:check` passes and now checks 12 migrations and 16 tables.
+
+**Not in this pass.** The SRS gaps the backend still has: no route for module package import (the repository method exists, nothing calls it), no persistence for views and forms (schemas only), no route to install a metadata template into a tenant. Each needs its own repository, route and test, and each is better built on a green gate. The accessibility and coverage gaps the plans keep recording — screen readers, touch and mobile layouts, browsers other than Chromium, animation timing frame by frame — are still open, as is reassembling `apps/web`.
