@@ -39,6 +39,8 @@ Rule: one phase per version branch (`v0.0.1`, `v0.0.2`, ...), in order. Phase 0 
 
 | 26 | v0.0.27 | Enforce the module's own permission definitions: the platform's matrix becomes the ceiling and a module narrows it | complete | **Verified 2026-10-21:** lint 0 errors and 0 warnings; `pnpm typecheck` 0 errors across 15 tasks; the full test suite passes from a shell that still exports `NODE_ENV=production`; `pnpm build` passes; `pnpm db:check` unchanged at 12 migrations and 16 tables. No migration. A module can narrow what a role may do and never widen it, so the platform's matrix stays the ceiling and both gates have to pass. The permission definitions are policy rather than schema, so they stay editable while a module is live. The `condition` on a definition is stored and not evaluated; the definition routes are not narrowed; the `field` and `action` resources are stored and matched exactly but no route names one yet. |
 
+| 27 | v0.0.28 | Render the view and the form: `NxMetaTable` and `NxMetaForm` over the persisted definitions | complete | **Verified 2026-10-21:** lint 0 errors and 0 warnings; `pnpm typecheck` 0 errors across 15 tasks; the full test suite passes from a shell that still exports `NODE_ENV=production`; `pnpm build` passes; `pnpm db:check` unchanged at 12 migrations and 16 tables. No migration. The renderers take the definitions as props and never fetch, the Phase 20 rule. `MetaDetail`, the record page with its activity trail and its relations, is not rebuilt. |
+
 Full functional requirements and acceptance criteria are in the user-provided LOGHOLIZON SRS v1.0, adapted to the decisions documented here. Do not add phases beyond this table (Phases 22 and 23 were added at the user's explicit request).
 
 ## Phase 22 — Own component library in `packages/ui` (complete)
@@ -285,3 +287,21 @@ This was found while writing the tests rather than by design: the first run of t
 **Gate for this phase.** From a shell that still exports `NODE_ENV=production`: lint 0 errors and 0 warnings; `pnpm typecheck` 0 errors across 15 tasks; the full test suite passes; `pnpm build` passes; `pnpm db:check` passes with 12 migrations and 16 tables, unchanged. The enforcement is exercised over HTTP with a member of the tenant: a module that lets the member read one entity refuses the member's write on it and leaves the entities it says nothing about alone, a module that hands a viewer a write still does not get one, a module with no definitions behaves as before, and the owner can widen its own narrowing again.
 
 **Not in this phase.** The `condition` on a permission definition is stored and not evaluated: it is a per-record condition, and a list request has no record to weigh it against. The `field` and `action` resources are stored and matched exactly, but no route names one yet. The definition routes are not narrowed. Nothing renders a view or a form yet: the Phase 20 renderers were deleted, `apps/web` is not reassembled, and `packages/ui` is a component library with no API calls.
+
+## Phase 27 — Render the view and the form (complete)
+
+Requested on 2026-10-21, the second half of the plan. The views and forms became persisted definitions in Phase 25, and the renderers that used to show them were deleted with the old component set in Phase 21. Nothing rendered them.
+
+### The contract is unchanged
+
+`packages/ui` never calls the SDK. The caller hands the definitions over and takes the values back, and that was the Phase 20 rule too. What changed is that the definitions are now first-class objects: a caller fetches a view and passes it in, rather than assembling a list of columns by hand.
+
+`NxMetaTable` renders a view's columns over a page of records. The view says which fields to show, in what order and how wide; the fields say how a value is formatted, so a cell is rendered through `NxFieldValue` and an integer is formatted as an integer; the records are the caller's page. Sorting a column emits the field id and the direction in the shape the records API takes, and the paging emits the page it wants. The loading, empty and error states are the ones the rest of the library uses.
+
+`NxMetaForm` renders a form's sections in order, each section laid out in as many columns as the section says, with the fields edited by `NxFieldInput`, which already owns the label, the hint, the error and the wiring between them. It emits the values as they change and the values again on submit.
+
+Both take the definition objects from `@nexa/meta`, so the shape of a view or a form is the one the server stores and the two halves cannot drift.
+
+**Gate for this phase.** From a shell that still exports `NODE_ENV=production`: lint 0 errors and 0 warnings; `pnpm typecheck` 0 errors across 15 tasks; the full test suite passes; `pnpm build` passes; `pnpm db:check` passes with 12 migrations and 16 tables, unchanged. The renderers are exercised in the package: the view's visible columns in the view's order with the hidden one out, a cell formatted by its field, the sort emitted in the API's shape, the loading and empty states, the error with a retry, the page emitted; the form's sections in order, a section laid out in its own column count, a field the form does not place left out, the values emitted as a field changes and again on submit, and a field the form cannot edit disabled. The playground shows both over the same fields.
+
+**Not in this phase.** `MetaDetail`, the record page with its activity trail and its relations, is the third renderer Phase 20 had and is not rebuilt. The Kanban, Calendar and Gallery view types have no renderer either. Nothing calls the renderers: `apps/web` is not reassembled, and `packages/ui` is a component library with no API calls. The `condition` on a permission definition is still stored and not evaluated, and the definition routes are still not narrowed by the module's own definitions.

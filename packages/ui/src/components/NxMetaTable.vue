@@ -104,7 +104,11 @@ function onSort(next: NxTableSort) {
       :caption="props.caption ?? props.view?.name"
       @update:sort="onSort"
     >
-      <template v-for="column in columns" #[`cell-${column.key}`]="{ value }">
+      <template
+        v-for="column in columns"
+        :key="column.key"
+        #[`cell-${column.key}`]="{ value }"
+      >
         <NxFieldValue
           :field="column.field"
           :value="value"

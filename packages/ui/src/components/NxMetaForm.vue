@@ -103,8 +103,8 @@ function onSubmit() {
       >
         <NxFieldInput
           v-for="field in section.fields"
-          :key="field.id"
           :id="`${formId}-${field.id}`"
+          :key="field.id"
           :field="field"
           :model-value="current[field.id]"
           :disabled="props.submitting || props.readonlyFieldIds.includes(field.id)"
