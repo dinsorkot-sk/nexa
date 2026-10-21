@@ -81,7 +81,7 @@ export function packageRepository(handle: DbHandle, context: TenantContext) {
         }
         // Validate integrity over the full set before writing anything.
         const byKind = (kind: DefinitionKind) => rows.filter((row) => row.kind === kind).map((row) => row.definition) as never[];
-        const issues = validateModuleSchema(byKind('entity'), byKind('field'), byKind('relation'), byKind('workflow'), byKind('action'), byKind('automation'), byKind('report'), byKind('dashboard'));
+        const issues = validateModuleSchema(byKind('entity'), byKind('field'), byKind('relation'), byKind('workflow'), byKind('action'), byKind('automation'), byKind('report'), byKind('dashboard'), byKind('view'), byKind('form'));
         if (issues.length > 0) {
           throw new DefinitionConflictError(`Invalid package schema: ${issues.map((issue) => issue.message).join('; ')}`);
         }
@@ -119,7 +119,7 @@ export function packageRepository(handle: DbHandle, context: TenantContext) {
           }
         }
         const byKind = (kind: DefinitionKind) => rows.filter((row) => row.kind === kind).map((row) => row.definition) as never[];
-        const issues = validateModuleSchema(byKind('entity'), byKind('field'), byKind('relation'), byKind('workflow'), byKind('action'), byKind('automation'), byKind('report'), byKind('dashboard'));
+        const issues = validateModuleSchema(byKind('entity'), byKind('field'), byKind('relation'), byKind('workflow'), byKind('action'), byKind('automation'), byKind('report'), byKind('dashboard'), byKind('view'), byKind('form'));
         if (issues.length > 0) {
           throw new DefinitionConflictError(`Invalid package schema: ${issues.map((issue) => issue.message).join('; ')}`);
         }

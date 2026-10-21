@@ -1,11 +1,73 @@
-import type { ActionDefinition, AutomationDefinition, DashboardDefinition, EntityDefinition, FieldDefinition, RelationDefinition, ReportDefinition, WorkflowDefinition } from '@nexa/meta';
+import type { ActionDefinition, AutomationDefinition, DashboardDefinition, EntityDefinition, FieldDefinition, FormDefinition, RelationDefinition, ReportDefinition, ViewDefinition, WorkflowDefinition } from '@nexa/meta';
 import { extractFormulaReferences, parseExpression, parseFormulaGraph, topologicalFormulaOrder } from '../../engine/formula/index';
 
 export interface DefinitionValidationIssue {
-  kind: 'entity' | 'field' | 'relation' | 'workflow' | 'action' | 'automation' | 'report' | 'dashboard';
+  kind: 'entity' | 'field' | 'relation' | 'view' | 'form' | 'workflow' | 'action' | 'automation' | 'report' | 'dashboard';
   id: string;
   message: string;
   path?: string[];
+}
+
+/**
+ * Cross-checks views and forms against the module's entities and fields.
+ * A view or a form belongs to an entity that has to exist, and the fields it
+ * names have to be fields of that entity. An entity has one default view:
+ * two of them would leave the choice of which one to open ambiguous.
+ */
+export function validateViewReferences(
+  entities: EntityDefinition[],
+  fields: FieldDefinition[],
+  views: ViewDefinition[],
+  forms: FormDefinition[],
+): DefinitionValidationIssue[] {
+  const issues: DefinitionValidationIssue[] = [];
+  const entityIds = new Set(entities.map((entity) => entity.id));
+  const fieldsByEntity = new Map<string, Set<string>>();
+  for (const field of fields) {
+    const owned = fieldsByEntity.get(field.entityId) ?? new Set<string>();
+    owned.add(field.id);
+    fieldsByEntity.set(field.entityId, owned);
+  }
+  const defaults = new Map<string, string>();
+  for (const view of views) {
+    if (!entityIds.has(view.entityId)) {
+      issues.push({ kind: 'view', id: view.id, message: `View references unknown entity "${view.entityId}"`, path: ['entityId'] });
+      continue;
+    }
+    const owned = fieldsByEntity.get(view.entityId) ?? new Set<string>();
+    view.columns.forEach((column, index) => {
+      if (!owned.has(column.fieldId)) {
+        issues.push({ kind: 'view', id: view.id, message: `View column references unknown field "${column.fieldId}"`, path: ['columns', String(index), 'fieldId'] });
+      }
+    });
+    view.sort.forEach((entry, index) => {
+      if (!owned.has(entry.fieldId)) {
+        issues.push({ kind: 'view', id: view.id, message: `View sort references unknown field "${entry.fieldId}"`, path: ['sort', String(index), 'fieldId'] });
+      }
+    });
+    if (view.isDefault) {
+      const existing = defaults.get(view.entityId);
+      if (existing) {
+        issues.push({ kind: 'view', id: view.id, message: `Entity "${view.entityId}" already has a default view "${existing}"`, path: ['isDefault'] });
+      }
+      defaults.set(view.entityId, view.id);
+    }
+  }
+  for (const form of forms) {
+    if (!entityIds.has(form.entityId)) {
+      issues.push({ kind: 'form', id: form.id, message: `Form references unknown entity "${form.entityId}"`, path: ['entityId'] });
+      continue;
+    }
+    const owned = fieldsByEntity.get(form.entityId) ?? new Set<string>();
+    form.sections.forEach((section, index) => {
+      section.fieldIds.forEach((fieldId, fieldIndex) => {
+        if (!owned.has(fieldId)) {
+          issues.push({ kind: 'form', id: form.id, message: `Form section references unknown field "${fieldId}"`, path: ['sections', String(index), 'fieldIds', String(fieldIndex)] });
+        }
+      });
+    });
+  }
+  return issues;
 }
 
 /**
@@ -128,11 +190,14 @@ export function validateModuleSchema(
   automations: AutomationDefinition[] = [],
   reports: ReportDefinition[] = [],
   dashboards: DashboardDefinition[] = [],
+  views: ViewDefinition[] = [],
+  forms: FormDefinition[] = [],
 ): DefinitionValidationIssue[] {
   const issues: DefinitionValidationIssue[] = [
     ...validateWorkflowReferences(entities, fields, workflows, actions),
     ...validateAutomationReferences(entities, automations, actions),
     ...validateReportReferences(entities, fields, reports, dashboards),
+    ...validateViewReferences(entities, fields, views, forms),
   ];
   const entityById = new Map(entities.map(e => [e.id, e]));
   const fieldsByEntityId = new Map<string, Map<string, FieldDefinition>>();

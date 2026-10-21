@@ -13,11 +13,19 @@ import {
   AutomationDefinitionSchema,
   DashboardDefinitionSchema,
   ReportDefinitionSchema,
+  ViewCreateInputSchema,
+  ViewDefinitionSchema,
+  ViewUpdateInputSchema,
+  FormCreateInputSchema,
+  FormDefinitionSchema,
+  FormUpdateInputSchema,
   WorkflowDefinitionSchema,
   type ActionDefinition,
   type AutomationDefinition,
   type DashboardDefinition,
   type ReportDefinition,
+  type ViewDefinition,
+  type FormDefinition,
   type WorkflowDefinition,
   type EntityDefinition,
   type FieldDefinition,
@@ -29,12 +37,14 @@ import type { DbHandle } from './client';
 import type { TenantContext } from './tenancy';
 import { auditLog, metadataDefinitions, modules, records } from './schema';
 
-export type DefinitionKind = 'entity' | 'field' | 'relation' | 'workflow' | 'action' | 'automation' | 'report' | 'dashboard';
+export type DefinitionKind = 'entity' | 'field' | 'relation' | 'view' | 'form' | 'workflow' | 'action' | 'automation' | 'report' | 'dashboard';
 
 export interface ModuleSchema {
   entities: EntityDefinition[];
   fields: FieldDefinition[];
   relations: RelationDefinition[];
+  views: ViewDefinition[];
+  forms: FormDefinition[];
   workflows: WorkflowDefinition[];
   actions: ActionDefinition[];
   automations: AutomationDefinition[];
@@ -60,6 +70,8 @@ const schemas: Record<DefinitionKind, z.ZodTypeAny> = {
   entity: EntityDefinitionSchema,
   field: FieldDefinitionSchema,
   relation: RelationDefinitionSchema,
+  view: ViewDefinitionSchema,
+  form: FormDefinitionSchema,
   workflow: WorkflowDefinitionSchema,
   action: ActionDefinitionSchema,
   automation: AutomationDefinitionSchema,
@@ -94,6 +106,8 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
       entities: await readAll<EntityDefinition>(db, moduleId, 'entity'),
       fields: await readAll<FieldDefinition>(db, moduleId, 'field'),
       relations: await readAll<RelationDefinition>(db, moduleId, 'relation'),
+      views: await readAll<ViewDefinition>(db, moduleId, 'view'),
+      forms: await readAll<FormDefinition>(db, moduleId, 'form'),
       workflows: await readAll<WorkflowDefinition>(db, moduleId, 'workflow'),
       actions: await readAll<ActionDefinition>(db, moduleId, 'action'),
       automations: await readAll<AutomationDefinition>(db, moduleId, 'automation'),
@@ -120,7 +134,7 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
       }
       const current = await loadSchema(tx, moduleId);
       const { next, result, audit, entityId } = await change(tx, current);
-      const issues = validateModuleSchema(next.entities, next.fields, next.relations, next.workflows, next.actions, next.automations, next.reports, next.dashboards);
+      const issues = validateModuleSchema(next.entities, next.fields, next.relations, next.workflows, next.actions, next.automations, next.reports, next.dashboards, next.views, next.forms);
       if (issues.length > 0) {
         throw new DefinitionConflictError(`Invalid module schema: ${issues.map((issue) => issue.message).join('; ')}`);
       }
@@ -443,6 +457,108 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
 
     listRelations: (moduleId: string) => readAll<RelationDefinition>(handle.db, moduleId, 'relation'),
     getRelation: (moduleId: string, id: string) => getOne<RelationDefinition>(moduleId, 'relation', id),
+
+    listViews: async (moduleId: string, entityId?: string) => {
+      const all = await readAll<ViewDefinition>(handle.db, moduleId, 'view');
+      return entityId ? all.filter((view) => view.entityId === entityId) : all;
+    },
+    getView: (moduleId: string, id: string) => getOne<ViewDefinition>(moduleId, 'view', id),
+
+    async createView(moduleId: string, input: z.input<typeof ViewCreateInputSchema>, actorId?: string): Promise<ViewDefinition> {
+      const parsed = ViewCreateInputSchema.parse(input);
+      const view = ViewDefinitionSchema.parse({ ...parsed, moduleId });
+      return mutate(moduleId, 'view.created', actorId, async (tx, current) => {
+        if (!current.entities.some((entity) => entity.id === view.entityId)) throw new DefinitionNotFoundError('Entity', view.entityId);
+        await insertDefinition(tx, moduleId, 'view', view);
+        return {
+          next: { ...current, views: [...current.views, view] },
+          result: view,
+          audit: { kind: 'view', after: view },
+          entityId: view.entityId,
+        };
+      });
+    },
+
+    async updateView(moduleId: string, id: string, patch: z.input<typeof ViewUpdateInputSchema>, actorId?: string): Promise<ViewDefinition> {
+      const parsed = ViewUpdateInputSchema.parse(patch);
+      return mutate(moduleId, 'view.updated', actorId, async (tx, current) => {
+        const before = current.views.find((view) => view.id === id);
+        if (!before) throw new DefinitionNotFoundError('View', id);
+        const after = ViewDefinitionSchema.parse({ ...before, ...parsed, moduleId });
+        await writeDefinition(tx, moduleId, 'view', after);
+        return {
+          next: { ...current, views: current.views.map((view) => (view.id === id ? after : view)) },
+          result: after,
+          audit: { kind: 'view', before, after },
+          entityId: after.entityId,
+        };
+      });
+    },
+
+    async deleteView(moduleId: string, id: string, actorId?: string): Promise<void> {
+      await mutate(moduleId, 'view.deleted', actorId, async (tx, current) => {
+        const before = current.views.find((view) => view.id === id);
+        if (!before) throw new DefinitionNotFoundError('View', id);
+        await removeDefinitions(tx, moduleId, 'view', [id]);
+        return {
+          next: { ...current, views: current.views.filter((view) => view.id !== id) },
+          result: undefined,
+          audit: { kind: 'view', before },
+          entityId: before.entityId,
+        };
+      });
+    },
+
+    listForms: async (moduleId: string, entityId?: string) => {
+      const all = await readAll<FormDefinition>(handle.db, moduleId, 'form');
+      return entityId ? all.filter((form) => form.entityId === entityId) : all;
+    },
+    getForm: (moduleId: string, id: string) => getOne<FormDefinition>(moduleId, 'form', id),
+
+    async createForm(moduleId: string, input: z.input<typeof FormCreateInputSchema>, actorId?: string): Promise<FormDefinition> {
+      const parsed = FormCreateInputSchema.parse(input);
+      const form = FormDefinitionSchema.parse({ ...parsed, moduleId });
+      return mutate(moduleId, 'form.created', actorId, async (tx, current) => {
+        if (!current.entities.some((entity) => entity.id === form.entityId)) throw new DefinitionNotFoundError('Entity', form.entityId);
+        await insertDefinition(tx, moduleId, 'form', form);
+        return {
+          next: { ...current, forms: [...current.forms, form] },
+          result: form,
+          audit: { kind: 'form', after: form },
+          entityId: form.entityId,
+        };
+      });
+    },
+
+    async updateForm(moduleId: string, id: string, patch: z.input<typeof FormUpdateInputSchema>, actorId?: string): Promise<FormDefinition> {
+      const parsed = FormUpdateInputSchema.parse(patch);
+      return mutate(moduleId, 'form.updated', actorId, async (tx, current) => {
+        const before = current.forms.find((form) => form.id === id);
+        if (!before) throw new DefinitionNotFoundError('Form', id);
+        const after = FormDefinitionSchema.parse({ ...before, ...parsed, moduleId });
+        await writeDefinition(tx, moduleId, 'form', after);
+        return {
+          next: { ...current, forms: current.forms.map((form) => (form.id === id ? after : form)) },
+          result: after,
+          audit: { kind: 'form', before, after },
+          entityId: after.entityId,
+        };
+      });
+    },
+
+    async deleteForm(moduleId: string, id: string, actorId?: string): Promise<void> {
+      await mutate(moduleId, 'form.deleted', actorId, async (tx, current) => {
+        const before = current.forms.find((form) => form.id === id);
+        if (!before) throw new DefinitionNotFoundError('Form', id);
+        await removeDefinitions(tx, moduleId, 'form', [id]);
+        return {
+          next: { ...current, forms: current.forms.filter((form) => form.id !== id) },
+          result: undefined,
+          audit: { kind: 'form', before },
+          entityId: before.entityId,
+        };
+      });
+    },
 
     async createRelation(moduleId: string, input: z.input<typeof RelationCreateInputSchema>, actorId?: string): Promise<RelationDefinition> {
       const relation = RelationDefinitionSchema.parse(RelationCreateInputSchema.parse(input));
