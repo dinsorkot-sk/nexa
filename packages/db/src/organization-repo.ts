@@ -42,6 +42,16 @@ async function seedOrganizationRoles(tx: { insert: DbHandle['db']['insert'] }, t
 
 export function organizationRepository(handle: DbHandle) {
   return {
+    /**
+     * Every tenant on the platform. The scheduler walks them, because a
+     * scheduled automation belongs to a tenant and the outbox is platform
+     * level work.
+     */
+    async listTenantIds(): Promise<string[]> {
+      const rows = await handle.db.select({ id: tenants.id }).from(tenants);
+      return rows.map((row) => row.id);
+    },
+
     async provisionForOwner(input: {
       name: string;
       slug: string;

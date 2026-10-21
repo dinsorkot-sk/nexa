@@ -37,7 +37,7 @@ describe('version and package helpers', () => {
       {
         module,
         entities: [], fields: [], relations: [], views: [], forms: [],
-        workflows: [], actions: [], automations: [], reports: [], dashboards: [],
+        workflows: [], actions: [], automations: [], reports: [], dashboards: [], permissions: [],
       },
     );
     expect(pkg.manifest).toMatchObject({ formatVersion: 1, moduleId: 'fleet', version: '1.2.0' });

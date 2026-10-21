@@ -1,11 +1,42 @@
-import type { ActionDefinition, AutomationDefinition, DashboardDefinition, EntityDefinition, FieldDefinition, FormDefinition, RelationDefinition, ReportDefinition, ViewDefinition, WorkflowDefinition } from '@nexa/meta';
+import type { ActionDefinition, AutomationDefinition, DashboardDefinition, EntityDefinition, FieldDefinition, FormDefinition, PermissionDefinition, RelationDefinition, ReportDefinition, ViewDefinition, WorkflowDefinition } from '@nexa/meta';
 import { extractFormulaReferences, parseExpression, parseFormulaGraph, topologicalFormulaOrder } from '../../engine/formula/index';
 
 export interface DefinitionValidationIssue {
-  kind: 'entity' | 'field' | 'relation' | 'view' | 'form' | 'workflow' | 'action' | 'automation' | 'report' | 'dashboard';
+  kind: 'entity' | 'field' | 'relation' | 'view' | 'form' | 'workflow' | 'action' | 'automation' | 'report' | 'dashboard' | 'permission';
   id: string;
   message: string;
   path?: string[];
+}
+
+/**
+ * Cross-checks permission definitions against the module's entities, fields
+ * and actions. A permission that names a resource the module does not have
+ * grants nothing, so it is refused rather than stored.
+ */
+export function validatePermissionReferences(
+  entities: EntityDefinition[],
+  fields: FieldDefinition[],
+  actions: ActionDefinition[],
+  permissions: PermissionDefinition[],
+): DefinitionValidationIssue[] {
+  const issues: DefinitionValidationIssue[] = [];
+  const entityIds = new Set(entities.map((entity) => entity.id));
+  const fieldIds = new Set(fields.map((field) => field.id));
+  const actionIds = new Set(actions.map((action) => action.id));
+  for (const permission of permissions) {
+    const resource = permission.resource;
+    if (!resource.id) continue;
+    if (resource.type === 'entity' && !entityIds.has(resource.id)) {
+      issues.push({ kind: 'permission', id: permission.id, message: `Permission references unknown entity "${resource.id}"`, path: ['resource', 'id'] });
+    }
+    if (resource.type === 'field' && !fieldIds.has(resource.id)) {
+      issues.push({ kind: 'permission', id: permission.id, message: `Permission references unknown field "${resource.id}"`, path: ['resource', 'id'] });
+    }
+    if (resource.type === 'action' && !actionIds.has(resource.id)) {
+      issues.push({ kind: 'permission', id: permission.id, message: `Permission references unknown action "${resource.id}"`, path: ['resource', 'id'] });
+    }
+  }
+  return issues;
 }
 
 /**
@@ -192,12 +223,14 @@ export function validateModuleSchema(
   dashboards: DashboardDefinition[] = [],
   views: ViewDefinition[] = [],
   forms: FormDefinition[] = [],
+  permissions: PermissionDefinition[] = [],
 ): DefinitionValidationIssue[] {
   const issues: DefinitionValidationIssue[] = [
     ...validateWorkflowReferences(entities, fields, workflows, actions),
     ...validateAutomationReferences(entities, automations, actions),
     ...validateReportReferences(entities, fields, reports, dashboards),
     ...validateViewReferences(entities, fields, views, forms),
+    ...validatePermissionReferences(entities, fields, actions, permissions),
   ];
   const entityById = new Map(entities.map(e => [e.id, e]));
   const fieldsByEntityId = new Map<string, Map<string, FieldDefinition>>();

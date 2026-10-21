@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import {
   ActionDefinitionSchema, EntityCreateInputSchema, EntityUpdateInputSchema, FieldCreateInputSchema, FieldUpdateInputSchema,
   ModulePackageSchema, RelationCreateInputSchema, RelationUpdateInputSchema, ViewCreateInputSchema, ViewUpdateInputSchema,
-  FormCreateInputSchema, FormUpdateInputSchema, WorkflowDefinitionSchema,
+  FormCreateInputSchema, FormUpdateInputSchema, PermissionCreateInputSchema, PermissionUpdateInputSchema, WorkflowDefinitionSchema,
 } from '@nexa/meta';
 import { DefinitionConflictError, ModuleConflictError, ModuleNotFoundError, createTenantContext, moduleRepository, packageRepository } from '@nexa/db';
 import { isUpgrade, templateToPackage } from '../../../../packages/engine/pkg/index';
@@ -24,7 +24,7 @@ const withModuleId = (definitions: unknown, moduleId: string) => (Array.isArray(
  * unique among themselves: the metadata definitions table is keyed by tenant,
  * module, kind and id, and a repeat would surface as a database error.
  */
-const packageDefinitionKinds = (pkg: { entities: Array<{ id: string }>; fields: Array<{ id: string }>; relations: Array<{ id: string }>; views: Array<{ id: string }>; forms: Array<{ id: string }>; workflows: Array<{ id: string }>; actions: Array<{ id: string }>; automations: Array<{ id: string }>; reports: Array<{ id: string }>; dashboards: Array<{ id: string }> }) => [
+const packageDefinitionKinds = (pkg: { entities: Array<{ id: string }>; fields: Array<{ id: string }>; relations: Array<{ id: string }>; views: Array<{ id: string }>; forms: Array<{ id: string }>; workflows: Array<{ id: string }>; actions: Array<{ id: string }>; automations: Array<{ id: string }>; reports: Array<{ id: string }>; dashboards: Array<{ id: string }>; permissions: Array<{ id: string }> }) => [
   ['entity', pkg.entities.map((definition) => definition.id)],
   ['field', pkg.fields.map((definition) => definition.id)],
   ['relation', pkg.relations.map((definition) => definition.id)],
@@ -35,6 +35,7 @@ const packageDefinitionKinds = (pkg: { entities: Array<{ id: string }>; fields: 
   ['automation', pkg.automations.map((definition) => definition.id)],
   ['report', pkg.reports.map((definition) => definition.id)],
   ['dashboard', pkg.dashboards.map((definition) => definition.id)],
+  ['permission', pkg.permissions.map((definition) => definition.id)],
 ] as const;
 
 /** Module-scoped metadata: schema, entities, fields, relations, workflows, actions, package. */
@@ -110,6 +111,25 @@ export function definitionRoutes(dependencies: AppDependencies) {
   }));
   app.delete('/modules/:moduleId/forms/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
     await repo.deleteForm(moduleId, c.req.param('id'));
+    return c.body(null, 204);
+  }));
+  app.get('/modules/:moduleId/permissions', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.listPermissions(moduleId))));
+  app.post('/modules/:moduleId/permissions', async (c) => withDefinitions(c, async (repo, moduleId, _tenantId, principal) => {
+    const parsed = PermissionCreateInputSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    return c.json(await repo.createPermission(moduleId, parsed.data, principal.userId), 201);
+  }));
+  app.get('/modules/:moduleId/permissions/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
+    const permission = await repo.getPermission(moduleId, c.req.param('id'));
+    return permission ? c.json(permission) : missingDefinition(c, 'Permission');
+  }));
+  app.patch('/modules/:moduleId/permissions/:id', async (c) => withDefinitions(c, async (repo, moduleId, _tenantId, principal) => {
+    const parsed = PermissionUpdateInputSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    return c.json(await repo.updatePermission(moduleId, c.req.param('id'), parsed.data, principal.userId));
+  }));
+  app.delete('/modules/:moduleId/permissions/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
+    await repo.deletePermission(moduleId, c.req.param('id'));
     return c.body(null, 204);
   }));
   app.get('/modules/:moduleId/fields', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.listFields(moduleId, c.req.query('entityId')))));
@@ -217,6 +237,7 @@ export function definitionRoutes(dependencies: AppDependencies) {
       automations: withModuleId(candidate.automations, moduleId),
       reports: withModuleId(candidate.reports, moduleId),
       dashboards: withModuleId(candidate.dashboards, moduleId),
+      permissions: withModuleId(candidate.permissions, moduleId),
     };
     const parsed = ModulePackageSchema.safeParse(normalized);
     if (!parsed.success) return invalid(c, parsed.error.message);

@@ -9,6 +9,7 @@ import { ActionDefinitionSchema } from './action';
 import { AutomationDefinitionSchema } from './automation';
 import { ReportDefinitionSchema } from './report';
 import { DashboardDefinitionSchema } from './dashboard';
+import { PermissionDefinitionSchema } from './permission';
 import { ModuleDefinitionSchema, SemanticVersionSchema } from './module';
 
 export const ModulePackageManifestSchema = z.object({
@@ -32,6 +33,7 @@ export const ModulePackageSchema = z.object({
   automations: z.array(AutomationDefinitionSchema).default([]),
   reports: z.array(ReportDefinitionSchema).default([]),
   dashboards: z.array(DashboardDefinitionSchema).default([]),
+  permissions: z.array(PermissionDefinitionSchema).default([]),
 }).strict().superRefine((pkg, ctx) => {
   if (pkg.manifest.moduleId !== pkg.module.id) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Manifest moduleId must match module.id', path: ['manifest', 'moduleId'] });

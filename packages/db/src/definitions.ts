@@ -19,6 +19,9 @@ import {
   FormCreateInputSchema,
   FormDefinitionSchema,
   FormUpdateInputSchema,
+  PermissionCreateInputSchema,
+  PermissionDefinitionSchema,
+  PermissionUpdateInputSchema,
   WorkflowDefinitionSchema,
   type ActionDefinition,
   type AutomationDefinition,
@@ -26,6 +29,7 @@ import {
   type ReportDefinition,
   type ViewDefinition,
   type FormDefinition,
+  type PermissionDefinition,
   type WorkflowDefinition,
   type EntityDefinition,
   type FieldDefinition,
@@ -37,7 +41,7 @@ import type { DbHandle } from './client';
 import type { TenantContext } from './tenancy';
 import { auditLog, metadataDefinitions, modules, records } from './schema';
 
-export type DefinitionKind = 'entity' | 'field' | 'relation' | 'view' | 'form' | 'workflow' | 'action' | 'automation' | 'report' | 'dashboard';
+export type DefinitionKind = 'entity' | 'field' | 'relation' | 'view' | 'form' | 'workflow' | 'action' | 'automation' | 'report' | 'dashboard' | 'permission';
 
 export interface ModuleSchema {
   entities: EntityDefinition[];
@@ -50,6 +54,7 @@ export interface ModuleSchema {
   automations: AutomationDefinition[];
   reports: ReportDefinition[];
   dashboards: DashboardDefinition[];
+  permissions: PermissionDefinition[];
 }
 
 export class DefinitionNotFoundError extends Error {
@@ -77,6 +82,7 @@ const schemas: Record<DefinitionKind, z.ZodTypeAny> = {
   automation: AutomationDefinitionSchema,
   report: ReportDefinitionSchema,
   dashboard: DashboardDefinitionSchema,
+  permission: PermissionDefinitionSchema,
 };
 
 function isUniqueViolation(error: unknown): boolean {
@@ -113,6 +119,7 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
       automations: await readAll<AutomationDefinition>(db, moduleId, 'automation'),
       reports: await readAll<ReportDefinition>(db, moduleId, 'report'),
       dashboards: await readAll<DashboardDefinition>(db, moduleId, 'dashboard'),
+      permissions: await readAll<PermissionDefinition>(db, moduleId, 'permission'),
     };
   }
 
@@ -134,7 +141,7 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
       }
       const current = await loadSchema(tx, moduleId);
       const { next, result, audit, entityId } = await change(tx, current);
-      const issues = validateModuleSchema(next.entities, next.fields, next.relations, next.workflows, next.actions, next.automations, next.reports, next.dashboards, next.views, next.forms);
+      const issues = validateModuleSchema(next.entities, next.fields, next.relations, next.workflows, next.actions, next.automations, next.reports, next.dashboards, next.views, next.forms, next.permissions);
       if (issues.length > 0) {
         throw new DefinitionConflictError(`Invalid module schema: ${issues.map((issue) => issue.message).join('; ')}`);
       }
@@ -451,6 +458,53 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
           result: undefined,
           audit: { kind: 'field', before },
           entityId: id,
+        };
+      });
+    },
+
+    listPermissions: (moduleId: string) => readAll<PermissionDefinition>(handle.db, moduleId, 'permission'),
+    getPermission: (moduleId: string, id: string) => getOne<PermissionDefinition>(moduleId, 'permission', id),
+
+    async createPermission(moduleId: string, input: z.input<typeof PermissionCreateInputSchema>, actorId?: string): Promise<PermissionDefinition> {
+      const parsed = PermissionCreateInputSchema.parse(input);
+      const permission = PermissionDefinitionSchema.parse({ ...parsed, moduleId });
+      return mutate(moduleId, 'permission.created', actorId, async (tx, current) => {
+        await insertDefinition(tx, moduleId, 'permission', permission);
+        return {
+          next: { ...current, permissions: [...current.permissions, permission] },
+          result: permission,
+          audit: { kind: 'permission', after: permission },
+          entityId: null,
+        };
+      });
+    },
+
+    async updatePermission(moduleId: string, id: string, patch: z.input<typeof PermissionUpdateInputSchema>, actorId?: string): Promise<PermissionDefinition> {
+      const parsed = PermissionUpdateInputSchema.parse(patch);
+      return mutate(moduleId, 'permission.updated', actorId, async (tx, current) => {
+        const before = current.permissions.find((permission) => permission.id === id);
+        if (!before) throw new DefinitionNotFoundError('Permission', id);
+        const after = PermissionDefinitionSchema.parse({ ...before, ...parsed, moduleId });
+        await writeDefinition(tx, moduleId, 'permission', after);
+        return {
+          next: { ...current, permissions: current.permissions.map((permission) => (permission.id === id ? after : permission)) },
+          result: after,
+          audit: { kind: 'permission', before, after },
+          entityId: null,
+        };
+      });
+    },
+
+    async deletePermission(moduleId: string, id: string, actorId?: string): Promise<void> {
+      await mutate(moduleId, 'permission.deleted', actorId, async (tx, current) => {
+        const before = current.permissions.find((permission) => permission.id === id);
+        if (!before) throw new DefinitionNotFoundError('Permission', id);
+        await removeDefinitions(tx, moduleId, 'permission', [id]);
+        return {
+          next: { ...current, permissions: current.permissions.filter((permission) => permission.id !== id) },
+          result: undefined,
+          audit: { kind: 'permission', before },
+          entityId: null,
         };
       });
     },

@@ -159,6 +159,46 @@ describe('view and form HTTP surface', () => {
     await expect(forms.json()).resolves.toMatchObject([{ id: 'vehicle-form', moduleId: 'copy' }]);
   });
 
+  it('carries the permissions through a package round trip', async () => {
+    const api = await createTestApp();
+    const cookie = await signup(api, 'admin@example.com');
+    const headers = { ...jsonHeaders, cookie };
+    const call = (moduleId: string, path: string, method: string, body?: unknown) => api.request(`/v1/modules/${moduleId}${path}`, {
+      method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    await moduleWithEntity(api, headers);
+
+    const created = await call('fleet', '/permissions', 'POST', { id: 'viewers-can-read', roleId: 'viewer', resource: { type: 'entity', id: 'vehicle' }, actions: ['read'] });
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toMatchObject({ id: 'viewers-can-read', moduleId: 'fleet', roleId: 'viewer' });
+
+    const listed = await call('fleet', '/permissions', 'GET');
+    await expect(listed.json()).resolves.toMatchObject([{ id: 'viewers-can-read' }]);
+    const read = await call('fleet', '/permissions/viewers-can-read', 'GET');
+    await expect(read.json()).resolves.toMatchObject({ id: 'viewers-can-read' });
+
+    // A permission that names a resource the module does not have grants nothing.
+    const unknown = await call('fleet', '/permissions', 'POST', { id: 'bad', roleId: 'viewer', resource: { type: 'entity', id: 'ghost' }, actions: ['read'] });
+    expect(unknown.status).toBe(409);
+
+    const updated = await call('fleet', '/permissions/viewers-can-read', 'PATCH', { actions: ['read', 'export'] });
+    expect(updated.status).toBe(200);
+    await expect(updated.json()).resolves.toMatchObject({ actions: ['read', 'export'] });
+
+    const exported = await call('fleet', '/package', 'GET');
+    const pkg = await exported.json() as ModulePackage;
+    expect(pkg.permissions.map((permission) => permission.id)).toEqual(['viewers-can-read']);
+
+    const rekeyed = { ...pkg, manifest: { ...pkg.manifest, moduleId: 'copy' }, module: { ...pkg.module, id: 'copy' } };
+    const imported = await call('copy', '/package/import', 'POST', rekeyed);
+    expect(imported.status).toBe(201);
+    const permissions = await call('copy', '/permissions', 'GET');
+    await expect(permissions.json()).resolves.toMatchObject([{ id: 'viewers-can-read', moduleId: 'copy' }]);
+
+    const removed = await call('fleet', '/permissions/viewers-can-read', 'DELETE');
+    expect(removed.status).toBe(204);
+  });
+
   it('denies a viewer the right to write a view', async () => {
     const db = createDb({ dataDir: 'memory://' });
     handles.push(db);

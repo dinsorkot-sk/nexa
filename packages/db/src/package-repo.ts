@@ -9,7 +9,7 @@ import type { ModuleDefinition } from '@nexa/meta';
 import { DefinitionConflictError } from './definitions';
 import { validateModuleSchema } from './definition-integrity';
 
-type DefinitionKind = 'entity' | 'field' | 'relation' | 'view' | 'form' | 'workflow' | 'action' | 'automation' | 'report' | 'dashboard';
+type DefinitionKind = 'entity' | 'field' | 'relation' | 'view' | 'form' | 'workflow' | 'action' | 'automation' | 'report' | 'dashboard' | 'permission';
 
 const definitionGroups: Array<{ kind: DefinitionKind; key: keyof Omit<ModulePackage, 'manifest' | 'module'> }> = [
   { kind: 'entity', key: 'entities' },
@@ -22,6 +22,7 @@ const definitionGroups: Array<{ kind: DefinitionKind; key: keyof Omit<ModulePack
   { kind: 'automation', key: 'automations' },
   { kind: 'report', key: 'reports' },
   { kind: 'dashboard', key: 'dashboards' },
+  { kind: 'permission', key: 'permissions' },
 ];
 
 /**
@@ -81,7 +82,7 @@ export function packageRepository(handle: DbHandle, context: TenantContext) {
         }
         // Validate integrity over the full set before writing anything.
         const byKind = (kind: DefinitionKind) => rows.filter((row) => row.kind === kind).map((row) => row.definition) as never[];
-        const issues = validateModuleSchema(byKind('entity'), byKind('field'), byKind('relation'), byKind('workflow'), byKind('action'), byKind('automation'), byKind('report'), byKind('dashboard'), byKind('view'), byKind('form'));
+        const issues = validateModuleSchema(byKind('entity'), byKind('field'), byKind('relation'), byKind('workflow'), byKind('action'), byKind('automation'), byKind('report'), byKind('dashboard'), byKind('view'), byKind('form'), byKind('permission'));
         if (issues.length > 0) {
           throw new DefinitionConflictError(`Invalid package schema: ${issues.map((issue) => issue.message).join('; ')}`);
         }
@@ -119,7 +120,7 @@ export function packageRepository(handle: DbHandle, context: TenantContext) {
           }
         }
         const byKind = (kind: DefinitionKind) => rows.filter((row) => row.kind === kind).map((row) => row.definition) as never[];
-        const issues = validateModuleSchema(byKind('entity'), byKind('field'), byKind('relation'), byKind('workflow'), byKind('action'), byKind('automation'), byKind('report'), byKind('dashboard'), byKind('view'), byKind('form'));
+        const issues = validateModuleSchema(byKind('entity'), byKind('field'), byKind('relation'), byKind('workflow'), byKind('action'), byKind('automation'), byKind('report'), byKind('dashboard'), byKind('view'), byKind('form'), byKind('permission'));
         if (issues.length > 0) {
           throw new DefinitionConflictError(`Invalid package schema: ${issues.map((issue) => issue.message).join('; ')}`);
         }

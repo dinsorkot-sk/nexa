@@ -15,8 +15,21 @@ export function isUpgrade(currentVersion: string, incomingVersion: string): bool
   return compareVersions(incomingVersion, currentVersion) > 0;
 }
 
+/**
+ * The content of a package. The definition arrays are optional: the ones left
+ * out are empty, so a caller that only has entities and fields does not have
+ * to name the other ten.
+ */
+export type PackageContent = Omit<ModulePackage, 'manifest' | DefinitionArray> & Partial<Pick<ModulePackage, DefinitionArray>>;
+
+type DefinitionArray = 'entities' | 'fields' | 'relations' | 'views' | 'forms' | 'workflows' | 'actions' | 'automations' | 'reports' | 'dashboards' | 'permissions';
+
+const emptyDefinitionArrays: Record<DefinitionArray, []> = {
+  entities: [], fields: [], relations: [], views: [], forms: [], workflows: [], actions: [], automations: [], reports: [], dashboards: [], permissions: [],
+};
+
 /** Builds the package payload from a module and its definitions; caller validates with ModulePackageSchema. */
-export function buildPackage(manifest: { moduleId: string; version: string; dependencies: ModuleDefinition['dependencies'] }, pkg: Omit<ModulePackage, 'manifest'>): ModulePackage {
+export function buildPackage(manifest: { moduleId: string; version: string; dependencies: ModuleDefinition['dependencies'] }, pkg: PackageContent): ModulePackage {
   return {
     manifest: {
       formatVersion: 1,
@@ -25,6 +38,7 @@ export function buildPackage(manifest: { moduleId: string; version: string; depe
       dependencies: manifest.dependencies.map((dependency) => ({ moduleId: dependency.moduleId, version: dependency.version })),
       exportedAt: new Date().toISOString(),
     },
+    ...emptyDefinitionArrays,
     ...pkg,
   };
 }
@@ -94,12 +108,6 @@ export function templateToPackage(template: unknown, context: TemplatePackageCon
   };
   return buildPackage(
     { moduleId: module.id, version: module.version, dependencies: module.dependencies },
-    {
-      module,
-      entities,
-      fields,
-      relations: parsed.relations,
-      views: [], forms: [], workflows: [], actions: [], automations: [], reports: [], dashboards: [],
-    },
+    { module, entities, fields, relations: parsed.relations },
   );
 }
