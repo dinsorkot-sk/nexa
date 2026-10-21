@@ -3,7 +3,7 @@ import type { EntityDefinition, FieldDefinition } from '@nexa/meta';
 import { RecordValidationError, validateRecordData } from './index';
 
 const entity: EntityDefinition = { id: 'vehicle', moduleId: 'fleet', name: 'vehicle', label: 'Vehicle', pluralLabel: 'Vehicles', description: '', settings: {} };
-const field = (id: string, type: FieldDefinition['type'], options: FieldDefinition['options'] = {}): FieldDefinition => ({ id, entityId: 'vehicle', name: id, label: id, type, position: 0, options: { required: false, unique: false, readonly: false, hidden: false, searchable: false, sortable: true, filterable: true, indexed: false, isStatus: false, ui: {}, ...options } });
+const field = (id: string, type: FieldDefinition['type'], options: Partial<FieldDefinition['options']> = {}): FieldDefinition => ({ id, entityId: 'vehicle', name: id, label: id, type, position: 0, options: { required: false, unique: false, readonly: false, hidden: false, searchable: false, sortable: true, filterable: true, indexed: false, isStatus: false, ui: {}, ...options } });
 
 describe('validateRecordData', () => {
   it('applies defaults and validates required fields and types', () => {

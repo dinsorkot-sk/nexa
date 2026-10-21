@@ -20,7 +20,7 @@ describe('selectAutomations', () => {
       automation({ id: 'match' }),
       automation({ id: 'off', enabled: false }),
       automation({ id: 'other', trigger: { type: 'event', event: 'record.updated' } }),
-      automation({ id: 'sched', trigger: { type: 'scheduled', cron: '* * * * *' } }),
+      automation({ id: 'sched', trigger: { type: 'scheduled', cron: '* * * * *', timezone: 'UTC' } }),
     ];
     expect(selectAutomations(automations, event).map((a) => a.id)).toEqual(['match']);
   });

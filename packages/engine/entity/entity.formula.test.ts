@@ -15,7 +15,7 @@ const entity: EntityDefinition = {
 const field = (
   id: string,
   type: FieldDefinition['type'],
-  options: FieldDefinition['options'] = {},
+  options: Partial<FieldDefinition['options']> = {},
 ): FieldDefinition => ({
   id,
   entityId: 'vehicle',
