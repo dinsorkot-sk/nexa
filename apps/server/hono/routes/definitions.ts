@@ -1,12 +1,22 @@
 import { Hono } from 'hono';
 import {
   ActionDefinitionSchema, EntityCreateInputSchema, EntityUpdateInputSchema, FieldCreateInputSchema, FieldUpdateInputSchema,
-  ModulePackageSchema, RelationCreateInputSchema, RelationUpdateInputSchema, WorkflowDefinitionSchema,
+  ModulePackageSchema, RelationCreateInputSchema, RelationUpdateInputSchema, ViewCreateInputSchema, ViewUpdateInputSchema,
+  FormCreateInputSchema, FormUpdateInputSchema, WorkflowDefinitionSchema,
 } from '@nexa/meta';
 import { DefinitionConflictError, ModuleConflictError, ModuleNotFoundError, createTenantContext, moduleRepository, packageRepository } from '@nexa/db';
 import { isUpgrade, templateToPackage } from '../../../../packages/engine/pkg/index';
 import { createHelpers, errorResponse, invalid, missingDefinition, type AppDependencies } from '../shared';
 import { isMetadataTemplateId, metadataTemplates, type MetadataTemplateId } from '../templates';
+
+/**
+ * Rewrites the module id of the definitions that carry one. A package names
+ * the module it was exported from, and the definitions belong to the module
+ * they are imported into.
+ */
+const withModuleId = (definitions: unknown, moduleId: string) => (Array.isArray(definitions)
+  ? definitions.map((definition) => (definition && typeof definition === 'object' ? { ...definition, moduleId } : definition))
+  : definitions);
 
 /**
  * The definition kinds a package carries, with the ids of each. A definition
@@ -62,6 +72,44 @@ export function definitionRoutes(dependencies: AppDependencies) {
   }));
   app.delete('/modules/:moduleId/entities/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
     await repo.deleteEntity(moduleId, c.req.param('id'));
+    return c.body(null, 204);
+  }));
+  app.get('/modules/:moduleId/views', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.listViews(moduleId, c.req.query('entityId')))));
+  app.post('/modules/:moduleId/views', async (c) => withDefinitions(c, async (repo, moduleId, _tenantId, principal) => {
+    const parsed = ViewCreateInputSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    return c.json(await repo.createView(moduleId, parsed.data, principal.userId), 201);
+  }));
+  app.get('/modules/:moduleId/views/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
+    const view = await repo.getView(moduleId, c.req.param('id'));
+    return view ? c.json(view) : missingDefinition(c, 'View');
+  }));
+  app.patch('/modules/:moduleId/views/:id', async (c) => withDefinitions(c, async (repo, moduleId, _tenantId, principal) => {
+    const parsed = ViewUpdateInputSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    return c.json(await repo.updateView(moduleId, c.req.param('id'), parsed.data, principal.userId));
+  }));
+  app.delete('/modules/:moduleId/views/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
+    await repo.deleteView(moduleId, c.req.param('id'));
+    return c.body(null, 204);
+  }));
+  app.get('/modules/:moduleId/forms', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.listForms(moduleId, c.req.query('entityId')))));
+  app.post('/modules/:moduleId/forms', async (c) => withDefinitions(c, async (repo, moduleId, _tenantId, principal) => {
+    const parsed = FormCreateInputSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    return c.json(await repo.createForm(moduleId, parsed.data, principal.userId), 201);
+  }));
+  app.get('/modules/:moduleId/forms/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
+    const form = await repo.getForm(moduleId, c.req.param('id'));
+    return form ? c.json(form) : missingDefinition(c, 'Form');
+  }));
+  app.patch('/modules/:moduleId/forms/:id', async (c) => withDefinitions(c, async (repo, moduleId, _tenantId, principal) => {
+    const parsed = FormUpdateInputSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    return c.json(await repo.updateForm(moduleId, c.req.param('id'), parsed.data, principal.userId));
+  }));
+  app.delete('/modules/:moduleId/forms/:id', async (c) => withDefinitions(c, async (repo, moduleId) => {
+    await repo.deleteForm(moduleId, c.req.param('id'));
     return c.body(null, 204);
   }));
   app.get('/modules/:moduleId/fields', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.listFields(moduleId, c.req.query('entityId')))));
@@ -161,6 +209,14 @@ export function definitionRoutes(dependencies: AppDependencies) {
         createdAt: now,
         updatedAt: now,
       },
+      entities: withModuleId(candidate.entities, moduleId),
+      views: withModuleId(candidate.views, moduleId),
+      forms: withModuleId(candidate.forms, moduleId),
+      workflows: withModuleId(candidate.workflows, moduleId),
+      actions: withModuleId(candidate.actions, moduleId),
+      automations: withModuleId(candidate.automations, moduleId),
+      reports: withModuleId(candidate.reports, moduleId),
+      dashboards: withModuleId(candidate.dashboards, moduleId),
     };
     const parsed = ModulePackageSchema.safeParse(normalized);
     if (!parsed.success) return invalid(c, parsed.error.message);
