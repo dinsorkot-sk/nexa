@@ -193,7 +193,7 @@ export function definitionRoutes(dependencies: AppDependencies) {
     if (!body || typeof body !== 'object') return invalid(c, 'Package payload required');
     const moduleId = c.req.param('moduleId');
     const now = new Date().toISOString();
-    const candidate = body as { manifest?: Record<string, unknown>; module?: Record<string, unknown> };
+    const candidate = body as { manifest?: Record<string, unknown>; module?: Record<string, unknown> } & Record<string, unknown>;
     // The server owns the identity of what lands: the tenant, the owner, the
     // timestamps, the status and the module id. A package carries the identity
     // of the tenant it was exported from, and that copy is not authoritative.
