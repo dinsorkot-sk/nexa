@@ -1,11 +1,30 @@
 import { Hono } from 'hono';
 import {
   ActionDefinitionSchema, EntityCreateInputSchema, EntityUpdateInputSchema, FieldCreateInputSchema, FieldUpdateInputSchema,
-  RelationCreateInputSchema, RelationUpdateInputSchema, WorkflowDefinitionSchema,
+  ModulePackageSchema, RelationCreateInputSchema, RelationUpdateInputSchema, WorkflowDefinitionSchema,
 } from '@nexa/meta';
 import { DefinitionConflictError, ModuleConflictError, ModuleNotFoundError, createTenantContext, moduleRepository, packageRepository } from '@nexa/db';
 import { isUpgrade } from '../../../../packages/engine/pkg/index';
 import { createHelpers, errorResponse, invalid, missingDefinition, type AppDependencies } from '../shared';
+
+/**
+ * The definition kinds a package carries, with the ids of each. A definition
+ * id is unique per kind inside a module, so the ids of one kind have to be
+ * unique among themselves: the metadata definitions table is keyed by tenant,
+ * module, kind and id, and a repeat would surface as a database error.
+ */
+const packageDefinitionKinds = (pkg: { entities: Array<{ id: string }>; fields: Array<{ id: string }>; relations: Array<{ id: string }>; views: Array<{ id: string }>; forms: Array<{ id: string }>; workflows: Array<{ id: string }>; actions: Array<{ id: string }>; automations: Array<{ id: string }>; reports: Array<{ id: string }>; dashboards: Array<{ id: string }> }) => [
+  ['entity', pkg.entities.map((definition) => definition.id)],
+  ['field', pkg.fields.map((definition) => definition.id)],
+  ['relation', pkg.relations.map((definition) => definition.id)],
+  ['view', pkg.views.map((definition) => definition.id)],
+  ['form', pkg.forms.map((definition) => definition.id)],
+  ['workflow', pkg.workflows.map((definition) => definition.id)],
+  ['action', pkg.actions.map((definition) => definition.id)],
+  ['automation', pkg.automations.map((definition) => definition.id)],
+  ['report', pkg.reports.map((definition) => definition.id)],
+  ['dashboard', pkg.dashboards.map((definition) => definition.id)],
+] as const;
 
 /** Module-scoped metadata: schema, entities, fields, relations, workflows, actions, package. */
 export function definitionRoutes(dependencies: AppDependencies) {
@@ -91,6 +110,45 @@ export function definitionRoutes(dependencies: AppDependencies) {
         ? c.json(errorResponse('MODULE_NOT_FOUND', error.message, 404), 404)
         : c.json(errorResponse('EXPORT_FAILED', error instanceof Error ? error.message : 'Export failed', 500), 500);
     }
+  }));
+  app.post('/modules/:moduleId/package/import', async (c) => withTenant(c, 'module:write', async (db, tenantId, principal) => {
+    const body = await c.req.json().catch(() => undefined);
+    if (!body || typeof body !== 'object') return invalid(c, 'Package payload required');
+    const moduleId = c.req.param('moduleId');
+    const now = new Date().toISOString();
+    const candidate = body as { manifest?: Record<string, unknown>; module?: Record<string, unknown> };
+    // The server owns the identity of what lands: the tenant, the owner, the
+    // timestamps, the status and the module id. A package carries the identity
+    // of the tenant it was exported from, and that copy is not authoritative.
+    const normalized = {
+      ...candidate,
+      manifest: candidate.manifest ?? {},
+      module: {
+        ...(candidate.module ?? {}),
+        id: moduleId,
+        tenantId,
+        owner: { id: principal.userId, type: 'user' },
+        status: 'draft',
+        createdAt: now,
+        updatedAt: now,
+      },
+    };
+    const parsed = ModulePackageSchema.safeParse(normalized);
+    if (!parsed.success) return invalid(c, parsed.error.message);
+    const pkg = parsed.data;
+    if (pkg.manifest.moduleId !== moduleId) return invalid(c, 'Package moduleId does not match the URL');
+    for (const [kind, ids] of packageDefinitionKinds(pkg)) {
+      if (new Set(ids).size !== ids.length) return invalid(c, `Package contains duplicate ${kind} ids`);
+    }
+    const repo = packageRepository(db, createTenantContext(tenantId));
+    try {
+      await repo.importPackage(pkg, principal.userId);
+    } catch (error) {
+      if (error instanceof DefinitionConflictError) return c.json(errorResponse('PACKAGE_CONFLICT', error.message, 409), 409);
+      if (error instanceof ModuleConflictError) return c.json(errorResponse('MODULE_CONFLICT', error.message, 409), 409);
+      throw error;
+    }
+    return c.json({ imported: true, module: { ...pkg.module, id: moduleId, tenantId, owner: { id: principal.userId, type: 'user' }, status: 'draft', createdAt: now, updatedAt: now } }, 201);
   }));
   app.post('/modules/:moduleId/package/upgrade', async (c) => withTenant(c, 'module:write', async (db, tenantId, principal) => {
     const body = await c.req.json().catch(() => undefined);
