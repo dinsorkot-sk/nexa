@@ -98,14 +98,22 @@ describe('production protections (Phase 17, Step F)', () => {
   });
 
   it('uses the __Host- cookie prefix in production', async () => {
+    // The server reads NODE_ENV for the cookie prefix and for the signup gate, so it has to go back to what it was
+    // afterwards: a test that leaves it at production changes the mode every test after it runs in.
+    const previousNodeEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';
-    const api = await createTestApp();
-    const response = await api.request('/v1/auth/login', {
-      method: 'POST', headers: json, body: JSON.stringify({ email: 'nobody@x.test', password: 'long-password' }),
-    });
-    expect(response.status).toBe(401);
-    const { sessionCookieName } = await import('../hono/middleware/session');
-    expect(sessionCookieName()).toBe('__Host-nexa_session');
+    try {
+      const api = await createTestApp();
+      const response = await api.request('/v1/auth/login', {
+        method: 'POST', headers: json, body: JSON.stringify({ email: 'nobody@x.test', password: 'long-password' }),
+      });
+      expect(response.status).toBe(401);
+      const { sessionCookieName } = await import('../hono/middleware/session');
+      expect(sessionCookieName()).toBe('__Host-nexa_session');
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+    }
   });
 
   it('reports ready when the database answers and unavailable when it does not', async () => {
