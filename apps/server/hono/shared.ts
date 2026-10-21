@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { automationJobKind, type AutomationJobPayload } from './jobs';
 import { dispatchAutomations as dispatchAutomationEvent } from '../../../packages/engine/automation/dispatch';
 import type { AutomationEvent } from '../../../packages/engine/automation/index';
-import { hasPlatformPermission, type PlatformPermission } from '../../../packages/engine/permission/index';
+import { hasModulePermission, hasPlatformPermission, type PlatformPermission } from '../../../packages/engine/permission/index';
 import { deliverWebhook } from '../../../integrations/webhook/src/index';
 import { sendNotification } from '../../../integrations/email/src/index';
 import { NotificationActionConfigSchema, WebhookActionConfigSchema } from '@nexa/meta';
@@ -113,5 +113,30 @@ export function createHelpers(dependencies: AppDependencies) {
     });
   };
 
-  return { withTenant, withModules, withDefinitions, dispatchAutomations, enqueueAutomations };
+  /**
+   * The record routes, narrowed by the module's own permission definitions. The platform's matrix is the ceiling:
+   * a module can only remove an action the platform already allows, never add one.
+   */
+  const withRecordAccess = (c: Context, action: string, callback: (repo: ReturnType<typeof definitionRepository>, moduleId: string, tenantId: string, principal: Principal) => Promise<Response>) => withDefinitions(c, async (repo, moduleId, tenantId, principal) => {
+    const permissions = await repo.listPermissions(moduleId);
+    const resource = { type: 'entity' as const, id: c.req.param('entityId') };
+    if (!hasModulePermission(principal.roleIds, permissions, { resource, action })) {
+      return c.json(errorResponse('FORBIDDEN', 'Permission denied', 403), 403);
+    }
+    return callback(repo, moduleId, tenantId, principal);
+  });
+
+  /**
+   * The package routes, narrowed by the module's own permission definitions. The resource is the module itself,
+   * so a definition that covers the whole module decides and one that names an entity does not.
+   */
+  const withPackageAccess = (c: Context, action: string, permission: PlatformPermission, callback: (db: DbHandle, tenantId: string, principal: Principal) => Promise<Response>) => withTenant(c, permission, async (db, tenantId, principal) => {
+    const permissions = await definitionRepository(db, createTenantContext(tenantId)).listPermissions(c.req.param('moduleId') ?? '');
+    if (!hasModulePermission(principal.roleIds, permissions, { resource: { type: 'module' }, action })) {
+      return c.json(errorResponse('FORBIDDEN', 'Permission denied', 403), 403);
+    }
+    return callback(db, tenantId, principal);
+  });
+
+  return { withTenant, withModules, withDefinitions, withRecordAccess, withPackageAccess, dispatchAutomations, enqueueAutomations };
 }

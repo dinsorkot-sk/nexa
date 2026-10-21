@@ -8,9 +8,9 @@ import { createHelpers, errorResponse, invalid, missingDefinition, missingRecord
 /** Record CRUD, relation links, and record activity. Business rules live in engine/db; this file parses, calls, and maps. */
 export function recordRoutes(dependencies: AppDependencies) {
   const app = new Hono();
-  const { withDefinitions, enqueueAutomations } = createHelpers(dependencies);
+  const { withRecordAccess, enqueueAutomations } = createHelpers(dependencies);
 
-  app.get('/modules/:moduleId/entities/:entityId/records', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+  app.get('/modules/:moduleId/entities/:entityId/records', async (c) => withRecordAccess(c, 'read', async (defs, moduleId, tenantId) => {
     const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
     if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
     const entityId = c.req.param('entityId');
@@ -22,7 +22,7 @@ export function recordRoutes(dependencies: AppDependencies) {
     const result = await tenantRepository(dependencies.db!, createTenantContext(tenantId)).listScopedRecords(moduleId, entityId, { ...query, fields });
     return c.json({ items: result.items.map((item) => redactHidden(item, fields)), total: result.total, limit: query.limit, offset: query.offset });
   }));
-  app.post('/modules/:moduleId/entities/:entityId/records', async (c) => withDefinitions(c, async (defs, moduleId, tenantId, principal) => {
+  app.post('/modules/:moduleId/entities/:entityId/records', async (c) => withRecordAccess(c, 'create', async (defs, moduleId, tenantId, principal) => {
     const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
     if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
     const entityId = c.req.param('entityId');
@@ -43,7 +43,7 @@ export function recordRoutes(dependencies: AppDependencies) {
     });
     return c.json(redactHidden(record, fields), 201);
   }));
-  app.get('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+  app.get('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withRecordAccess(c, 'read', async (defs, moduleId, tenantId) => {
     const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
     if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
     const entityId = c.req.param('entityId');
@@ -52,7 +52,7 @@ export function recordRoutes(dependencies: AppDependencies) {
     const record = await tenantRepository(dependencies.db!, createTenantContext(tenantId)).getScopedRecord(moduleId, entityId, c.req.param('recordId'));
     return record ? c.json(redactHidden(record, fields)) : missingRecord(c);
   }));
-  app.patch('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId, principal) => {
+  app.patch('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withRecordAccess(c, 'update', async (defs, moduleId, tenantId, principal) => {
     const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
     if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
     const entityId = c.req.param('entityId');
@@ -74,7 +74,7 @@ export function recordRoutes(dependencies: AppDependencies) {
     });
     return updated ? c.json(redactHidden(updated, fields)) : missingRecord(c);
   }));
-  app.delete('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+  app.delete('/modules/:moduleId/entities/:entityId/records/:recordId', async (c) => withRecordAccess(c, 'delete', async (defs, moduleId, tenantId) => {
     const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
     if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
     if (!(await defs.getEntity(moduleId, c.req.param('entityId')))) return missingDefinition(c, 'Entity');
@@ -83,7 +83,7 @@ export function recordRoutes(dependencies: AppDependencies) {
     return deleted ? c.body(null, 204) : missingRecord(c);
   }));
 
-  app.get('/modules/:moduleId/entities/:entityId/records/:recordId/relations/:relationId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+  app.get('/modules/:moduleId/entities/:entityId/records/:recordId/relations/:relationId', async (c) => withRecordAccess(c, 'read', async (defs, moduleId, tenantId) => {
     const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
     if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
     const relation = await defs.getRelation(moduleId, c.req.param('relationId'));
@@ -93,7 +93,7 @@ export function recordRoutes(dependencies: AppDependencies) {
     const links = await tenantRepository(dependencies.db!, createTenantContext(tenantId)).listRelationTargets(moduleId, entityId, relation, c.req.param('recordId'));
     return links === undefined ? missingRecord(c) : c.json(links);
   }));
-  app.post('/modules/:moduleId/entities/:entityId/records/:recordId/relations/:relationId/:targetRecordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+  app.post('/modules/:moduleId/entities/:entityId/records/:recordId/relations/:relationId/:targetRecordId', async (c) => withRecordAccess(c, 'update', async (defs, moduleId, tenantId) => {
     const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
     if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
     const relation = await defs.getRelation(moduleId, c.req.param('relationId'));
@@ -102,7 +102,7 @@ export function recordRoutes(dependencies: AppDependencies) {
     const link = await tenantRepository(dependencies.db!, createTenantContext(tenantId)).createRelationLink(moduleId, relation, c.req.param('recordId'), c.req.param('targetRecordId'));
     return c.json(link, 201);
   }));
-  app.delete('/modules/:moduleId/entities/:entityId/records/:recordId/relations/:relationId/:targetRecordId', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+  app.delete('/modules/:moduleId/entities/:entityId/records/:recordId/relations/:relationId/:targetRecordId', async (c) => withRecordAccess(c, 'update', async (defs, moduleId, tenantId) => {
     const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
     if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
     const relation = await defs.getRelation(moduleId, c.req.param('relationId'));
@@ -112,7 +112,7 @@ export function recordRoutes(dependencies: AppDependencies) {
     return link ? c.body(null, 204) : missingRecord(c);
   }));
 
-  app.get('/modules/:moduleId/entities/:entityId/records/:recordId/activity', async (c) => withDefinitions(c, async (defs, moduleId, tenantId) => {
+  app.get('/modules/:moduleId/entities/:entityId/records/:recordId/activity', async (c) => withRecordAccess(c, 'read', async (defs, moduleId, tenantId) => {
     const modules = moduleRepository(dependencies.db!, createTenantContext(tenantId));
     if (!(await requireEnabled(modules, moduleId))) return c.json(errorResponse('MODULE_NOT_ENABLED', 'Records require an enabled module', 409), 409);
     const entityId = c.req.param('entityId');

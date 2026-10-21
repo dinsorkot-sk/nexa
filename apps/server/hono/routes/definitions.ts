@@ -41,7 +41,7 @@ const packageDefinitionKinds = (pkg: { entities: Array<{ id: string }>; fields: 
 /** Module-scoped metadata: schema, entities, fields, relations, workflows, actions, package. */
 export function definitionRoutes(dependencies: AppDependencies) {
   const app = new Hono();
-  const { withTenant, withDefinitions } = createHelpers(dependencies);
+  const { withDefinitions, withPackageAccess } = createHelpers(dependencies);
 
   app.get('/modules/:moduleId/schema', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.getModuleSchema(moduleId))));
   app.get('/modules/:moduleId/entities', async (c) => withDefinitions(c, async (repo, moduleId) => c.json(await repo.listEntities(moduleId))));
@@ -171,16 +171,16 @@ export function definitionRoutes(dependencies: AppDependencies) {
     return c.body(null, 204);
   }));
 
-  app.get('/modules/:moduleId/package', async (c) => withDefinitions(c, async (_repo, moduleId, tenantId) => {
+  app.get('/modules/:moduleId/package', async (c) => withPackageAccess(c, 'export', 'definition:read', async (db, tenantId) => {
     try {
-      return c.json(await packageRepository(dependencies.db!, createTenantContext(tenantId)).exportPackage(moduleId));
+      return c.json(await packageRepository(db, createTenantContext(tenantId)).exportPackage(c.req.param('moduleId')));
     } catch (error) {
       return error instanceof ModuleNotFoundError || (error instanceof Error && error.message.startsWith('Module not found'))
         ? c.json(errorResponse('MODULE_NOT_FOUND', error.message, 404), 404)
         : c.json(errorResponse('EXPORT_FAILED', error instanceof Error ? error.message : 'Export failed', 500), 500);
     }
   }));
-  app.post('/modules/:moduleId/from-template', async (c) => withTenant(c, 'module:write', async (db, tenantId, principal) => {
+  app.post('/modules/:moduleId/from-template', async (c) => withPackageAccess(c, 'import', 'module:write', async (db, tenantId, principal) => {
     const body = await c.req.json().catch(() => undefined);
     if (!body || typeof body !== 'object') return invalid(c, 'Template payload required');
     const requested = body as { templateId?: unknown; name?: unknown };
@@ -208,7 +208,7 @@ export function definitionRoutes(dependencies: AppDependencies) {
     }
     return c.json({ imported: true, template: templateId, module: pkg.module }, 201);
   }));
-  app.post('/modules/:moduleId/package/import', async (c) => withTenant(c, 'module:write', async (db, tenantId, principal) => {
+  app.post('/modules/:moduleId/package/import', async (c) => withPackageAccess(c, 'import', 'module:write', async (db, tenantId, principal) => {
     const body = await c.req.json().catch(() => undefined);
     if (!body || typeof body !== 'object') return invalid(c, 'Package payload required');
     const moduleId = c.req.param('moduleId');
@@ -256,7 +256,7 @@ export function definitionRoutes(dependencies: AppDependencies) {
     }
     return c.json({ imported: true, module: { ...pkg.module, id: moduleId, tenantId, owner: { id: principal.userId, type: 'user' }, status: 'draft', createdAt: now, updatedAt: now } }, 201);
   }));
-  app.post('/modules/:moduleId/package/upgrade', async (c) => withTenant(c, 'module:write', async (db, tenantId, principal) => {
+  app.post('/modules/:moduleId/package/upgrade', async (c) => withPackageAccess(c, 'update', 'module:write', async (db, tenantId, principal) => {
     const body = await c.req.json().catch(() => undefined);
     if (!body || typeof body !== 'object') return invalid(c, 'Package payload required');
     const pkgPkgs = await import('@nexa/meta');
