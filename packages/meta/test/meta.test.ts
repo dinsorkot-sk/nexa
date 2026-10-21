@@ -18,6 +18,7 @@ import {
   ModuleUpdateInputSchema,
   ModuleTransitionInputSchema,
   ModulePackageSchema,
+  MetadataTemplateSchema,
   transitionModuleStatus,
   WorkflowDefinitionSchema,
   LoginInputSchema,
@@ -206,6 +207,31 @@ describe('@nexa/meta schemas', () => {
     };
     expect(ModulePackageSchema.safeParse(pkg).success).toBe(true);
     expect(ModulePackageSchema.safeParse({ ...pkg, manifest: { ...pkg.manifest, version: '2.0.0' } }).success).toBe(false);
+  });
+
+  it('validates metadata templates with the same field rules a field creation input follows', () => {
+    const template = {
+      moduleId: 'crm',
+      name: 'CRM',
+      version: '1.0.0',
+      description: 'Accounts and contacts',
+      entities: [
+        {
+          id: 'account', name: 'account', label: 'Account', pluralLabel: 'Accounts', description: 'Companies', settings: {},
+          fields: [{ id: 'name', name: 'name', label: 'Name', type: 'text', options: { required: true }, position: 0 }],
+        },
+      ],
+      relations: [],
+    };
+    expect(MetadataTemplateSchema.safeParse(template).success).toBe(true);
+    const withField = (field: Record<string, unknown>) => ({
+      ...template,
+      entities: [{ ...template.entities[0], fields: [field] }],
+    });
+    expect(MetadataTemplateSchema.safeParse(withField({ id: 'name', name: 'name', label: 'Name' })).success).toBe(false);
+    expect(MetadataTemplateSchema.safeParse(withField({ id: 'stage', name: 'stage', label: 'Stage', type: 'select', position: 1 })).success).toBe(false);
+    expect(MetadataTemplateSchema.safeParse({ ...template, version: 'v1' }).success).toBe(false);
+    expect(MetadataTemplateSchema.safeParse({ ...template, unexpected: true }).success).toBe(false);
   });
 
   it('validates authentication inputs and prevents password hash exposure', () => {

@@ -44,7 +44,7 @@ type FieldStructure = {
  * (e.g. autoNumber fields written before generation was deferred) unreadable:
  * the read path must still parse them so validation can report them cleanly.
  */
-function checkFieldStructure(field: FieldStructure, ctx: z.RefinementCtx, creation = false) {
+export function checkFieldStructure(field: FieldStructure, ctx: z.RefinementCtx, creation = false) {
   const { type, options } = field;
 
   // select/multiSelect require non-empty unique choices
