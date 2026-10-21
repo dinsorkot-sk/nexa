@@ -58,6 +58,17 @@ describe('@nexa/db migrations, tenancy, seed, and checks', () => {
     expect(missingTableResult.checks.at(-1)).toMatchObject({ name: 'schema', ok: false });
   }, 15000);
 
+  it('checks the tables the later migrations added', async () => {
+    const handle = createTestDb();
+    await runMigrations(handle);
+
+    // The outbox and the automation runs arrived after the check was written; a missing one of them has to fail it.
+    await handle.db.execute(sql.raw('DROP TABLE nexa_outbox CASCADE'));
+    const missingOutbox = await checkDatabase(handle);
+    expect(missingOutbox.ok).toBe(false);
+    expect(missingOutbox.checks.at(-1)).toMatchObject({ name: 'schema', ok: false });
+  }, 15000);
+
   it('persists module-scoped records, validates relation cardinality and applies onDelete atomically', async () => {
     const handle = createTestDb();
     await runMigrations(handle);
