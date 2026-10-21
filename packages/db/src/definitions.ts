@@ -36,7 +36,7 @@ import {
   type RelationDefinition,
   type z,
 } from '@nexa/meta';
-import { validateModuleSchema } from './definition-integrity';
+import { validateModuleSchema, validatePermissionReferences } from './definition-integrity';
 import type { DbHandle } from './client';
 import type { TenantContext } from './tenancy';
 import { auditLog, metadataDefinitions, modules, records } from './schema';
@@ -142,6 +142,36 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
       const current = await loadSchema(tx, moduleId);
       const { next, result, audit, entityId } = await change(tx, current);
       const issues = validateModuleSchema(next.entities, next.fields, next.relations, next.workflows, next.actions, next.automations, next.reports, next.dashboards, next.views, next.forms, next.permissions);
+      if (issues.length > 0) {
+        throw new DefinitionConflictError(`Invalid module schema: ${issues.map((issue) => issue.message).join('; ')}`);
+      }
+      await tx.insert(auditLog).values({ tenantId, actorId, action, entityId, changes: { moduleId, ...audit } });
+      return result;
+    });
+  }
+
+  /**
+   * Runs `change` in a transaction with the module row locked, for the access policy rather than the schema.
+   *
+   * A module's schema is frozen once it is live because the records depend on it, but its permission
+   * definitions are policy: no record depends on them, and a tenant has to be able to narrow access to a
+   * running module. They are therefore editable in every status, and are still checked against the module.
+   */
+  async function mutatePolicy<R>(
+    moduleId: string,
+    action: string,
+    actorId: string | undefined,
+    change: (tx: Tx, current: ModuleSchema) => Promise<{ next: ModuleSchema; result: R; audit: Record<string, unknown>; entityId: string | null }>,
+  ): Promise<R> {
+    return handle.db.transaction(async (tx) => {
+      const locked = await tx.execute(sql`
+        SELECT definition->>'status' AS status FROM ${modules}
+        WHERE ${modules.tenantId} = ${tenantId} AND ${modules.id} = ${moduleId} FOR UPDATE`);
+      const row = (locked.rows as Array<{ status: string }>)[0];
+      if (!row) throw new DefinitionNotFoundError('Module', moduleId);
+      const current = await loadSchema(tx, moduleId);
+      const { next, result, audit, entityId } = await change(tx, current);
+      const issues = validatePermissionReferences(next.entities, next.fields, next.actions, next.permissions);
       if (issues.length > 0) {
         throw new DefinitionConflictError(`Invalid module schema: ${issues.map((issue) => issue.message).join('; ')}`);
       }
@@ -468,7 +498,7 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
     async createPermission(moduleId: string, input: z.input<typeof PermissionCreateInputSchema>, actorId?: string): Promise<PermissionDefinition> {
       const parsed = PermissionCreateInputSchema.parse(input);
       const permission = PermissionDefinitionSchema.parse({ ...parsed, moduleId });
-      return mutate(moduleId, 'permission.created', actorId, async (tx, current) => {
+      return mutatePolicy(moduleId, 'permission.created', actorId, async (tx, current) => {
         await insertDefinition(tx, moduleId, 'permission', permission);
         return {
           next: { ...current, permissions: [...current.permissions, permission] },
@@ -481,7 +511,7 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
 
     async updatePermission(moduleId: string, id: string, patch: z.input<typeof PermissionUpdateInputSchema>, actorId?: string): Promise<PermissionDefinition> {
       const parsed = PermissionUpdateInputSchema.parse(patch);
-      return mutate(moduleId, 'permission.updated', actorId, async (tx, current) => {
+      return mutatePolicy(moduleId, 'permission.updated', actorId, async (tx, current) => {
         const before = current.permissions.find((permission) => permission.id === id);
         if (!before) throw new DefinitionNotFoundError('Permission', id);
         const after = PermissionDefinitionSchema.parse({ ...before, ...parsed, moduleId });
@@ -496,7 +526,7 @@ export function definitionRepository(handle: DbHandle, context: TenantContext) {
     },
 
     async deletePermission(moduleId: string, id: string, actorId?: string): Promise<void> {
-      await mutate(moduleId, 'permission.deleted', actorId, async (tx, current) => {
+      await mutatePolicy(moduleId, 'permission.deleted', actorId, async (tx, current) => {
         const before = current.permissions.find((permission) => permission.id === id);
         if (!before) throw new DefinitionNotFoundError('Permission', id);
         await removeDefinitions(tx, moduleId, 'permission', [id]);
