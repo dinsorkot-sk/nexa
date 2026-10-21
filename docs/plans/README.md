@@ -37,6 +37,8 @@ Rule: one phase per version branch (`v0.0.1`, `v0.0.2`, ...), in order. Phase 0 
 
 | 25 | v0.0.26 | The three gaps the backend still had: views and forms as definition kinds, scheduled automations that actually fire, and permission definitions as a kind | complete | **Verified 2026-10-21:** lint 0 errors and 0 warnings; `pnpm typecheck` 0 errors across 15 tasks; the full test suite passes (55 files, 783 tests) from a shell that still exports `NODE_ENV=production`; `pnpm build` passes; `pnpm db:check` passes with 12 migrations and 16 tables. No migration: the metadata definitions table already carries the kind discriminator. The views and forms read and write on the definition permissions, the same ones the workflows and actions use, so the role matrix did not change. The scheduled automations are enqueued through the durable outbox, so a crash between the schedule matching and the delivery leaves the job pending. The permission definitions are stored and travel with the module, but the platform's role matrix is still what the engine enforces. |
 
+| 26 | v0.0.27 | Enforce the module's own permission definitions: the platform's matrix becomes the ceiling and a module narrows it | complete | **Verified 2026-10-21:** lint 0 errors and 0 warnings; `pnpm typecheck` 0 errors across 15 tasks; the full test suite passes from a shell that still exports `NODE_ENV=production`; `pnpm build` passes; `pnpm db:check` unchanged at 12 migrations and 16 tables. No migration. A module can narrow what a role may do and never widen it, so the platform's matrix stays the ceiling and both gates have to pass. The permission definitions are policy rather than schema, so they stay editable while a module is live. The `condition` on a definition is stored and not evaluated; the definition routes are not narrowed; the `field` and `action` resources are stored and matched exactly but no route names one yet. |
+
 Full functional requirements and acceptance criteria are in the user-provided LOGHOLIZON SRS v1.0, adapted to the decisions documented here. Do not add phases beyond this table (Phases 22 and 23 were added at the user's explicit request).
 
 ## Phase 22 — Own component library in `packages/ui` (complete)
@@ -257,3 +259,29 @@ What it does not do yet is enforce anything. The platform's role matrix in `pack
 **Gate for this phase.** From a shell that still exports `NODE_ENV=production`: lint 0 errors and 0 warnings; `pnpm typecheck` 0 errors across 15 tasks; the full test suite passes, 55 files and 783 tests; `pnpm build` passes; `pnpm db:check` passes with 12 migrations and 16 tables. The views and forms are exercised over HTTP: create, list, filter by entity, read, update and delete; the references are refused when they name something the module does not have; an entity has one default view; a viewer cannot write a view; and a package round trip carries the views, the forms and the permissions. The scheduler is exercised with a fixed instant: the minute a schedule names is enqueued once, the same minute cannot be enqueued twice, a minute the schedule does not name is not enqueued, and a schedule keeps its own time zone.
 
 **Not in this phase.** Nothing renders a view or a form yet: the Phase 20 renderers were deleted, `apps/web` is not reassembled, and `packages/ui` is a component library with no API calls. The module's own permission definitions are not enforced. The scheduler walks every tenant and every module on every minute, which is fine for a platform of this size and would need a due-time index rather than a scan. `apps/web` is still not reassembled.
+
+## Phase 26 — Enforce the module's own permission definitions (complete)
+
+Requested on 2026-10-21, the piece the previous phase left open. The permission definitions were a kind: stored, readable, writable, exported and imported. Nothing consulted them, and the platform's role matrix was the only thing that decided access.
+
+### The platform's matrix is the ceiling
+
+A module can narrow what a role may do, never widen it. That direction is the whole design. A module is the tenant's own, and its definitions are authored by whoever holds `definition:write`; if a module could widen the platform's grant, a module owner could hand a viewer write access to the records. So the check is two gates and both have to pass: the platform's matrix, exactly as it was, and then the module's own definitions for the principal's roles.
+
+`hasModulePermission` sits next to `hasPlatformPermission` in `packages/engine/permission`. A definition covers a request when its resource is the module itself, or when it is the same kind of resource and either names no id or names the same one. The action has to be in the actions of at least one covering definition. When no definition of the principal's roles covers the resource, the module says nothing about it and the platform's answer stands, which is what keeps a module without permission definitions behaving exactly as it did before.
+
+### Where it is consulted
+
+The record routes narrow by the entity the records belong to and the method that touches them: a read, a create, an update, a delete. The relation link routes change a record, so they count as an update. The package routes narrow by the module itself, so a definition that covers the whole module decides and one that names an entity does not.
+
+The definition routes are left on the platform's `definition:read` and `definition:write`. Who may design a module is the platform's business; who may see its data is the module's. That also removes the foot-gun of a module narrowing the very routes an owner would need to undo the narrowing.
+
+### Policy is not schema
+
+A module's schema is frozen once it is live, because the records depend on it. Its permission definitions are policy: no record depends on them, and a tenant has to be able to narrow access to a running module, which is exactly when narrowing matters most. They therefore get their own mutation path, one that takes the module lock and writes the audit trail but does not refuse an enabled module. They are still checked against the module, so a permission naming an entity the module does not have is refused rather than stored.
+
+This was found while writing the tests rather than by design: the first run of the permission creation against an enabled module came back with `Definitions cannot be edited while the module is enabled`, and a feature that cannot change the access of a live module is not a feature.
+
+**Gate for this phase.** From a shell that still exports `NODE_ENV=production`: lint 0 errors and 0 warnings; `pnpm typecheck` 0 errors across 15 tasks; the full test suite passes; `pnpm build` passes; `pnpm db:check` passes with 12 migrations and 16 tables, unchanged. The enforcement is exercised over HTTP with a member of the tenant: a module that lets the member read one entity refuses the member's write on it and leaves the entities it says nothing about alone, a module that hands a viewer a write still does not get one, a module with no definitions behaves as before, and the owner can widen its own narrowing again.
+
+**Not in this phase.** The `condition` on a permission definition is stored and not evaluated: it is a per-record condition, and a list request has no record to weigh it against. The `field` and `action` resources are stored and matched exactly, but no route names one yet. The definition routes are not narrowed. Nothing renders a view or a form yet: the Phase 20 renderers were deleted, `apps/web` is not reassembled, and `packages/ui` is a component library with no API calls.
