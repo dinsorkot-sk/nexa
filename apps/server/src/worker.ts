@@ -1,7 +1,8 @@
 import { createDb } from '@nexa/db';
 import { runWorkerLoop } from '../hono/worker';
+import { startScheduler } from '../hono/scheduler';
 
-/** Separate process that drains the outbox. Run alongside the API; never imports the HTTP app. */
+/** Separate process that drains the outbox and enqueues the schedules that came due. Run alongside the API; never imports the HTTP app. */
 const db = createDb();
 const controller = new AbortController();
 
@@ -21,6 +22,7 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
 
 console.info('Nexa outbox worker started');
+startScheduler(db, controller.signal);
 runWorkerLoop(db, {}, controller.signal).catch((error) => {
   console.error('Worker crashed:', error);
   process.exit(1);

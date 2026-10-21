@@ -1,11 +1,12 @@
 import { automationRepository, createTenantContext, definitionRepository, outboxRepository, type DbHandle } from '@nexa/db';
 import type { OutboxRow } from '@nexa/db';
-import { dispatchAutomations } from '../../../packages/engine/automation/dispatch';
+import { dispatchAutomations, dispatchScheduledAutomation } from '../../../packages/engine/automation/dispatch';
+import type { AutomationEvent } from '../../../packages/engine/automation/index';
 import { deliverWebhook } from '../../../integrations/webhook/src/index';
 import { sendNotification } from '../../../integrations/email/src/index';
 import { NotificationActionConfigSchema, WebhookActionConfigSchema, type ActionDefinition, type WebhookActionConfig } from '@nexa/meta';
 import type { AppDependencies } from './shared';
-import { automationJobKind, type AutomationJobPayload } from './jobs';
+import { automationJobKind, scheduledAutomationJobKind, type AutomationJobPayload, type ScheduledAutomationJobPayload } from './jobs';
 
 /**
  * Processes one job. Returns the job's outcome; never throws, so one bad row cannot stop the loop.
@@ -15,8 +16,8 @@ import { automationJobKind, type AutomationJobPayload } from './jobs';
 export async function processOutboxRow(db: DbHandle, row: OutboxRow, deps: AppDependencies): Promise<'done' | 'retry' | 'dead'> {
   const outbox = outboxRepository(db);
   try {
-    if (row.kind !== automationJobKind) throw new Error(`Unknown job kind "${row.kind}"`);
-    const job = row.payload as unknown as AutomationJobPayload;
+    if (row.kind !== automationJobKind && row.kind !== scheduledAutomationJobKind) throw new Error(`Unknown job kind "${row.kind}"`);
+    const job = row.payload as unknown as AutomationJobPayload & ScheduledAutomationJobPayload;
     if (job.tenantId !== row.tenantId) throw new Error('Job tenant does not match its outbox row');
 
     const ctx = createTenantContext(job.tenantId);
@@ -26,11 +27,11 @@ export async function processOutboxRow(db: DbHandle, row: OutboxRow, deps: AppDe
     // as failed before dispatching again. The new attempt records its own runs, tagged with this job's id.
     const closed = await runs.closeOrphans(row.id, 'Worker stopped before this run finished; job was reclaimed');
     if (closed > 0) console.warn(`Closed ${closed} orphaned automation run(s) for job ${row.id}`);
-    await dispatchAutomations({
-      listAutomations: (moduleId) => defs.listAutomations(moduleId),
-      listActions: (moduleId) => defs.listActions(moduleId),
+    const ports = {
+      listAutomations: (moduleId: string) => defs.listAutomations(moduleId),
+      listActions: (moduleId: string) => defs.listActions(moduleId),
       runs,
-      deliver: async (action: ActionDefinition, context) => {
+      deliver: async (action: ActionDefinition, context: { event: AutomationEvent; automationId: string; actorId?: string }) => {
         if (action.kind === 'webhook') {
           const parsed: WebhookActionConfig = WebhookActionConfigSchema.parse(action.config);
           // The outbox id is the delivery id: receivers dedupe on it, which makes at-least-once delivery safe.
@@ -44,7 +45,12 @@ export async function processOutboxRow(db: DbHandle, row: OutboxRow, deps: AppDe
           await sendNotification(NotificationActionConfigSchema.parse(action.config), deps.emailTransport);
         }
       },
-    }, job.moduleId, job.event, job.actorId, row.id);
+    };
+    if (row.kind === scheduledAutomationJobKind) {
+      await dispatchScheduledAutomation(ports, job.moduleId, job.automationId, new Date(job.scheduledAt), job.actorId, row.id);
+    } else {
+      await dispatchAutomations(ports, job.moduleId, job.event, job.actorId, row.id);
+    }
 
     await outbox.complete({ tenantId: row.tenantId, id: row.id });
     return 'done';
