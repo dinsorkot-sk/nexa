@@ -137,6 +137,40 @@ describe('acceptance: vehicle management end to end', () => {
     expect(page.items).toHaveLength(50);
   });
 
+  it('installs the CRM template, enables it, and records a contact against an account', async () => {
+    const api = await createTestApp();
+    const cookie = await signup(api, 'crm-admin@example.com');
+    const headers = { ...jsonHeaders, cookie };
+    const call = async (path: string, method: string, body?: unknown) => {
+      const response = await api.request(`/v1/modules/crm${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+      if (response.status >= 400) throw new Error(`${method} ${path} -> ${response.status}: ${await response.clone().text()}`);
+      return response;
+    };
+
+    // 1. The template installs as a draft module with its entities and fields.
+    const installed = await call('/from-template', 'POST', { templateId: 'crm' });
+    expect(installed.status).toBe(201);
+    await expect(installed.json()).resolves.toMatchObject({ imported: true, template: 'crm', module: { id: 'crm', status: 'draft' } });
+
+    // 2. It goes through the lifecycle to enabled.
+    for (const to of ['review', 'published', 'enabled']) {
+      await call('/transition', 'POST', { to });
+    }
+
+    // 3. Records are written against the template's entities. A definition id
+    //    is unique per module, so the field ids carry the entity they belong to.
+    const account = await call('/entities/account/records', 'POST', { data: { 'account.name': 'Acme Ltd' } });
+    expect(account.status).toBe(201);
+    const contact = await call('/entities/contact/records', 'POST', { data: { 'contact.fullName': 'Ada Lovelace', 'contact.email': 'ada@acme.test' } });
+    expect(contact.status).toBe(201);
+
+    // 4. The records read back.
+    const listed = await call('/entities/account/records', 'GET');
+    const result = await listed.json() as { items: Array<{ data: Record<string, unknown> }>; total: number };
+    expect(result.total).toBe(1);
+    expect(result.items[0].data['account.name']).toBe('Acme Ltd');
+  });
+
   it('isolates tenants and denies viewers privileged endpoints', async () => {
     const db = createDb({ dataDir: 'memory://' });
     handles.push(db);

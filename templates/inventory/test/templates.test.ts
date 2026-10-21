@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  EntityDefinitionSchema, FieldDefinitionSchema, RelationDefinitionSchema,
-} from '../../../packages/meta/src/index';
+import { MetadataTemplateSchema } from '../../../packages/meta/src/index';
 import { validateModuleSchema } from '../../../packages/db/src/definition-integrity';
 import type { EntityDefinition, FieldDefinition } from '@nexa/meta';
 import { inventoryTemplate } from '../src/index';
@@ -16,23 +14,25 @@ const templates = [
 
 describe('metadata templates', () => {
   for (const { template, name } of templates) {
-    it(`validates the ${name} template against meta schemas and module integrity`, () => {
-      expect(template.moduleId).toBeTruthy();
+    it(`validates the ${name} template against the template schema and module integrity`, () => {
+      const parsed = MetadataTemplateSchema.parse(template);
+      expect(parsed.moduleId).toBeTruthy();
 
       const entities: EntityDefinition[] = [];
       const fields: FieldDefinition[] = [];
-      template.entities.forEach(({ fields: entityFields, ...entity }) => {
-        entities.push(EntityDefinitionSchema.parse({
-          ...entity, moduleId: template.moduleId,
-          createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-        }));
+      parsed.entities.forEach(({ fields: entityFields, ...entity }) => {
+        entities.push({
+          ...entity,
+          moduleId: parsed.moduleId,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        });
         entityFields.forEach((field) => {
-          fields.push(FieldDefinitionSchema.parse({ ...field, entityId: entity.id }) as FieldDefinition);
+          fields.push({ ...field, entityId: entity.id });
         });
       });
-      const relations = template.relations.map((relation) => RelationDefinitionSchema.parse(relation));
 
-      const issues = validateModuleSchema(entities, fields, relations, [], [], [], [], []);
+      const issues = validateModuleSchema(entities, fields, parsed.relations, [], [], [], [], []);
       expect(issues).toEqual([]);
     });
   }
