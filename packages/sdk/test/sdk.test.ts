@@ -5,15 +5,21 @@ import { createNexaClient } from '../src/index';
 /** Captures what the client actually sends, without opening a socket: the custom fetch sees the final Request. */
 const captures: Array<{ url: string; method: string; headers: Headers; credentials: RequestCredentials }> = [];
 
-function recordingFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const request = input instanceof Request ? input : new Request(input, init);
-  captures.push({
-    url: request.url,
-    method: request.method,
-    headers: request.headers,
-    credentials: request.credentials,
-  });
-  return Promise.resolve(Response.json({ ok: true }));
+/**
+ * Captures the request the client built and answers it from the app, so the round trip is real and the test can
+ * still read the request that went out.
+ */
+function recordingFetch(app: Hono) {
+  return (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    captures.push({
+      url: request.url,
+      method: request.method,
+      headers: request.headers,
+      credentials: request.credentials,
+    });
+    return Promise.resolve(app.request(request));
+  };
 }
 
 afterEach(() => {
@@ -35,12 +41,12 @@ describe('@nexa/sdk client creation', () => {
     type AppType = typeof app;
 
     const withToken = createNexaClient<AppType>({ baseUrl: 'http://localhost', token: 'tok-1' });
-    const tokened = await withToken.v1.who.$get({}, { init: undefined, fetch: recordingFetch });
+    const tokened = await withToken.v1.who.$get({}, { init: undefined, fetch: recordingFetch(app) });
     expect(tokened.ok).toBe(true);
     expect(captures[0]!.headers.get('authorization')).toBe('Bearer tok-1');
 
     const withoutToken = createNexaClient<AppType>({ baseUrl: 'http://localhost' });
-    const anonymous = await withoutToken.v1.who.$get({}, { fetch: recordingFetch });
+    const anonymous = await withoutToken.v1.who.$get({}, { fetch: recordingFetch(app) });
     expect(anonymous.ok).toBe(true);
     expect(captures[1]!.headers.get('authorization')).toBeNull();
   });
@@ -50,7 +56,7 @@ describe('@nexa/sdk client creation', () => {
     type AppType = typeof app;
 
     const client = createNexaClient<AppType>({ baseUrl: 'http://localhost' });
-    const response = await client.v1.me.$get({}, { fetch: recordingFetch, init: { headers: { cookie: 'nexa_session=abc' } } });
+    const response = await client.v1.me.$get({}, { fetch: recordingFetch(app), init: { headers: { cookie: 'nexa_session=abc' } } });
     expect(response.ok).toBe(true);
     // The cookie travels on the request; a real browser would attach the HttpOnly cookie itself.
     expect(captures[0]!.headers.get('cookie')).toBe('nexa_session=abc');
@@ -64,7 +70,7 @@ describe('@nexa/sdk client creation', () => {
 
     const client = createNexaClient<AppType>({ baseUrl: 'http://localhost' });
     // A real Hono round trip: the client builds the URL; the app's request handler answers it.
-    const response = await client.v1.ping.$get({}, { fetch: (input, init) => Promise.resolve(app.request(input, init)) });
+    const response = await client.v1.ping.$get({}, { fetch: recordingFetch(app) });
     expect(response.status).toBe(200);
     const body = await response.json();
     // Compile-time check: body is the typed endpoint response, not unknown.
@@ -77,7 +83,7 @@ describe('@nexa/sdk client creation', () => {
     type AppType = typeof app;
 
     const client = createNexaClient<AppType>({ baseUrl: 'http://localhost' });
-    const response = await client.v1.denied.$get({}, { fetch: (input, init) => Promise.resolve(app.request(input, init)) });
+    const response = await client.v1.denied.$get({}, { fetch: recordingFetch(app) });
     expect(response.status).toBe(401);
     const body = await response.json();
     expect((body as { error: { code: string } }).error.code).toBe('AUTH_REQUIRED');
