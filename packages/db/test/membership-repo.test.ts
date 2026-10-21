@@ -36,7 +36,7 @@ async function addUser(handle: DbHandle, tenantId: string, email: string, roleId
 
 describe('membership repository: invitations', () => {
   it('stores only a token hash and accepts a valid invitation once', async () => {
-    const { handle, repo, tenantId, ownerId } = await setup();
+    const { handle, repo, ownerId } = await setup();
     const invite = await repo.createInvitation({ actorUserId: ownerId, actorRoleIds: ['owner'], email: 'New@Acme.test', roleId: 'member' });
     expect(invite.email).toBe('new@acme.test');
     const stored = await repo.listInvitations();
