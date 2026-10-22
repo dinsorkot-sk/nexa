@@ -76,6 +76,15 @@ export function validateViewReferences(
         issues.push({ kind: 'view', id: view.id, message: `View sort references unknown field "${entry.fieldId}"`, path: ['sort', String(index), 'fieldId'] });
       }
     });
+    // The layout fields decide what the view can be laid out by, so a field that
+    // is not there would leave the renderer with nothing to show. The title and
+    // the picture are not checked: a title falls back to the first column and a
+    // picture is optional.
+    for (const [name, fieldId] of [['groupBy', view.groupBy], ['dateField', view.dateField]] as const) {
+      if (fieldId !== undefined && !owned.has(fieldId)) {
+        issues.push({ kind: 'view', id: view.id, message: `View ${name} references unknown field "${fieldId}"`, path: [name] });
+      }
+    }
     if (view.isDefault) {
       const existing = defaults.get(view.entityId);
       if (existing) {

@@ -119,6 +119,14 @@ describe('view and form HTTP surface', () => {
     const unknownSort = await call('/views', 'POST', { id: 'v', entityId: 'vehicle', name: 'Bad sort', type: 'table', sort: [{ fieldId: 'ghost', direction: 'asc' }] });
     expect(unknownSort.status).toBe(409);
 
+    // A view that lays itself out by a field the entity does not have would leave the renderer with nothing to show.
+    const unknownGroup = await call('/views', 'POST', { id: 'v', entityId: 'vehicle', name: 'Bad group', type: 'kanban', groupBy: 'ghost' });
+    expect(unknownGroup.status).toBe(409);
+    await expect(unknownGroup.json()).resolves.toMatchObject({ error: { code: 'DEFINITION_CONFLICT' } });
+
+    const unknownDate = await call('/views', 'POST', { id: 'v', entityId: 'vehicle', name: 'Bad date', type: 'calendar', dateField: 'ghost' });
+    expect(unknownDate.status).toBe(409);
+
     const unknownFormField = await call('/forms', 'POST', { id: 'f', entityId: 'vehicle', name: 'Bad form', sections: [{ id: 'main', label: 'Main', fieldIds: ['ghost'] }] });
     expect(unknownFormField.status).toBe(409);
 
