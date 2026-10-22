@@ -37,9 +37,17 @@ export { default as NxKanbanCard, type NxKanbanAssignee } from './components/NxK
 export { default as NxKbd } from './components/NxKbd.vue';
 export { default as NxLink } from './components/NxLink.vue';
 export { default as NxLogo } from './components/NxLogo.vue';
+export { default as NxMetaCalendar } from './components/NxMetaCalendar.vue';
+export { default as NxMetaDetail } from './components/NxMetaDetail.vue';
 export { default as NxMetaForm } from './components/NxMetaForm.vue';
+export { default as NxMetaGallery } from './components/NxMetaGallery.vue';
+export { default as NxMetaKanban } from './components/NxMetaKanban.vue';
 export { default as NxMetaTable } from './components/NxMetaTable.vue';
+export { default as MetaCalendar } from './components/NxMetaCalendar.vue';
+export { default as MetaDetail } from './components/NxMetaDetail.vue';
 export { default as MetaForm } from './components/NxMetaForm.vue';
+export { default as MetaGallery } from './components/NxMetaGallery.vue';
+export { default as MetaKanban } from './components/NxMetaKanban.vue';
 export { default as MetaTable } from './components/NxMetaTable.vue';
 export { default as NxMenu, type NxMenuItem } from './components/NxMenu.vue';
 export { default as NxModal } from './components/NxModal.vue';
