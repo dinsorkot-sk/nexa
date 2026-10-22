@@ -4,6 +4,7 @@ import { defineComponent, h, nextTick } from 'vue';
 import NxCombobox from '../src/components/NxCombobox.vue';
 import NxDatePicker from '../src/components/NxDatePicker.vue';
 import NxMenu from '../src/components/NxMenu.vue';
+import NxOrgSwitcher from '../src/components/NxOrgSwitcher.vue';
 
 afterEach(() => { document.body.innerHTML = ''; });
 
@@ -141,5 +142,87 @@ describe('the menu', () => {
       await trigger.trigger('click');
     }
     pair.unmount();
+  });
+
+  it('lets Tab leave the menu and closes it once the focus has gone', async () => {
+    const wrapper = mount(NxMenu, { props: { label: 'Actions', items }, attachTo: document.body });
+    await wrapper.find('button[aria-haspopup="menu"]').trigger('click');
+    await nextTick();
+    const first = wrapper.findAll('[role="menuitem"]')[0]!;
+    press(first.element, 'Tab');
+    await nextTick();
+    // The menu must still be there while the focus is on its way out.
+    expect(wrapper.find('[role="menu"]').exists()).toBe(true);
+
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    const focusout = new FocusEvent('focusout', { bubbles: true });
+    Object.defineProperty(focusout, 'relatedTarget', { value: outside });
+    first.element.dispatchEvent(focusout);
+    await nextTick();
+    expect(wrapper.find('[role="menu"]').exists()).toBe(false);
+    outside.remove();
+    wrapper.unmount();
+  });
+});
+
+describe('the organization switcher', () => {
+  const organizations = [
+    { value: 'acme', label: 'Acme Co.' },
+    { value: 'beta', label: 'Beta Co.' },
+    { value: 'gamma', label: 'Gamma Co.', disabled: true },
+  ];
+
+  it('takes the focus with the arrow keys, skips disabled memberships and closes on Escape', async () => {
+    const wrapper = mount(NxOrgSwitcher, {
+      props: { modelValue: 'beta', organizations, label: 'Organization' },
+      attachTo: document.body,
+    });
+    const trigger = wrapper.find('button[aria-haspopup="menu"]');
+    await trigger.trigger('click');
+    await nextTick();
+    await nextTick();
+    const menu = wrapper.find('[role="menu"]');
+    const rows = wrapper.findAll('[role="menuitemradio"]');
+    expect(menu.exists()).toBe(true);
+    expect(trigger.attributes('aria-controls')).toBe(menu.attributes('id'));
+    // The checked membership takes the focus when the menu opens from the trigger.
+    expect(document.activeElement).toBe(rows[1]!.element);
+
+    press(rows[1]!.element, 'ArrowDown');
+    await nextTick();
+    expect(document.activeElement).toBe(rows[0]!.element);
+    press(rows[0]!.element, 'End');
+    await nextTick();
+    expect(document.activeElement).toBe(rows[1]!.element);
+    press(rows[1]!.element, 'a');
+    await nextTick();
+    expect(document.activeElement).toBe(rows[0]!.element);
+
+    press(rows[0]!.element, 'Escape');
+    await nextTick();
+    expect(wrapper.find('[role="menu"]').exists()).toBe(false);
+    expect(document.activeElement).toBe(trigger.element);
+    wrapper.unmount();
+  });
+
+  it('selects a membership on a click, and a click outside closes the menu', async () => {
+    const wrapper = mount(NxOrgSwitcher, {
+      props: { modelValue: 'acme', organizations, label: 'Organization' },
+      attachTo: document.body,
+    });
+    const trigger = wrapper.find('button[aria-haspopup="menu"]');
+    await trigger.trigger('click');
+    await nextTick();
+    await wrapper.findAll('[role="menuitemradio"]')[1]!.trigger('click');
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['beta']);
+    expect(wrapper.find('[role="menu"]').exists()).toBe(false);
+
+    await trigger.trigger('click');
+    await nextTick();
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    await nextTick();
+    expect(wrapper.find('[role="menu"]').exists()).toBe(false);
+    wrapper.unmount();
   });
 });

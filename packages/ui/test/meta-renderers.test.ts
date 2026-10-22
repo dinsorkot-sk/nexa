@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
+import { nextTick } from 'vue';
 import type { FieldDefinition, FormDefinition, ViewDefinition } from '@nexa/meta';
 import NxMetaCalendar from '../src/components/NxMetaCalendar.vue';
 import NxMetaDetail from '../src/components/NxMetaDetail.vue';
@@ -198,6 +199,23 @@ describe('NxMetaKanban places the records in columns', () => {
     const wrapper = mount(NxMetaKanban, { props: { view: board, fields: boardFields, records: boardRecords } });
     await wrapper.findAll('section')[1].trigger('drop', { dataTransfer: { getData: () => 'v1' } });
     expect(wrapper.emitted('move')?.[0]).toEqual(['v1', 'closed']);
+  });
+
+  it('offers the other columns on the card and emits the move when one is picked', async () => {
+    const wrapper = mount(NxMetaKanban, {
+      props: { view: board, fields: boardFields, records: boardRecords },
+      attachTo: document.body,
+    });
+    const trigger = wrapper.find('button[aria-label="Move AB-1"]');
+    expect(trigger.classes()).toContain('size-6');
+    await trigger.trigger('click');
+    await nextTick();
+    const items = wrapper.findAll('[role="menuitem"]');
+    // The column the card is already in is not offered.
+    expect(items.map((item) => item.text())).toEqual(['Closed']);
+    await items[0]!.trigger('click');
+    expect(wrapper.emitted('move')?.at(-1)).toEqual(['v1', 'closed']);
+    wrapper.unmount();
   });
 });
 

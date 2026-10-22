@@ -49,7 +49,10 @@ function select(organization: NxSelectOption) {
 }
 
 const { activeValue, onMenuKeydown, onTriggerKeydown, onFocusout } = useMenuKeyboard({
-  entries: () => props.organizations,
+  entries: () => props.organizations.map((organization) => ({
+    ...organization,
+    selected: organization.value === props.modelValue,
+  })),
   isOpen: () => open.value,
   open: () => { open.value = true; },
   close,
