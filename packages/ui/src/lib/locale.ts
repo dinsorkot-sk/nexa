@@ -40,6 +40,11 @@ export interface NxMessages {
   permission: string;
   save: string;
   cancel: string;
+  detailFields: string;
+  detailRelations: string;
+  detailActivity: string;
+  detailNoLinks: string;
+  recordsOn: string;
 }
 
 export const messages: Record<NxLocale, NxMessages> = {
@@ -77,6 +82,11 @@ export const messages: Record<NxLocale, NxMessages> = {
     permission: 'Permission',
     save: 'Save',
     cancel: 'Cancel',
+    detailFields: 'Fields',
+    detailRelations: 'Relations',
+    detailActivity: 'Activity',
+    detailNoLinks: 'No linked records',
+    recordsOn: 'Records on',
   },
   th: {
     close: 'ปิด',
@@ -111,6 +121,11 @@ export const messages: Record<NxLocale, NxMessages> = {
     statusEmpty: 'ว่าง',
     permission: 'สิทธิ์',
     save: 'บันทึก',
+    detailFields: 'ฟิลด์',
+    detailRelations: 'ความสัมพันธ์',
+    detailActivity: 'กิจกรรม',
+    detailNoLinks: 'ไม่มีรายการที่เชื่อมโยง',
+    recordsOn: 'รายการของวันที่',
     cancel: 'ยกเลิก',
   },
 };
