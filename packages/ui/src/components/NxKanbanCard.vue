@@ -48,10 +48,12 @@ const card = computed(() => ({
           {{ title }}
         </h3>
       </button>
-      <GripVertical
-        class="size-3.5 shrink-0 text-ui-text-dimmed"
-        aria-hidden="true"
-      />
+      <slot name="actions">
+        <GripVertical
+          class="size-3.5 shrink-0 text-ui-text-dimmed"
+          aria-hidden="true"
+        />
+      </slot>
     </div>
     <p
       v-if="meta"

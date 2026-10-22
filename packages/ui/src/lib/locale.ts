@@ -45,6 +45,7 @@ export interface NxMessages {
   detailActivity: string;
   detailNoLinks: string;
   recordsOn: string;
+  move: (label: string) => string;
 }
 
 export const messages: Record<NxLocale, NxMessages> = {
@@ -87,6 +88,7 @@ export const messages: Record<NxLocale, NxMessages> = {
     detailActivity: 'Activity',
     detailNoLinks: 'No linked records',
     recordsOn: 'Records on',
+    move: (label: string) => `Move ${label}`,
   },
   th: {
     close: 'ปิด',
@@ -126,6 +128,7 @@ export const messages: Record<NxLocale, NxMessages> = {
     detailActivity: 'กิจกรรม',
     detailNoLinks: 'ไม่มีรายการที่เชื่อมโยง',
     recordsOn: 'รายการของวันที่',
+    move: (label: string) => `ย้าย ${label}`,
     cancel: 'ยกเลิก',
   },
 };

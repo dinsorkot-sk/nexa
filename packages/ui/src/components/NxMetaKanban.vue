@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import type { FieldDefinition, ViewDefinition } from '@nexa/meta';
+import { GripVertical } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 import { formatFieldDisplay } from '../lib/display';
 import { useNxLocale, useNxMessages } from '../lib/locale';
 import NxKanbanCard from './NxKanbanCard.vue';
+import NxMenu from './NxMenu.vue';
 
 /**
  * The records as a board of columns.
@@ -85,6 +87,13 @@ function titleOf(record: { data: Record<string, unknown> }): string {
   return field ? display(field, record.data[field.id]) : '';
 }
 
+/** The columns a card can move to: every column but the one it is in. */
+function moveItems(current: string) {
+  return groups.value
+    .filter((group) => group.value !== current)
+    .map((group) => ({ value: group.value, label: group.label }));
+}
+
 /** The card being dragged, so it can be lifted while it is held. */
 const dragging = ref<string | undefined>();
 
@@ -128,7 +137,27 @@ function onDrop(group: string, event: DragEvent) {
           @click="emit('open', record.id)"
           @dragstart="onDragStart(record.id, $event)"
           @dragend="dragging = undefined"
-        />
+        >
+          <template
+            v-if="moveItems(column.value).length"
+            #actions
+          >
+            <NxMenu
+              compact
+              align="end"
+              :label="messages.move(titleOf(record))"
+              :items="moveItems(column.value)"
+              @select="emit('move', record.id, $event)"
+            >
+              <template #trigger>
+                <GripVertical
+                  class="size-3.5"
+                  aria-hidden="true"
+                />
+              </template>
+            </NxMenu>
+          </template>
+        </NxKanbanCard>
       </div>
     </section>
   </div>

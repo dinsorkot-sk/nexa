@@ -19,9 +19,12 @@ const props = withDefaults(defineProps<{
   label: string;
   open?: boolean;
   align?: 'start' | 'end';
+  /** Draws a small icon-only trigger, for a card action; the trigger slot carries the icon. */
+  compact?: boolean;
 }>(), {
   open: undefined,
   align: 'start',
+  compact: false,
 });
 
 const emit = defineEmits<{
@@ -81,7 +84,9 @@ const { activeValue, onMenuKeydown, onTriggerKeydown, onFocusout } = useMenuKeyb
       :aria-expanded="isOpen"
       :aria-controls="menuId"
       :aria-label="label"
-      class="inline-flex items-center gap-2 rounded-ui border border-ui-border-accented bg-ui-bg px-3 py-2 text-sm text-ui-text outline-none transition-colors duration-ui-fast ease-ui-out hover:bg-ui-bg-muted focus-visible:ring-2 focus-visible:ring-ui-primary"
+      :class="compact
+        ? 'inline-flex size-6 items-center justify-center rounded-ui text-ui-text-muted outline-none transition-colors duration-ui-fast ease-ui-out hover:bg-ui-bg-elevated focus-visible:ring-2 focus-visible:ring-ui-primary'
+        : 'inline-flex items-center gap-2 rounded-ui border border-ui-border-accented bg-ui-bg px-3 py-2 text-sm text-ui-text outline-none transition-colors duration-ui-fast ease-ui-out hover:bg-ui-bg-muted focus-visible:ring-2 focus-visible:ring-ui-primary'"
       @click="toggle"
       @keydown="onTriggerKeydown"
     >
@@ -89,6 +94,7 @@ const { activeValue, onMenuKeydown, onTriggerKeydown, onFocusout } = useMenuKeyb
         {{ label }}
       </slot>
       <ChevronDown
+        v-if="!compact"
         class="size-4 text-ui-text-muted transition-transform duration-ui ease-ui-out"
         :class="isOpen && 'rotate-180'"
         aria-hidden="true"
