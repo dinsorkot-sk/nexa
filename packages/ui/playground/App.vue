@@ -10,7 +10,8 @@ import {
   NxCalendarDay, NxCalendarEvent, NxCalendarView, NxCard, NxChartCard, NxChartLegend, NxCheckbox, NxChip, NxCodeBlock,
   NxCombobox, NxCommandPalette, NxDatePicker, NxDiffRow, NxDonutChart, NxEmptyState, NxFieldInput, NxFieldRow, NxFieldValue,
   NxFieldWrapper, NxFileUpload, NxFormulaEditor, NxIconButton, NxIndicator, NxInput, NxKanbanCard, NxKbd, NxLineChart,
-  NxLink, NxLogo, NxMenu, NxMetaForm, NxMetaTable, NxModal, NxNavGroupLabel, NxNavItem, NxNavbar, NxOrgSwitcher, NxPackageDiff, NxPageButton,
+  NxLink, NxLogo, NxMenu, NxMetaCalendar, NxMetaDetail, NxMetaForm, NxMetaGallery, NxMetaKanban, NxMetaTable, NxModal,
+  NxNavGroupLabel, NxNavItem, NxNavbar, NxOrgSwitcher, NxPackageDiff, NxPageButton,
   NxPageHeader, NxPagination, NxPermissionCell, NxPermissionsTable, NxPopover, NxProgress, NxRadio, NxSegment, NxSelect,
   NxSelectMenu, NxSeparator, NxSidebar, NxSkeleton, NxSlideover, NxSpinner, NxStatCard, NxStepper, NxSwitch, NxTable,
   NxTableRow, NxTabs, NxTextarea, NxTimeline, NxToast, NxToaster, NxTooltip, NxWorkflowEdge, NxWorkflowNode, pushToast,
@@ -90,6 +91,45 @@ const vehicleForm: FormDefinition = {
   settings: {},
 };
 const vehicleValues = ref<Record<string, unknown>>({ plate: 'AB-1234', model: 'Hilux' });
+
+// The views that lay themselves out: a board, a month and a gallery over the same records.
+const vehicleDueField: FieldDefinition = { id: 'due', entityId: 'vehicle', name: 'due', label: 'Due', type: 'date', position: 4, options: fieldOptions };
+const vehiclePhotoField: FieldDefinition = { id: 'photo', entityId: 'vehicle', name: 'photo', label: 'Photo', type: 'image', position: 5, options: fieldOptions };
+const vehicleLayoutFields = [...vehicleFields, vehicleDueField, vehiclePhotoField];
+const vehicleBoard: ViewDefinition = {
+  id: 'vehicle-board', moduleId: 'fleet', entityId: 'vehicle', name: 'Vehicles by status', type: 'kanban', isDefault: false,
+  columns: [{ fieldId: 'plate', visible: true }, { fieldId: 'model', visible: true }],
+  sort: [], filters: {}, settings: {},
+  groupBy: 'status',
+  titleField: 'plate',
+};
+const vehicleCalendar: ViewDefinition = {
+  id: 'vehicle-calendar', moduleId: 'fleet', entityId: 'vehicle', name: 'Service calendar', type: 'calendar', isDefault: false,
+  columns: [{ fieldId: 'plate', visible: true }],
+  sort: [], filters: {}, settings: {},
+  dateField: 'due',
+  titleField: 'plate',
+};
+const vehicleGallery: ViewDefinition = {
+  id: 'vehicle-gallery', moduleId: 'fleet', entityId: 'vehicle', name: 'Fleet gallery', type: 'gallery', isDefault: false,
+  columns: [{ fieldId: 'model', visible: true }, { fieldId: 'odometer', visible: true }],
+  sort: [], filters: {}, settings: {},
+  imageField: 'photo',
+  titleField: 'plate',
+};
+const vehicleLayoutRecords = [
+  { id: 'v1', data: { plate: 'AB-1234', model: 'Hilux', odometer: 42150, status: 'active', due: '2026-03-04', photo: 'https://images.example.com/vehicles/hilux.png' } },
+  { id: 'v2', data: { plate: 'AB-5678', model: 'Isuzu D-Max', odometer: 9800, status: 'draft', due: '2026-03-09', photo: 'https://images.example.com/vehicles/dmax.png' } },
+  { id: 'v3', data: { plate: 'AB-9012', model: 'Toyota Hilux', odometer: 132400, status: 'closed', due: '2026-03-16', photo: 'https://images.example.com/vehicles/toyota.png' } },
+];
+const vehicleActivity = [
+  { id: 'a1', actor: 'Ada Lovelace', action: 'created the record', time: '2 hours ago', kind: 'create' as const },
+  { id: 'a2', actor: 'Grace Hopper', action: 'changed the status', time: 'yesterday', kind: 'status' as const, oldValue: 'draft', newValue: 'active' },
+];
+const vehicleRelations = [
+  { id: 'owner', name: 'Owner', targets: [{ id: 'u1', label: 'Ada Lovelace' }] },
+  { id: 'location', name: 'Location', targets: [{ id: 'l1', label: 'Bangkok depot' }] },
+];
 
 const people: ComboboxOption[] = [
   { value: 'u-1', label: 'Ada Lovelace' },
@@ -755,6 +795,56 @@ const buttonColors = ['primary', 'secondary', 'success', 'info', 'warning', 'err
               @update:values="vehicleValues = $event"
             />
           </div>
+        </div>
+      </section>
+
+      <!-- The views that lay themselves out -->
+      <section class="space-y-4">
+        <h2 class="text-xl font-semibold text-ui-text-highlighted">
+          The views that lay themselves out
+        </h2>
+        <div class="space-y-3">
+          <h3 class="text-sm font-medium text-ui-text-muted">
+            A board grouped by the status
+          </h3>
+          <NxMetaKanban
+            :view="vehicleBoard"
+            :fields="vehicleLayoutFields"
+            :records="vehicleLayoutRecords"
+          />
+        </div>
+        <div class="space-y-3">
+          <h3 class="text-sm font-medium text-ui-text-muted">
+            A month, with the records of the day underneath
+          </h3>
+          <NxMetaCalendar
+            :view="vehicleCalendar"
+            :fields="vehicleLayoutFields"
+            :records="vehicleLayoutRecords"
+            month="2026-03"
+            selected-date="2026-03-04"
+          />
+        </div>
+        <div class="space-y-3">
+          <h3 class="text-sm font-medium text-ui-text-muted">
+            A gallery of cards
+          </h3>
+          <NxMetaGallery
+            :view="vehicleGallery"
+            :fields="vehicleLayoutFields"
+            :records="vehicleLayoutRecords"
+          />
+        </div>
+        <div class="space-y-3">
+          <h3 class="text-sm font-medium text-ui-text-muted">
+            The record page
+          </h3>
+          <NxMetaDetail
+            :record="vehicleLayoutRecords[0]!"
+            :fields="vehicleLayoutFields"
+            :relations="vehicleRelations"
+            :activity="vehicleActivity"
+          />
         </div>
       </section>
 
