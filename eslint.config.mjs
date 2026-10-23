@@ -64,6 +64,7 @@ export default [
         useAuth: 'readonly',
         ref: 'readonly',
         computed: 'readonly',
+        onMounted: 'readonly',
         reactive: 'readonly',
         defineProps: 'readonly',
         defineEmits: 'readonly',

@@ -9,8 +9,9 @@ export default defineNuxtConfig({
   ui: { colorMode: false },
   // @nexa/ui is type-checked by its own stricter config; here its sources are only consumed.
   typescript: { tsConfig: { compilerOptions: { noUncheckedIndexedAccess: false } } },
-  // Same-origin proxy so the session cookie never crosses an origin (see packages/sdk).
-  nitro: {
-    devProxy: { '/v1': { target: process.env.NEXA_API_URL ?? 'http://localhost:3001/v1', changeOrigin: true } },
+  // Same-origin proxy so the session cookie never crosses an origin (see packages/sdk). A route
+  // rule works in dev and in the built server alike; NEXA_API_URL is the API's origin.
+  routeRules: {
+    '/v1/**': { proxy: `${process.env.NEXA_API_URL ?? 'http://localhost:3001'}/v1/**` },
   },
 });
