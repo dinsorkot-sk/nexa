@@ -3,14 +3,8 @@ import type { FieldDefinition, FormDefinition, RelationDefinition } from '@nexa/
 import { NxAlert, NxButton, NxMetaDetail, NxMetaForm, type NxMetaDetailActivity, type NxMetaDetailRelation } from '@nexa/ui';
 
 import { ApiError, api } from '~/composables/useApi';
+import { formatActivity, type RawActivityEntry } from '~/composables/useFormat';
 import { loadEntity, recordLabel, referenceLoader, type RecordRow } from '~/composables/useEntity';
-
-interface ActivityItem {
-  id: string;
-  action: string;
-  actorName: string;
-  occurredAt: string;
-}
 
 const route = useRoute();
 const moduleId = String(route.params.moduleId);
@@ -38,10 +32,10 @@ async function load() {
   record.value = await api<RecordRow>(`${base}/records/${recordId}`);
   values.value = { ...record.value.data };
   const [{ items }, definitions] = await Promise.all([
-    api<{ items: ActivityItem[] }>(`${base}/records/${recordId}/activity`),
+    api<{ items: RawActivityEntry[] }>(`${base}/records/${recordId}/activity`),
     api<RelationDefinition[]>(`/modules/${moduleId}/relations`),
   ]);
-  activity.value = items.map((item) => ({ id: item.id, actor: item.actorName, action: item.action, time: item.occurredAt }));
+  activity.value = items.map((item) => formatActivity(item));
   const own = definitions.filter((relation) => relation.sourceEntityId === entityId || relation.targetEntityId === entityId);
   relations.value = await Promise.all(own.map(async (relation) => {
     const targets = await api<RecordRow[]>(`${base}/records/${recordId}/relations/${relation.id}`);
