@@ -70,9 +70,8 @@ const selectedValues = computed<string[]>(() => {
 const labelOf = (value: string) => labels.get(value) ?? value;
 const chips = computed(() => (props.multiple ? selectedValues.value.map((value) => ({ value, label: labelOf(value) })) : []));
 const rootValue = computed(() => (props.multiple ? selectedValues.value : (selectedValues.value[0] ?? undefined)));
+/** The typed text drives the fetcher; the label of a single selection is what the input shows after it. */
 const displayValue = (value: unknown) => (typeof value === 'string' ? labelOf(value) : '');
-/** Filtering is done by the fetcher; every returned item is shown unchanged. */
-const keepAll = (list: unknown) => list as never;
 
 const anchorClass = computed(() => [
   'flex min-h-9 w-full flex-wrap items-center gap-1 rounded-ui border bg-ui-bg px-2 py-1 text-sm text-ui-text-highlighted transition-colors focus-within:ring-2 focus-within:ring-ui-primary',
@@ -108,15 +107,22 @@ function onSearch(term: string) {
   search.value = term;
   if (!open.value) return;
   clearTimeout(timer);
-  timer = setTimeout(() => { void run(term); }, props.debounceMs);
+  // A static list is filtered locally, so it answers as soon as the term changes; a server search is
+  // debounced so a fast typist does not give the network every letter.
+  if (!props.loadOptions) {
+    void run(term);
+    return;
+  }
+  timer = setTimeout(() => {
+    if (open.value) void run(term);
+  }, props.debounceMs);
 }
 
+/** Opening lists the matches for the text the input already holds (typing into a closed input opens it in reka). */
 function onOpenChange(next: boolean) {
   open.value = next;
-  if (next) {
-    clearTimeout(timer);
-    void run(search.value);
-  }
+  clearTimeout(timer);
+  if (next) void run(search.value);
 }
 
 function onSelect(value: unknown) {
@@ -146,15 +152,10 @@ onBeforeUnmount(() => {
     :model-value="rootValue"
     :multiple="multiple"
     :open="open"
-    :search-term="search"
-    :filter-function="keepAll"
-    :display-value="displayValue"
+    :ignore-filter="true"
     :disabled="disabled"
-    :reset-search-term-on-blur="false"
-    :reset-search-term-on-select="false"
     @update:model-value="onSelect"
     @update:open="onOpenChange"
-    @update:search-term="onSearch"
   >
     <ComboboxAnchor :class="anchorClass">
       <NxChip
@@ -168,12 +169,14 @@ onBeforeUnmount(() => {
       </NxChip>
       <ComboboxInput
         :id="id"
+        :display-value="displayValue"
         :aria-label="label"
         :aria-describedby="describedBy"
         :aria-invalid="invalid || undefined"
         :placeholder="chips.length ? undefined : placeholder"
         :disabled="disabled"
         class="min-w-24 flex-1 bg-transparent px-1 py-1 outline-none placeholder:text-ui-text-muted"
+        @update:model-value="onSearch"
       />
       <ComboboxTrigger
         :aria-label="messages.openList"

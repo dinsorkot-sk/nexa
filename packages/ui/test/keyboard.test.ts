@@ -33,6 +33,42 @@ describe('keyboard operation', () => {
     expect(['a', 'b']).toContain((wrapper.emitted('update:modelValue')?.at(-1) as unknown[])[0]);
   });
 
+  it('Combobox: typing asks the loader for the term and shows the server answer untouched', async () => {
+    const calls: string[] = [];
+    const wrapper = mount(NxCombobox, {
+      props: {
+        label: 'Owner',
+        debounceMs: 20,
+        loadOptions: async (term: string) => {
+          calls.push(term);
+          return [{ value: 'hit', label: 'Server hit' }];
+        },
+      },
+      attachTo: document.body,
+    });
+    const input = wrapper.find('input').element;
+    // Opening (here via typing) lists everything first, then the debounced term follows.
+    input.value = 'a';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    expect(calls.at(0)).toBe('');
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    await flushPromises();
+    expect(calls.at(-1)).toBe('a');
+    // Two keystrokes inside the debounce window collapse into one request.
+    input.value = 'acme';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    expect(calls.at(-1)).toBe('a');
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    await flushPromises();
+    expect(calls.at(-1)).toBe('acme');
+    // The server answer stays whole even though the label does not contain the typed term.
+    expect(document.body.textContent).toContain('Server hit');
+    wrapper.unmount();
+  });
+
   it('DatePicker: the segments accept typed digits and the calendar closes on Escape', async () => {
     const wrapper = mount(NxDatePicker, {
       props: { modelValue: '2026-10-16', label: 'Due' },
