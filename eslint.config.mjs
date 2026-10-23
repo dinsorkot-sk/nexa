@@ -73,4 +73,9 @@ export default [
     },
     plugins: { '@typescript-eslint': tsPlugin },
   },
+  {
+    // Nuxt resolves routes from file names, so page and layout files are single-word by design.
+    files: ['apps/web/app/pages/**/*.vue'],
+    rules: { 'vue/multi-word-component-names': 'off' },
+  },
 ];

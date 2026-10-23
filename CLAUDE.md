@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working in this
 
 ## Status
 
-Nexa is a metadata-driven app platform. Backend hardening is the current focus. `apps/web` and `apps/cli` were intentionally removed on 2026-10-09 and may be reassembled after the backend is ready; do not assume those workspaces exist.
+Nexa is a metadata-driven app platform. Backend hardening is the current focus. `apps/cli` was intentionally removed on 2026-10-09; `apps/web` is being reassembled from Phase 30 (`docs/plans/README.md`) and is only a shell until its slices land.
 
 ## Architecture
 
