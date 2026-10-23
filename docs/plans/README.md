@@ -43,7 +43,7 @@ Rule: one phase per version branch (`v0.0.1`, `v0.0.2`, ...), in order. Phase 0 
 | 27 | v0.0.28 | Render the view and the form: `NxMetaTable` and `NxMetaForm` over the persisted definitions | complete | **Verified 2026-10-21:** lint 0 errors and 0 warnings; `pnpm typecheck` 0 errors across 15 tasks; the full test suite passes from a shell that still exports `NODE_ENV=production`; `pnpm build` passes; `pnpm db:check` unchanged at 12 migrations and 16 tables. No migration. The renderers take the definitions as props and never fetch, the Phase 20 rule. `MetaDetail`, the record page with its activity trail and its relations, is not rebuilt. |
 | 28 | v0.0.29 | The remaining renderers: the record page, and the kanban, calendar and gallery views | complete | **Verified 2026-10-21:** lint 0 errors and 0 warnings; `pnpm typecheck` 0 errors across 15 tasks; the full test suite passes from a shell that still exports `NODE_ENV=production`; `pnpm build` passes; `pnpm db:check` unchanged at 12 migrations and 16 tables. No migration: a view's shape is in the row's JSON. The view now says how it is laid out, so the renderer is told rather than asked. A module can narrow what a role may do and never widen it, so the platform's matrix stays the ceiling and both gates have to pass. The `condition` on a definition is stored and not evaluated; the definition routes are not narrowed; the `field` and `action` resources are stored and matched exactly but no route names one yet. |
 | 29 | v0.0.30 | Close the component interaction gaps: one keyboard contract shared by the menu and the organization switcher, and a kanban card that moves between columns without a pointer | complete | **Verified 2026-10-22:** lint 0 errors and 0 warnings; `pnpm typecheck` 0 errors across 15 tasks; the full test suite passes, 57 files and 839 tests; `pnpm build` passes; `pnpm db:check` unchanged at 12 migrations and 16 tables. No migration. The menu's ids are bound from `useId()` rather than written as literal strings, so `aria-controls` and `aria-labelledby` name elements that exist and two menus on one page no longer collide. The board's grip is a button that opens the other columns; picking one emits the same move a drop does. Checked in headless Chromium at 1280/768/375: no page-level horizontal overflow, the menu and the switcher open and close from the keyboard, and the card's move menu opens from the grip. Not checked: a screen reader, touch and real devices, browsers other than Chromium, and animation timing frame by frame. `apps/web` is still not reassembled, so nothing calls the components outside the playground. |
-| 30 | v0.0.32 | Reassemble `apps/web` (Nuxt 4): first slice, the shell | in progress | Requested 2026-10-23. A Nuxt 4 app that consumes `@nexa/ui`, `@nexa/sdk` and `@nexa/meta`, proxies `/v1` same-origin to the API and builds, typechecks and lints. Login, organization selection, module list, table, form, detail and the other renderers' wiring are the following slices; see the section below. |
+| 30 | v0.0.32 | Reassemble `apps/web` (Nuxt 4): the shell, sign-in, module and record screens, and the four view types | complete | Requested 2026-10-23. See the section below for the gate and the limits. |
 
 Full functional requirements and acceptance criteria are in the user-provided LOGHOLIZON SRS v1.0, adapted to the decisions documented here. Do not add phases beyond this table (Phases 22 and 23 were added at the user's explicit request).
 
@@ -370,7 +370,7 @@ The menu, the switcher and a card's move menu were driven from the keyboard in t
 
 **Not in this phase.** A screen reader was not run, touch and real devices were not tried, and neither Firefox nor Safari was opened; the animation timings are still not checked frame by frame. The kanban card's move menu is one interaction, not a full keyboard model for the board: there is no roving focus between cards or between columns. `apps/web` is still not reassembled, so nothing calls these components outside the playground. The `condition` on a permission definition is still stored and not evaluated, and the definition routes are still not narrowed by the module's own definitions.
 
-## Phase 30 — Reassemble `apps/web` (in progress)
+## Phase 30 — Reassemble `apps/web` (complete)
 
 Requested on 2026-10-23, after the Phase 29 gate was run again and pushed (lint 0/0; `pnpm typecheck` 0 errors; 57 files and 843 tests; `pnpm build`; `pnpm db:check` with 12 migrations and 16 tables).
 
@@ -383,15 +383,24 @@ Requested on 2026-10-23, after the Phase 29 gate was run again and pushed (lint 
 - Node 22.21.0 satisfies Nuxt 4. The app is a SPA (`ssr: false`) for now: sessions are cookie-based and the library has no server-rendering check.
 - `pnpm-workspace.yaml` includes `apps/*` again; the lockfile gains the `apps/web` importer.
 
-### This slice
+### What was built
 
-The shell only: `apps/web` with `nuxt.config.ts`, a placeholder index page, the proxy, and the lint override that lets Nuxt page files be single-word. Gate: lint, `pnpm typecheck` (17 tasks), `pnpm build` pass.
+- **The shell**: `apps/web` with `nuxt.config.ts`, the `/v1` proxy as a Nitro route rule (`NEXA_API_URL`, default `http://localhost:3001`) and a lint override for single-word page names.
+- **Sign-in**: `/login` with the organization choice after a 409 `ORGANIZATION_REQUIRED`, `useSession`, and a global middleware that sends a visitor without a session to `/login`.
+- **Screens**: modules (enabled only), a module's entities, an entity's records, the new-record form and the record page. The table pages server-side with sort; the record page shows values, relations and the activity trail, and edits through `NxMetaForm`.
+- **Views**: an entity's stored views appear as tabs, with a table of its visible fields in front when none is stored. Kanban, calendar and gallery render from the stored view; dropping a kanban card sends the same version-checked update the form does.
+- **Conflicts**: an edit sends the record's `version`; a 409 shows that someone else changed the record and offers to reload.
+- Calls go through a small same-origin `fetch` wrapper (`useApi`) rather than the Hono RPC client: importing the server's app type would pull the server's dependencies into the web typecheck. `@nexa/sdk` stays the typed client for when that is worth it.
 
-### Next slices (not started)
+### Verified 2026-10-23
 
-1. Login and organization selection (handle the 409 `ORGANIZATION_REQUIRED` membership list), session guard middleware.
-2. Module list and the record table over `NxMetaTable` with server-side paging, sort and filter.
-3. Record form and detail with version-based conflict handling.
-4. Kanban, calendar and gallery views from persisted view definitions.
+Against a real API (PGlite) and the built Nuxt server in headless Chromium: sign-in and the module list; the table with three records; creating a record through the form; the record page with relations and activity; an edit that the server refuses because another save came first, then the reload and the delete; and the board and the gallery from stored views, with a click on a card opening its record. No page errors. `pnpm lint`, `pnpm typecheck` and `pnpm build` pass with `apps/web` in the workspace.
 
-**Not in this phase.** No page calls the API yet. `apps/cli` stays removed.
+### Known limits
+
+- The calendar was not opened in the browser: the inventory template has no date field. It is covered by the renderer's own tests only.
+- The reference picker fetches one page of the target entity (100 rows) and filters by label in the browser; the server search needs a searchable field and the picker does not know one.
+- The activity trail shows the server's action name and timestamp as they come; formatting them is for the renderer's callers to do and is not done yet.
+- `nuxt dev` fails on this machine's `/mnt/d` mount (Vite's dependency optimizer cannot rename its cache), so the checks above ran against `nuxt build` output.
+- The app is a SPA and has no tests of its own; the cookie CSRF guard needs the page's origin in `CORS_ORIGINS` (default `http://localhost:3000`, so run the app on port 3000 in development).
+- Not in this phase: a module builder, administration screens, invitations, a production reverse proxy, `apps/cli`.
