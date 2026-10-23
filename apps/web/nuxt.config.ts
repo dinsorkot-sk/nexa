@@ -9,6 +9,11 @@ export default defineNuxtConfig({
   ui: { colorMode: false },
   // @nexa/ui is type-checked by its own stricter config; here its sources are only consumed.
   typescript: { tsConfig: { compilerOptions: { noUncheckedIndexedAccess: false } } },
+  vite: {
+    // Escape hatch for a slow first boot on WSL's /mnt/d (9p): point Vite's cache at the
+    // Linux filesystem for the session, e.g. NEXA_VITE_CACHE_DIR=/tmp/opencode/nexa-vite.
+    ...(process.env.NEXA_VITE_CACHE_DIR ? { cacheDir: process.env.NEXA_VITE_CACHE_DIR } : {}),
+  },
   // Same-origin proxy so the session cookie never crosses an origin (see packages/sdk). A route
   // rule works in dev and in the built server alike; NEXA_API_URL is the API's origin.
   routeRules: {

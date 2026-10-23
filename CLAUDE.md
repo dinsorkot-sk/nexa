@@ -32,12 +32,20 @@ pnpm db:check     # Check connectivity, schema, migrations
 pnpm build        # Workspace build
 pnpm typecheck    # Workspace typecheck
 pnpm test         # Vitest workspace tests
+pnpm --filter @nexa/web test   # apps/web composables over a stubbed fetch
 ```
 
 Run tests directly if Turbo cannot spawn child processes in the current shell:
 
 ```bash
 ./node_modules/.bin/vitest run
+```
+
+Run the web app from a build when a dev server is not worth the wait (the same ports section lives in `apps/web/README.md`):
+
+```bash
+pnpm --filter @nexa/web build
+PORT=3000 node apps/web/.output/server/index.mjs
 ```
 
 ## Rules
