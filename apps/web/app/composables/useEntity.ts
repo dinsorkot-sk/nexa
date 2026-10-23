@@ -39,12 +39,34 @@ export async function loadEntity(moduleId: string, entityId: string) {
   return { entity: entities.find((candidate) => candidate.id === entityId), fields, form };
 }
 
-/** Server-side search for a reference field: the list endpoint's page, narrowed by the label here. */
+/**
+ * Server-side search for a reference field.
+ *
+ * The list endpoint takes `?search=` but answers 400 unless the target entity has a searchable,
+ * non-hidden field, so the loader reads the target's fields once (cached per loader) and sends the
+ * search and the limit only when one exists. Without one it stays on the fallback: fetch one page
+ * and narrow it by the label here. The context's signal rides along, so a superseded search aborts
+ * the request the browser has already forgotten about.
+ */
 export function referenceLoader(moduleId: string, field: FieldDefinition) {
+  let targetFields: Promise<FieldDefinition[]> | undefined;
+  const searchTarget = async (target: string): Promise<boolean> => {
+    try {
+      targetFields ??= api<FieldDefinition[]>(`/modules/${moduleId}/fields?entityId=${target}`);
+      const fields = await targetFields;
+      return fields.some((candidate) => candidate.options.searchable && !candidate.options.hidden);
+    } catch {
+      // Without the target's fields there is no safe `?search=`: the fallback keeps working.
+      targetFields = Promise.resolve([]);
+      return false;
+    }
+  };
   return async (search: string, context: { limit: number; signal: AbortSignal }): Promise<Option[]> => {
     const target = field.options.referenceEntityId;
     if (!target) return [];
-    const result = await api<{ items: RecordRow[] }>(`/modules/${moduleId}/entities/${target}/records?limit=${context.limit}`);
+    const query = new URLSearchParams({ limit: String(context.limit) });
+    if (await searchTarget(target)) query.set('search', search);
+    const result = await api<{ items: RecordRow[] }>(`/modules/${moduleId}/entities/${target}/records?${query}`, { signal: context.signal });
     const needle = search.trim().toLowerCase();
     return result.items
       .map((record) => ({ value: record.id, label: recordLabel(record) }))

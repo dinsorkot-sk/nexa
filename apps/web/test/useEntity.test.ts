@@ -12,8 +12,9 @@ function record(id: string, data: Record<string, unknown>) {
   return { id, version: 1, data };
 }
 
-function page(items: Array<{ id: string; version: number; data: Record<string, unknown> }>) {
-  return vi.fn(() => Promise.resolve(Response.json({ items })));
+/** A one-shot fetch implementation answering the JSON body once. */
+function fetchOnce(value: unknown) {
+  return vi.fn(() => Promise.resolve(Response.json(value)));
 }
 
 afterEach(() => {
@@ -42,32 +43,93 @@ describe('referenceLoader', () => {
     options: options({ referenceEntityId: 'contact' }),
   };
 
-  function loaderTest(search: string, limit: number) {
-    const controller = new AbortController();
-    return referenceLoader('crm', field)(search, { limit, signal: controller.signal });
+  function recordsOf(...records: Array<ReturnType<typeof record>>) {
+    return vi.fn(() => Promise.resolve(Response.json({ items: records })));
   }
 
-  it('fetches one page of the target entity and narrows by the label in the browser', async () => {
-    const fetch = page([
-      record('c1', { name: 'Acme Co' }),
-      record('c2', { name: 'Globex' }),
-      record('c3', { name: 'acme group' }),
-      record('c4', { name: '7' }),
-    ]);
+  it('sends the search to the server when the target has a searchable, non-hidden field', async () => {
+    const fetch = vi.fn(() => Promise.resolve(Response.json({ items: [record('c1', { name: 'Acme Co' })] })));
+    fetch.mockImplementationOnce((path: string) => {
+      expect(path).toBe('/v1/modules/crm/fields?entityId=contact');
+      return Promise.resolve(Response.json([
+        { id: 'code', entityId: 'contact', name: 'code', label: 'Code', type: 'text', position: 0, options: options({ hidden: true, searchable: true }) },
+        { id: 'name', entityId: 'contact', name: 'name', label: 'Name', type: 'text', position: 1, options: options({ searchable: true }) },
+      ]));
+    });
     vi.stubGlobal('fetch', fetch);
 
-    await expect(loaderTest('acme', 25)).resolves.toEqual([
+    const loader = referenceLoader('crm', field);
+    const narrowed = await loader('acme', { limit: 25, signal: new AbortController().signal });
+    expect(narrowed).toEqual([{ value: 'c1', label: 'Acme Co' }]);
+    expect(fetch).toHaveBeenCalledWith('/v1/modules/crm/entities/contact/records?limit=25&search=acme', expect.anything());
+  });
+
+  it('stays on the one-page fallback and narrows in the browser without a searchable field', async () => {
+    const fetch = vi.fn()
+      .mockImplementationOnce((path: string) => {
+        expect(path).toBe('/v1/modules/crm/fields?entityId=contact');
+        return Promise.resolve(Response.json([
+          { id: 'name', entityId: 'contact', name: 'name', label: 'Name', type: 'text', position: 0, options: options({ hidden: true, searchable: true }) },
+          { id: 'count', entityId: 'contact', name: 'count', label: 'Count', type: 'integer', position: 1, options: options() },
+        ]));
+      })
+      .mockImplementationOnce(() => Promise.resolve(Response.json({ items: [
+        record('c1', { name: 'Acme Co' }),
+        record('c2', { name: 'Globex' }),
+        record('c3', { name: 'acme group' }),
+      ] })));
+    vi.stubGlobal('fetch', fetch);
+
+    const loader = referenceLoader('crm', field);
+    await expect(loader('acme', { limit: 25, signal: new AbortController().signal })).resolves.toEqual([
       { value: 'c1', label: 'Acme Co' },
       { value: 'c3', label: 'acme group' },
     ]);
     expect(fetch).toHaveBeenCalledWith('/v1/modules/crm/entities/contact/records?limit=25', expect.anything());
   });
 
-  it('passes the empty search through as one unfiltered page', async () => {
-    const fetch = page([record('c1', { name: 'Acme Co' })]);
+  it('reads the target fields once per loader, then searches again', async () => {
+    const fields = fetchOnce([
+      { id: 'name', entityId: 'contact', name: 'name', label: 'Name', type: 'text', position: 0, options: options({ searchable: true }) },
+    ]);
+    const fetch = vi.fn()
+      .mockImplementationOnce(fields)
+      .mockImplementationOnce(() => Promise.resolve(Response.json({ items: [record('c1', { name: 'Acme Co' })] })))
+      .mockImplementationOnce(() => Promise.resolve(Response.json({ items: [record('c2', { name: 'Globex' })] })));
     vi.stubGlobal('fetch', fetch);
-    await expect(loaderTest('', 10)).resolves.toEqual([{ value: 'c1', label: 'Acme Co' }]);
+
+    const loader = referenceLoader('crm', field);
+    await expect(loader('ac', { limit: 10, signal: new AbortController().signal })).resolves.toEqual([{ value: 'c1', label: 'Acme Co' }]);
+    await expect(loader('gl', { limit: 10, signal: new AbortController().signal })).resolves.toEqual([{ value: 'c2', label: 'Globex' }]);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenLastCalledWith('/v1/modules/crm/entities/contact/records?limit=10&search=gl', expect.anything());
+  });
+
+  it('keeps the fallback when the target fields cannot be read', async () => {
+    const fetch = vi.fn()
+      .mockImplementationOnce(() => Promise.resolve(new Response('database is down', { status: 503 })))
+      .mockImplementationOnce(() => Promise.resolve(Response.json({ items: [record('c2', { name: 'Globex' })] })));
+    vi.stubGlobal('fetch', fetch);
+
+    const loader = referenceLoader('crm', field);
+    await expect(loader('gl', { limit: 10, signal: new AbortController().signal })).resolves.toEqual([{ value: 'c2', label: 'Globex' }]);
     expect(fetch).toHaveBeenCalledWith('/v1/modules/crm/entities/contact/records?limit=10', expect.anything());
+  });
+
+  it('hands the context signal to the records request', async () => {
+    const fetch = vi.fn()
+      .mockImplementationOnce(() => Promise.resolve(Response.json([
+        { id: 'name', entityId: 'contact', name: 'name', label: 'Name', type: 'text', position: 0, options: options({ searchable: true }) },
+      ])))
+      .mockImplementationOnce(recordsOf(record('c1', { name: 'Acme Co' })));
+    vi.stubGlobal('fetch', fetch);
+
+    const controller = new AbortController();
+    await referenceLoader('crm', field)('ac', { limit: 5, signal: controller.signal });
+    expect(fetch).toHaveBeenCalledWith(
+      '/v1/modules/crm/entities/contact/records?limit=5&search=ac',
+      expect.objectContaining({ signal: controller.signal }),
+    );
   });
 
   it('returns nothing without hitting the network when the field points at no entity', async () => {
@@ -79,8 +141,11 @@ describe('referenceLoader', () => {
   });
 
   it('maps the labels again when a record has no text value', async () => {
-    const fetch = page([record('c9', { count: 7 })]);
+    const fields = fetchOnce([
+      { id: 'name', entityId: 'contact', name: 'name', label: 'Name', type: 'text', position: 0, options: options({ searchable: true }) },
+    ]);
+    const fetch = vi.fn().mockImplementationOnce(fields).mockImplementationOnce(recordsOf(record('c9', { count: 7 })));
     vi.stubGlobal('fetch', fetch);
-    await expect(loaderTest('', 5)).resolves.toEqual([{ value: 'c9', label: 'c9' }]);
+    await expect(referenceLoader('crm', field)('', { limit: 5, signal: new AbortController().signal })).resolves.toEqual([{ value: 'c9', label: 'c9' }]);
   });
 });

@@ -35,6 +35,14 @@ describe('api', () => {
     expect(fetch).toHaveBeenLastCalledWith('/v1/things', expect.objectContaining({ headers: undefined, body: undefined }));
   });
 
+  it('hands an optional signal to the request', async () => {
+    const fetch = vi.fn(() => Promise.resolve(new Response('{"ok":true}', { status: 200 })));
+    vi.stubGlobal('fetch', fetch);
+    const controller = new AbortController();
+    await api('/things', { signal: controller.signal });
+    expect(fetch).toHaveBeenCalledWith('/v1/things', expect.objectContaining({ signal: controller.signal }));
+  });
+
   it('throws an ApiError carrying the server body of an error response', async () => {
     const fetch = vi.fn(() => Promise.resolve(new Response(
       JSON.stringify({ error: { code: 'STALE_WRITE', message: 'Someone changed this record', status: 409, details: { version: 3 } } }),
