@@ -72,6 +72,13 @@ const days = computed(() => {
   });
 });
 
+/** The days as the weeks a grid is made of. */
+const weeksOfDays = computed(() => {
+  const out = [];
+  for (let index = 0; index < days.value.length; index += 7) out.push(days.value.slice(index, index + 7));
+  return out;
+});
+
 function moveMonth(amount: number) {
   const month = parseMonth(visibleMonth.value);
   month.setUTCMonth(month.getUTCMonth() + amount);
@@ -124,25 +131,42 @@ function eventsFor(date: string) {
       class="grid grid-cols-7"
     >
       <div
-        v-for="(weekday, index) in weekdayLabels"
-        :key="weekday"
-        role="columnheader"
-        class="border-b border-ui-border bg-ui-bg-muted px-1 py-2 text-center text-xs font-medium text-ui-text-muted"
+        role="row"
+        class="contents"
       >
-        {{ weekdayLabels[(index + weekStartsOn) % weekdayLabels.length] }}
+        <div
+          v-for="(weekday, index) in weekdayLabels"
+          :key="weekday"
+          role="columnheader"
+          class="border-b border-ui-border bg-ui-bg-muted px-1 py-2 text-center text-xs font-medium text-ui-text-muted"
+        >
+          {{ weekdayLabels[(index + weekStartsOn) % weekdayLabels.length] }}
+        </div>
       </div>
-      <NxCalendarDay
-        v-for="day in days"
-        :key="day.isoDate"
-        :date="day.date"
-        :iso-date="day.isoDate"
-        :events="eventsFor(day.isoDate)"
-        :outside="day.outside"
-        :selected="day.isoDate === modelValue"
-        :today="day.isoDate === new Date().toISOString().slice(0, 10)"
-        :label="day.isoDate"
-        @select="emit('update:modelValue', $event)"
-      />
+      <div
+        v-for="(week, weekIndex) in weeksOfDays"
+        :key="weekIndex"
+        role="row"
+        class="contents"
+      >
+        <div
+          v-for="day in week"
+          :key="day.isoDate"
+          role="gridcell"
+          class="contents"
+        >
+          <NxCalendarDay
+            :date="day.date"
+            :iso-date="day.isoDate"
+            :events="eventsFor(day.isoDate)"
+            :outside="day.outside"
+            :selected="day.isoDate === modelValue"
+            :today="day.isoDate === new Date().toISOString().slice(0, 10)"
+            :label="day.isoDate"
+            @select="emit('update:modelValue', $event)"
+          />
+        </div>
+      </div>
     </div>
   </section>
 </template>

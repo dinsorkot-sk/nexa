@@ -38,7 +38,7 @@ export { default as NxKbd } from './components/NxKbd.vue';
 export { default as NxLink } from './components/NxLink.vue';
 export { default as NxLogo } from './components/NxLogo.vue';
 export { default as NxMetaCalendar } from './components/NxMetaCalendar.vue';
-export { default as NxMetaDetail } from './components/NxMetaDetail.vue';
+export { default as NxMetaDetail, type NxMetaDetailRelation, type NxMetaDetailActivity } from './components/NxMetaDetail.vue';
 export { default as NxMetaForm } from './components/NxMetaForm.vue';
 export { default as NxMetaGallery } from './components/NxMetaGallery.vue';
 export { default as NxMetaKanban } from './components/NxMetaKanban.vue';

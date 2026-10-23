@@ -102,6 +102,8 @@ function onSort(next: NxTableSort) {
       :sort="sort"
       :loading="props.loading"
       :caption="props.caption ?? props.view?.name"
+      :actions="$slots.actions !== undefined"
+      :actions-label="messages.actions"
       @update:sort="onSort"
     >
       <template
@@ -124,6 +126,16 @@ function onSort(next: NxTableSort) {
             class="h-4 w-full"
           />
         </div>
+      </template>
+
+      <template
+        v-if="$slots.actions"
+        #actions="{ row }"
+      >
+        <slot
+          name="actions"
+          :record-id="String(row.id)"
+        />
       </template>
 
       <template #empty>

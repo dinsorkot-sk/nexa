@@ -17,12 +17,15 @@ const props = withDefaults(defineProps<{
   assignee?: NxKanbanAssignee;
   meta?: string;
   state?: 'default' | 'hover' | 'dragging';
+  /** The tab index of the title button; a board moves the focus between cards and passes -1. */
+  titleTabindex?: number;
 }>(), {
   description: undefined,
   status: undefined,
   assignee: undefined,
   meta: undefined,
   state: 'default',
+  titleTabindex: 0,
 });
 
 const emit = defineEmits<{ click: [] }>();
@@ -41,6 +44,7 @@ const card = computed(() => ({
     <div class="flex items-start gap-2">
       <button
         type="button"
+        :tabindex="titleTabindex"
         class="min-w-0 flex-1 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ui-primary"
         @click="emit('click')"
       >

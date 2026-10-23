@@ -19,6 +19,7 @@ export interface NxMessages {
   retry: string;
   openList: string;
   remove: (label: string) => string;
+  actions: string;
   openCalendar: string;
   prevMonth: string;
   nextMonth: string;
@@ -62,6 +63,7 @@ export const messages: Record<NxLocale, NxMessages> = {
     retry: 'Try again',
     openList: 'Open list',
     remove: (label: string) => `Remove ${label}`,
+    actions: 'Actions',
     openCalendar: 'Open calendar',
     prevMonth: 'Previous month',
     nextMonth: 'Next month',
@@ -103,6 +105,7 @@ export const messages: Record<NxLocale, NxMessages> = {
     retry: 'ลองอีกครั้ง',
     openList: 'เปิดรายการ',
     remove: (label: string) => `นำ ${label} ออก`,
+    actions: 'การกระทำ',
     openCalendar: 'เปิดปฏิทิน',
     prevMonth: 'เดือนก่อนหน้า',
     nextMonth: 'เดือนถัดไป',

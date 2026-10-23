@@ -45,6 +45,7 @@ function onChange(event: Event) {
       :accept="accept"
       :multiple="multiple"
       :disabled="disabled"
+      :aria-label="label"
       :aria-invalid="invalid || undefined"
       @change="onChange"
     >

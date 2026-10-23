@@ -108,12 +108,69 @@ function onDrop(group: string, event: DragEvent) {
   dragging.value = undefined;
   if (recordId) emit('move', recordId, group);
 }
+
+const rootRef = ref<HTMLElement | null>(null);
+/** The card the keyboard is on; the board is one tab stop and the arrow keys move between its cards. */
+const activeRecord = ref<string | undefined>();
+
+const recordIds = computed(() => columns.value.flatMap((column) => column.records.map((record) => record.id)));
+const tabStop = computed(() => (
+  activeRecord.value && recordIds.value.includes(activeRecord.value)
+    ? activeRecord.value
+    : recordIds.value[0]
+));
+
+function focusRecord(recordId: string) {
+  activeRecord.value = recordId;
+  const cards = rootRef.value?.querySelectorAll<HTMLElement>('[data-record-id]') ?? [];
+  for (const card of cards) {
+    if (card.dataset.recordId === recordId) {
+      card.focus();
+      return;
+    }
+  }
+}
+
+/** The nearest non-empty column in a direction, so a board with an empty column still moves. */
+function neighbour(columnIndex: number, step: number, recordIndex: number): string | undefined {
+  for (let index = columnIndex + step; index >= 0 && index < columns.value.length; index += step) {
+    const records = columns.value[index]?.records ?? [];
+    if (records.length) return records[Math.min(recordIndex, records.length - 1)]?.id;
+  }
+  return undefined;
+}
+
+function onCardKeydown(columnIndex: number, recordIndex: number, event: KeyboardEvent) {
+  // A key pressed on the title button or the move menu belongs to it, not to the board.
+  if (event.target !== event.currentTarget) return;
+  const column = columns.value[columnIndex];
+  const record = column?.records[recordIndex];
+  if (!column || !record) return;
+  let target: string | undefined;
+  switch (event.key) {
+    case 'ArrowDown': target = column.records[Math.min(recordIndex + 1, column.records.length - 1)]?.id; break;
+    case 'ArrowUp': target = column.records[Math.max(recordIndex - 1, 0)]?.id; break;
+    case 'Home': target = column.records[0]?.id; break;
+    case 'End': target = column.records[column.records.length - 1]?.id; break;
+    case 'ArrowRight': target = neighbour(columnIndex, 1, recordIndex); break;
+    case 'ArrowLeft': target = neighbour(columnIndex, -1, recordIndex); break;
+    case 'Enter':
+    case ' ': event.preventDefault(); emit('open', record.id); return;
+    default: return;
+  }
+  if (!target) return;
+  event.preventDefault();
+  focusRecord(target);
+}
 </script>
 
 <template>
-  <div class="grid w-full gap-3 md:grid-cols-2 xl:grid-cols-4">
+  <div
+    ref="rootRef"
+    class="grid w-full gap-3 md:grid-cols-2 xl:grid-cols-4"
+  >
     <section
-      v-for="column in columns"
+      v-for="(column, columnIndex) in columns"
       :key="column.value"
       class="flex min-w-0 flex-col gap-2 rounded-ui-lg bg-ui-bg-muted p-2"
       :aria-label="column.label"
@@ -126,15 +183,20 @@ function onDrop(group: string, event: DragEvent) {
       </h3>
       <div class="flex flex-col gap-2">
         <NxKanbanCard
-          v-for="record in column.records"
+          v-for="(record, recordIndex) in column.records"
           :key="record.id"
           :title="titleOf(record)"
+          :title-tabindex="-1"
           :status="column.label"
           :description="cardFields[0] ? display(cardFields[0], record.data[cardFields[0].id]) : undefined"
           :meta="cardFields[1] ? display(cardFields[1], record.data[cardFields[1].id]) : undefined"
           :state="dragging === record.id ? 'dragging' : 'default'"
+          :tabindex="tabStop === record.id ? 0 : -1"
+          :data-record-id="record.id"
           draggable="true"
           @click="emit('open', record.id)"
+          @focus="activeRecord = record.id"
+          @keydown="onCardKeydown(columnIndex, recordIndex, $event)"
           @dragstart="onDragStart(record.id, $event)"
           @dragend="dragging = undefined"
         >

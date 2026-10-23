@@ -26,8 +26,30 @@ describe('NxTable', () => {
       slots: { 'cell-name': ({ value }: { value: unknown }) => h('strong', String(value)) },
     });
     expect(wrapper.find('tbody strong').text()).toBe('Ada');
+    expect(wrapper.find('thead button')).toBeDefined();
     await wrapper.find('thead button').trigger('click');
     expect(wrapper.emitted('update:sort')?.at(-1)).toEqual([{ key: 'name', direction: 'asc' }]);
+  });
+
+  it('adds an actions column and its cell only when the table has actions', () => {
+    const props = {
+      columns: [{ key: 'name', label: 'Name' }],
+      rows: [{ id: 'a', name: 'Ada' }],
+      rowKey: 'id',
+    };
+    const plain = mount(NxTable, { props });
+    expect(plain.findAll('th')).toHaveLength(1);
+    expect(plain.find('tbody td:last-child').text()).toBe('Ada');
+
+    const withActions = mount(NxTable, {
+      props: { ...props, actions: true },
+      slots: { actions: ({ row }: { row: Record<string, unknown> }) => h('button', String(row.id)) },
+    });
+    expect(withActions.findAll('th')).toHaveLength(2);
+    expect(withActions.find('tbody td:last-child button').text()).toBe('a');
+
+    const empty = mount(NxTable, { props: { ...props, rows: [], actions: true }, slots: { actions: () => h('span') } });
+    expect(empty.find('tbody td').attributes('colspan')).toBe('2');
   });
 
   it('shows the empty state when there are no rows', () => {
@@ -79,6 +101,18 @@ describe('data and builder controls', () => {
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['2026-10-17']);
   });
 
+  it('lays the month out as rows of grid cells, so the grid has the children it needs', () => {
+    const wrapper = mount(NxCalendarView, {
+      props: { month: '2026-10', label: 'Calendar' },
+    });
+    // A grid's column headers and cells must sit in rows; a browser does not insert them the way a table does.
+    const rows = wrapper.findAll('[role="grid"] > [role="row"]');
+    expect(rows).toHaveLength(7);
+    expect(rows[0]!.findAll('[role="columnheader"]')).toHaveLength(7);
+    expect(wrapper.findAll('[role="gridcell"]')).toHaveLength(42);
+    expect(wrapper.findAll('[role="grid"] > [role="gridcell"]')).toHaveLength(0);
+  });
+
   it('emits permission matrix changes immutably', async () => {
     const wrapper = mount(NxPermissionsTable, {
       props: {
@@ -124,6 +158,7 @@ describe('content and action components', () => {
     const wrapper = mount(NxFileUpload, { props: { label: 'Choose a file' } });
     const file = new File(['example'], 'example.csv', { type: 'text/csv' });
     const input = wrapper.find('input[type="file"]');
+    expect(input.attributes('aria-label')).toBe('Choose a file');
     Object.defineProperty(input.element, 'files', { configurable: true, value: [file] as unknown as FileList });
     await input.trigger('change');
     expect(wrapper.emitted('select')?.at(-1)).toEqual([[file]]);

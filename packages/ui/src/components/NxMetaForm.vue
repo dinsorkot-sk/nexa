@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { FieldDefinition, FormDefinition } from '@nexa/meta';
 import { computed, ref, watch } from 'vue';
+import type { ComboboxOption, LoadOptions } from '../lib/combobox';
 import { useNxMessages } from '../lib/locale';
 import NxButton from './NxButton.vue';
 import NxFieldInput from './NxFieldInput.vue';
@@ -29,6 +30,12 @@ const props = withDefaults(defineProps<{
   cancelLabel?: string;
   /** The fields that cannot be edited, by field id. */
   readonlyFieldIds?: string[];
+  /** Server-side search for reference fields. The form never fetches: the caller searches. */
+  loadOptions?: LoadOptions;
+  /** A search per reference field, for a form whose references point at different entities. */
+  loadOptionsByField?: Record<string, LoadOptions>;
+  /** The labels of the records already chosen, keyed by field id. */
+  selected?: Record<string, ComboboxOption[]>;
 }>(), {
   form: undefined,
   values: () => ({}),
@@ -38,6 +45,9 @@ const props = withDefaults(defineProps<{
   submitLabel: undefined,
   cancelLabel: undefined,
   readonlyFieldIds: () => [],
+  loadOptions: undefined,
+  loadOptionsByField: () => ({}),
+  selected: () => ({}),
 });
 
 const emit = defineEmits<{
@@ -108,6 +118,8 @@ function onSubmit() {
           :field="field"
           :model-value="current[field.id]"
           :disabled="props.submitting || props.readonlyFieldIds.includes(field.id)"
+          :load-options="props.loadOptionsByField[field.id] ?? props.loadOptions"
+          :selected="props.selected[field.id] ?? []"
           @update:model-value="(value) => setValue(field.id, value)"
         />
       </div>

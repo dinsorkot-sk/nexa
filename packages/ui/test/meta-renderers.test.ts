@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
-import { nextTick } from 'vue';
+import { nextTick, h } from 'vue';
 import type { FieldDefinition, FormDefinition, ViewDefinition } from '@nexa/meta';
 import NxMetaCalendar from '../src/components/NxMetaCalendar.vue';
 import NxMetaDetail from '../src/components/NxMetaDetail.vue';
@@ -10,6 +10,10 @@ import NxMetaKanban from '../src/components/NxMetaKanban.vue';
 import NxMetaTable from '../src/components/NxMetaTable.vue';
 
 const options = { required: false, unique: false, readonly: false, hidden: false, searchable: false, sortable: true, filterable: true, indexed: false, isStatus: false, ui: {} };
+
+const press = (el: Element, key: string) => {
+  el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+};
 
 const fields: FieldDefinition[] = [
   { id: 'plate', entityId: 'vehicle', name: 'plate', label: 'Plate', type: 'text', position: 0, options },
@@ -65,6 +69,15 @@ describe('NxMetaTable renders a view over a page of records', () => {
     expect(loading.findAll('tbody tr').length).toBeGreaterThan(0);
     const empty = mount(NxMetaTable, { props: { view, fields, records: [] } });
     expect(empty.text()).toContain('No results');
+  });
+
+  it('gives every row an actions cell when the caller supplies one', () => {
+    const wrapper = mount(NxMetaTable, {
+      props: { view, fields, records: [{ id: 'r1', data: { plate: 'AB-1', odometer: 12 } }] },
+      slots: { actions: ({ recordId }: { recordId: string }) => h('button', recordId) },
+    });
+    expect(wrapper.findAll('th')).toHaveLength(3);
+    expect(wrapper.find('tbody td:last-child button').text()).toBe('r1');
   });
 
   it('shows the error and offers a retry', async () => {
@@ -215,6 +228,44 @@ describe('NxMetaKanban places the records in columns', () => {
     expect(items.map((item) => item.text())).toEqual(['Closed']);
     await items[0]!.trigger('click');
     expect(wrapper.emitted('move')?.at(-1)).toEqual(['v1', 'closed']);
+    wrapper.unmount();
+  });
+
+  it('is one tab stop, and the arrow keys move the focus between the cards', async () => {
+    const wrapper = mount(NxMetaKanban, {
+      props: { view: board, fields: boardFields, records: boardRecords },
+      attachTo: document.body,
+    });
+    const cards = wrapper.findAll('[data-record-id]');
+    // The board's cards in document order: Active has v1 and v3, Closed has v2.
+    expect(cards.map((card) => card.attributes('data-record-id'))).toEqual(['v1', 'v3', 'v2']);
+    expect(cards[0]!.attributes('tabindex')).toBe('0');
+    expect(cards[1]!.attributes('tabindex')).toBe('-1');
+    expect(cards[0]!.findAll('button')[0]!.attributes('tabindex')).toBe('-1');
+
+    (cards[0]!.element as HTMLElement).focus();
+    press(cards[0]!.element, 'ArrowDown');
+    await nextTick();
+    expect(document.activeElement).toBe(cards[1]!.element);
+
+    press(cards[1]!.element, 'ArrowRight');
+    await nextTick();
+    expect(document.activeElement).toBe(cards[2]!.element);
+
+    press(cards[2]!.element, 'ArrowLeft');
+    await nextTick();
+    expect(document.activeElement).toBe(cards[0]!.element);
+
+    press(cards[0]!.element, 'End');
+    await nextTick();
+    expect(document.activeElement).toBe(cards[1]!.element);
+    press(cards[1]!.element, 'Home');
+    await nextTick();
+    expect(document.activeElement).toBe(cards[0]!.element);
+
+    press(cards[0]!.element, 'Enter');
+    await nextTick();
+    expect(wrapper.emitted('open')?.at(-1)).toEqual(['v1']);
     wrapper.unmount();
   });
 });

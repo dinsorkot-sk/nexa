@@ -21,12 +21,18 @@ const props = withDefaults(defineProps<{
   emptyLabel?: string;
   loading?: boolean;
   sort?: NxTableSort;
+  /** Adds a trailing actions cell, filled by the `actions` slot of the same row. */
+  actions?: boolean;
+  /** The accessible name of the actions column. */
+  actionsLabel?: string;
 }>(), {
   rowKey: 'id',
   caption: undefined,
   emptyLabel: undefined,
   loading: false,
   sort: undefined,
+  actions: false,
+  actionsLabel: undefined,
 });
 
 const emit = defineEmits<{ 'update:sort': [sort: NxTableSort] }>();
@@ -89,6 +95,13 @@ function displayValue(value: unknown): string {
             </button>
             <span v-else>{{ column.label }}</span>
           </th>
+          <th
+            v-if="props.actions"
+            scope="col"
+            class="px-3 py-3 text-right"
+          >
+            <span class="sr-only">{{ props.actionsLabel ?? messages.actions }}</span>
+          </th>
         </tr>
       </thead>
       <tbody class="divide-y divide-ui-border">
@@ -114,10 +127,19 @@ function displayValue(value: unknown): string {
               {{ displayValue(row[column.key]) }}
             </slot>
           </td>
+          <td
+            v-if="props.actions"
+            class="px-3 py-3.5 text-right"
+          >
+            <slot
+              name="actions"
+              :row="row"
+            />
+          </td>
         </tr>
         <tr v-if="props.loading">
           <td
-            :colspan="Math.max(props.columns.length, 1)"
+            :colspan="Math.max(props.columns.length, 1) + (props.actions ? 1 : 0)"
             role="status"
             class="px-3 py-8 text-center text-ui-text-muted"
           >
@@ -128,7 +150,7 @@ function displayValue(value: unknown): string {
         </tr>
         <tr v-else-if="props.rows.length === 0">
           <td
-            :colspan="Math.max(props.columns.length, 1)"
+            :colspan="Math.max(props.columns.length, 1) + (props.actions ? 1 : 0)"
             class="px-3 py-8 text-center text-ui-text-muted"
           >
             <slot name="empty">
