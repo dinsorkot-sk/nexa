@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { EntityDefinition, FieldDefinition, RecordSort, ViewDefinition } from '@nexa/meta';
-import { NxMetaTable } from '@nexa/ui';
+import { NxButton, NxMetaTable } from '@nexa/ui';
 
 import { api } from '~/composables/useApi';
 
@@ -94,9 +94,16 @@ function onPage(next: number) {
     >
       ← เอนทิตี
     </NuxtLink>
-    <h1 class="my-4 text-2xl font-bold">
-      {{ entity?.label }}
-    </h1>
+    <div class="my-4 flex items-center justify-between">
+      <h1 class="text-2xl font-bold">
+        {{ entity?.label }}
+      </h1>
+      <NuxtLink :to="`/modules/${moduleId}/entities/${entityId}/new`">
+        <NxButton size="sm">
+          เพิ่มรายการ
+        </NxButton>
+      </NuxtLink>
+    </div>
     <NxMetaTable
       :view="view"
       :fields="fields"
@@ -110,6 +117,15 @@ function onPage(next: number) {
       @update:sort="onSort"
       @update:page="onPage"
       @retry="loadRecords"
-    />
+    >
+      <template #actions="{ recordId }">
+        <NuxtLink
+          :to="`/modules/${moduleId}/entities/${entityId}/${recordId}`"
+          class="text-sm text-ui-primary-text underline"
+        >
+          เปิด
+        </NuxtLink>
+      </template>
+    </NxMetaTable>
   </main>
 </template>
