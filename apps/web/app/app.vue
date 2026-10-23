@@ -1,3 +1,11 @@
+<script setup lang="ts">
+import { provideNxLocale } from '@nexa/ui';
+
+provideNxLocale('th');
+</script>
+
 <template>
-  <NuxtPage />
+  <UApp>
+    <NuxtPage />
+  </UApp>
 </template>

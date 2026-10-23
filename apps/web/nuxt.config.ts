@@ -7,6 +7,8 @@ export default defineNuxtConfig({
   ssr: false,
   css: ['@nexa/ui/styles.css'],
   ui: { colorMode: false },
+  // @nexa/ui is type-checked by its own stricter config; here its sources are only consumed.
+  typescript: { tsConfig: { compilerOptions: { noUncheckedIndexedAccess: false } } },
   // Same-origin proxy so the session cookie never crosses an origin (see packages/sdk).
   nitro: {
     devProxy: { '/v1': { target: process.env.NEXA_API_URL ?? 'http://localhost:3001/v1', changeOrigin: true } },
