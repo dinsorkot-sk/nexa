@@ -7,6 +7,7 @@ import { createPlatformDb } from './platform-db';
 import { tenantMiddleware } from './tenant-middleware';
 import { lookupTenant, provisionTenant } from './tenants';
 import { registerUser, loginUser } from './auth';
+import { createCrudRoutes } from './crud-routes';
 
 const db = createPlatformDb();
 
@@ -55,6 +56,8 @@ app.get('/api/me', (c) => {
   const ctx = getTenantContext();
   return c.json({ tenant: ctx?.tenant ?? null });
 });
+
+app.route('/api', createCrudRoutes());
 
 const port = Number(process.env.PORT ?? 3000);
 logger.info('server starting', { port });
