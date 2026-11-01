@@ -12,15 +12,10 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@nexa/utils": "workspace:*"
-  },
-  "peerDependencies": {
-    "react": "^18.0.0 || ^19.0.0",
-    "react-dom": "^18.0.0 || ^19.0.0"
+    "@nexa/utils": "workspace:*",
+    "solid-js": "^1.9.0"
   },
   "devDependencies": {
-    "@types/react": "^18.3.0",
-    "@types/react-dom": "^18.3.0",
     "typescript": "^5.6.0"
   }
 }
