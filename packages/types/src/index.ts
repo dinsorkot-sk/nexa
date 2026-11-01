@@ -18,3 +18,4 @@ export * from './db';
 export * from './tenant';
 export * from './metadata';
 export * from './module';
+export * from './thai';

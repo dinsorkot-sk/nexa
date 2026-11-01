@@ -10,6 +10,15 @@ export interface TenantDatabase {
   meta_workflow: MetaWorkflowTable;
   meta_migration: MetaMigrationTable;
   audit_log: AuditLogTable;
+  wht_rate: WhtRateTable;
+}
+
+export interface WhtRateTable {
+  id: string;
+  income_type: string;
+  rate: number;
+  description: string;
+  created_at: Generated<string>;
 }
 
 export interface MetaEntityTable {
