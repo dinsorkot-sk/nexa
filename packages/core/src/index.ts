@@ -5,3 +5,5 @@ export function greet(user: User): string {
 }
 
 export const PLATFORMS = ['web', 'server', 'desktop', 'mobile'] as const;
+
+export * from './db';
