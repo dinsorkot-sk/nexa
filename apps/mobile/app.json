@@ -1,0 +1,9 @@
+{
+  "expo": {
+    "name": "Nexa Mobile",
+    "slug": "nexa-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "platforms": ["ios", "android"]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@nexa/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    "./eslint": "./eslint/index.js",
+    "./tsconfig/base": "./tsconfig/base.json",
+    "./tsconfig/react": "./tsconfig/react.json"
+  },
+  "scripts": {
+    "lint": "echo \"no lint\"",
+    "clean": "echo \"no clean\""
+  }
+}
