@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "nuxt": {
+      "type": "http",
+      "url": "https://nuxt.com/mcp",
+      "description": "Nuxt 4.x documentation, blog, modules, changelog"
+    },
+    "nuxt-ui": {
+      "type": "http",
+      "url": "https://ui.nuxt.com/mcp",
+      "headers": {
+        "X-MCP-Tools": "search-components,get-component,search-composables,search-icons,search-documentation,get-documentation-page,list-examples,get-example,list-templates,get-template,get-migration-guide"
+      },
+      "description": "Nuxt UI v4 components, composables, icons, examples, templates"
+    }
+  }
+}

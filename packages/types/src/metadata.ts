@@ -107,3 +107,75 @@ export interface AuditLogEntry {
   after: Record<string, unknown> | null;
   createdAt: string;
 }
+
+// UI-level field types (23). These map onto LogicalType (physical) via the
+// dialect adapter: currency/percentage → decimal, email/phone/url → text, etc.
+export type FieldLogicalType =
+  | 'text'
+  | 'longText'
+  | 'email'
+  | 'phone'
+  | 'url'
+  | 'integer'
+  | 'number'
+  | 'decimal'
+  | 'currency'
+  | 'percentage'
+  | 'boolean'
+  | 'date'
+  | 'datetime'
+  | 'time'
+  | 'select'
+  | 'multiSelect'
+  | 'reference'
+  | 'file'
+  | 'image'
+  | 'json'
+  | 'autoNumber'
+  | 'formula'
+  | 'computed';
+
+export interface FieldOption {
+  value: string;
+  label: string;
+  color?: string;
+}
+
+// Metadata-driven field description consumed by NxFieldInput / NxFieldValue.
+// Superset of MetaField with the UI-level flags from the design system.
+export interface FieldSpec {
+  id: string;
+  entityId?: string;
+  name: string;
+  label: string;
+  logicalType: FieldLogicalType;
+  required?: boolean;
+  unique?: boolean;
+  hidden?: boolean;
+  readOnly?: boolean;
+  nullable?: boolean;
+  minLength?: number | null;
+  maxLength?: number | null;
+  pattern?: string | null;
+  scale?: number | null;
+  precision?: number | null;
+  length?: number | null;
+  referenceEntity?: string | null;
+  formula?: string | null;
+  options?: FieldOption[];
+  default?: unknown;
+  description?: string | null;
+}
+
+export const FIELD_TYPE_GROUPS: { name: string; types: FieldLogicalType[] }[] = [
+  { name: 'TEXT', types: ['text', 'longText', 'email', 'phone', 'url'] },
+  { name: 'NUMBER', types: ['integer', 'number', 'decimal', 'currency', 'percentage'] },
+  { name: 'DATE & TIME', types: ['date', 'datetime', 'time'] },
+  { name: 'CHOICE', types: ['select', 'multiSelect'] },
+  { name: 'RELATION', types: ['reference'] },
+  { name: 'CALCULATED', types: ['autoNumber', 'formula', 'computed'] },
+  { name: 'MEDIA', types: ['file', 'image'] },
+  { name: 'ADVANCED', types: ['json', 'boolean'] },
+];
+
+export const READONLY_FIELD_TYPES: FieldLogicalType[] = ['autoNumber', 'formula', 'computed'];

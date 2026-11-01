@@ -1,0 +1,8 @@
+@import 'tailwindcss';
+@import '@nuxt/ui';
+@import '@nexa/ui/assets/css/tokens.css';
+@import '@nexa/ui/assets/css/theme.css';
+
+html {
+  scroll-behavior: smooth;
+}

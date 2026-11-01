@@ -8,6 +8,8 @@ build/
 out/
 .next/
 .expo/
+.output/
+.nuxt/
 
 # Env
 .env

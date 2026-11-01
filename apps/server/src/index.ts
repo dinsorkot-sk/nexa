@@ -1,5 +1,8 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { greet } from '@nexa/core';
 import { logger, runWithCorrelationId } from './logging';
 import { getTenantContext } from '@nexa/core/db';
@@ -72,6 +75,19 @@ app.route('/api', createCrudRoutes());
 app.route('/api/modules', createModuleRoutes());
 app.route('/api/workflow', createWorkflowRoutes());
 app.route('/api/pdpa', createPdpaRoutes());
+
+// Serve the generated Nuxt SPA (nuxi generate → .output/public) on the same origin as /api.
+const webDist = resolve(process.cwd(), '../web/.output/public');
+if (existsSync(webDist)) {
+  app.use('*', serveStatic({ root: webDist }));
+  app.get('*', (c) => {
+    if (/\.[a-z0-9]+$/i.test(new URL(c.req.url).pathname)) return c.notFound();
+    const fallback = existsSync(resolve(webDist, '200.html'))
+      ? readFileSync(resolve(webDist, '200.html'), 'utf8')
+      : readFileSync(resolve(webDist, 'index.html'), 'utf8');
+    return c.html(fallback);
+  });
+}
 
 const port = Number(process.env.PORT ?? 3000);
 logger.info('server starting', { port });

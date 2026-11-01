@@ -4,7 +4,10 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "out/**", "build/**"]
+      "outputs": ["dist/**", ".next/**", "out/**", "build/**", ".output/**"]
+    },
+    "tokens": {
+      "cache": false
     },
     "dev": {
       "cache": false,

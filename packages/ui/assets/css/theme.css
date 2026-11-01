@@ -1,0 +1,138 @@
+@theme static {
+  /* Nexa green (Nuxt UI set) — overrides Tailwind green.
+     Rule 1: components never use primitive hex; the palette lives here only. */
+  --color-green-50: #effdf5;
+  --color-green-100: #d9fbe8;
+  --color-green-200: #b3f5d1;
+  --color-green-300: #75edae;
+  --color-green-400: #00dc82;
+  --color-green-500: #00c16a;
+  --color-green-600: #00a155;
+  --color-green-700: #007f45;
+  --color-green-800: #016538;
+  --color-green-900: #0a5331;
+  --color-green-950: #052e16;
+
+  --font-sans: 'Inter', 'Noto Sans Thai', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Consolas', 'Noto Sans Mono Thai', ui-monospace, SFMono-Regular, monospace;
+
+  /* Elevation (slate-900 alpha) */
+  --shadow-sm: 0 2px 8px rgb(15 23 42 / 0.07);
+  --shadow-md: 0 4px 16px rgb(15 23 42 / 0.1);
+  --shadow-lg: 0 12px 32px rgb(15 23 42 / 0.16);
+}
+
+/* Typography — 14 text styles from Nexa.figcraft (Thai-first).
+   Thai line-heights are kept generous for marks above vowels. */
+@utility text-nexa-display {
+  font-size: 32px;
+  line-height: 40px;
+  font-weight: 600;
+}
+@utility text-nexa-title {
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 600;
+}
+@utility text-nexa-heading {
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+}
+@utility text-nexa-subheading {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+}
+@utility text-nexa-body-lg {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 400;
+}
+@utility text-nexa-body-lg-medium {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+}
+@utility text-nexa-body {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+}
+@utility text-nexa-body-medium {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+}
+@utility text-nexa-body-strong {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+@utility text-nexa-small {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+}
+@utility text-nexa-small-medium {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+}
+@utility text-nexa-caption {
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+}
+@utility text-nexa-mono {
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 400;
+  font-family: var(--font-mono);
+}
+@utility text-nexa-mono-small {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+}
+
+/* Rule 3 — text on solid colored surfaces is --ui-on-solid (slate-900, both modes),
+   not white. Targets every v4 component whose solid variant pairs a colored
+   background (bg-<role>) with text-inverted. Neutral solid (bg-inverted) keeps
+   inverted text. Deterministic: attribute substring + class, beats utility order. */
+.text-inverted[class*='bg-primary'],
+.text-inverted[class*='bg-secondary'],
+.text-inverted[class*='bg-success'],
+.text-inverted[class*='bg-info'],
+.text-inverted[class*='bg-warning'],
+.text-inverted[class*='bg-error'] {
+  color: var(--ui-on-solid);
+}
+
+/* Soft / subtle / outline variants use --ui-text-highlighted, never the role color. */
+[class*='text-primary'][class*='bg-primary/'],
+[class*='text-primary'][class*='ring-primary/'],
+[class*='text-secondary'][class*='bg-secondary/'],
+[class*='text-secondary'][class*='ring-secondary/'],
+[class*='text-success'][class*='bg-success/'],
+[class*='text-success'][class*='ring-success/'],
+[class*='text-info'][class*='bg-info/'],
+[class*='text-info'][class*='ring-info/'],
+[class*='text-warning'][class*='bg-warning/'],
+[class*='text-warning'][class*='ring-warning/'],
+[class*='text-error'][class*='bg-error/'],
+[class*='text-error'][class*='ring-error/'] {
+  color: var(--ui-text-highlighted);
+}
+
+/* Rule — disabled = opacity 50% (low specificity: any component class wins). */
+:where([disabled], [aria-disabled='true']) {
+  opacity: 0.5;
+}
+
+/* Rule 6 — visible focus for neutral controls and anything v4 leaves unoutlined. */
+:where(button, a, input, select, textarea, [role='button'], [tabindex]):focus-visible {
+  outline: 2px solid var(--ui-ring);
+  outline-offset: 2px;
+}
