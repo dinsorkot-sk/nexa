@@ -12,7 +12,7 @@ function makeField(id: string, entityId: string, name: string, physicalName: str
   return {
     id, entityId, name, label: name, logicalType, physicalName,
     nullable: true, unique: false, required: false, isSystem: false,
-    scale: null, precision: null, length: null, default: null, referenceEntity: null, deletedAt: null, createdAt: '',
+    scale: null, precision: null, length: null, default: null, referenceEntity: null, formula: null, deletedAt: null, createdAt: '',
     ...opts,
   };
 }

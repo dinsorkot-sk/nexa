@@ -101,6 +101,23 @@ export function JsonField(props: FieldProps) {
   );
 }
 
+export function LookupSelectField(props: FieldProps & { options: { value: string; label: string }[] }) {
+  return (
+    <div class="flex flex-col gap-1">
+      <label class="text-sm font-medium">{props.field.label}</label>
+      <select
+        class="rounded-md border px-3 py-2 text-sm"
+        value={String(props.value ?? '')}
+        onChange={(e) => props.onChange(e.currentTarget.value)}
+      >
+        <option value="">— select —</option>
+        {props.options.map((o) => <option value={o.value}>{o.label}</option>)}
+      </select>
+      {props.error && <span class="text-xs text-red-500">{props.error}</span>}
+    </div>
+  );
+}
+
 export function renderField(props: FieldProps & { options?: { value: string; label: string }[] }) {
   switch (props.field.logicalType) {
     case 'boolean':
@@ -114,7 +131,9 @@ export function renderField(props: FieldProps & { options?: { value: string; lab
     case 'json':
       return <JsonField {...props} />;
     default:
-      // enum select if field has options via extra; otherwise text
+      if (props.field.referenceEntity) {
+        return <LookupSelectField {...props} options={props.options ?? []} />;
+      }
       if (props.options && props.options.length > 0) {
         return <SelectField {...props} options={props.options} />;
       }

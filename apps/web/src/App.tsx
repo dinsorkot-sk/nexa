@@ -6,9 +6,9 @@ import { MetaList } from './components/List';
 import type { MetaField } from '@nexa/types';
 
 const sampleFields: MetaField[] = [
-  { id: '1', entityId: 'e1', name: 'name', label: 'Name', logicalType: 'text', physicalName: 'name', nullable: false, unique: false, required: true, isSystem: false, scale: null, precision: null, length: 100, default: null, referenceEntity: null, deletedAt: null, createdAt: '' },
-  { id: '2', entityId: 'e1', name: 'age', label: 'Age', logicalType: 'integer', physicalName: 'age', nullable: true, unique: false, required: false, isSystem: false, scale: null, precision: null, length: null, default: null, referenceEntity: null, deletedAt: null, createdAt: '' },
-  { id: '3', entityId: 'e1', name: 'active', label: 'Active', logicalType: 'boolean', physicalName: 'active', nullable: true, unique: false, required: false, isSystem: false, scale: null, precision: null, length: null, default: null, referenceEntity: null, deletedAt: null, createdAt: '' },
+  { id: '1', entityId: 'e1', name: 'name', label: 'Name', logicalType: 'text', physicalName: 'name', nullable: false, unique: false, required: true, isSystem: false, scale: null, precision: null, length: 100, default: null, referenceEntity: null, formula: null, deletedAt: null, createdAt: '' },
+  { id: '2', entityId: 'e1', name: 'age', label: 'Age', logicalType: 'integer', physicalName: 'age', nullable: true, unique: false, required: false, isSystem: false, scale: null, precision: null, length: null, default: null, referenceEntity: null, formula: null, deletedAt: null, createdAt: '' },
+  { id: '3', entityId: 'e1', name: 'active', label: 'Active', logicalType: 'boolean', physicalName: 'active', nullable: true, unique: false, required: false, isSystem: false, scale: null, precision: null, length: null, default: null, referenceEntity: null, formula: null, deletedAt: null, createdAt: '' },
 ];
 
 export function App() {

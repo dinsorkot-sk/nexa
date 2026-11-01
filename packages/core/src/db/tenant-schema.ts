@@ -39,6 +39,7 @@ export interface MetaFieldTable {
   length: number | null;
   default_value: string | null;
   reference_entity: string | null;
+  formula: string | null;
   created_at: Generated<string>;
 }
 
@@ -50,6 +51,7 @@ export interface MetaRelationTable {
   target_entity: string;
   foreign_key: string;
   junction_table: string | null;
+  cascade: 'restrict' | 'cascade' | 'setNull' | null;
   created_at: Generated<string>;
 }
 

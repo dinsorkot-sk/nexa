@@ -37,6 +37,7 @@ export interface MetaField {
   length: number | null;
   default: unknown;
   referenceEntity: string | null;
+  formula: string | null;
   deletedAt: string | null;
   createdAt: string;
 }
@@ -49,6 +50,7 @@ export interface MetaRelation {
   targetEntity: string;
   foreignKey: string;
   junctionTable: string | null;
+  cascade: 'restrict' | 'cascade' | 'setNull' | null;
   createdAt: string;
 }
 

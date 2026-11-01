@@ -12,3 +12,4 @@ export * from './row-filter-apply';
 export * from './rbac';
 export * from './crud';
 export * from './validation';
+export * from './relations';
