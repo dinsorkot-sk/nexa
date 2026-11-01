@@ -1,7 +1,8 @@
 export interface User {
   id: string;
   email: string;
-  name?: string;
+  name: string | null;
+  passwordHash: string;
   createdAt: string;
 }
 
@@ -14,3 +15,4 @@ export interface ApiResponse<T> {
 export type Platform = 'web' | 'server' | 'desktop' | 'mobile';
 
 export * from './db';
+export * from './tenant';
