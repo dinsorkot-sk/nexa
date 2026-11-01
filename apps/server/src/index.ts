@@ -8,6 +8,7 @@ import { tenantMiddleware } from './tenant-middleware';
 import { lookupTenant, provisionTenant } from './tenants';
 import { registerUser, loginUser } from './auth';
 import { createCrudRoutes } from './crud-routes';
+import { createModuleRoutes } from './module-routes';
 
 const db = createPlatformDb();
 
@@ -58,6 +59,7 @@ app.get('/api/me', (c) => {
 });
 
 app.route('/api', createCrudRoutes());
+app.route('/api/modules', createModuleRoutes());
 
 const port = Number(process.env.PORT ?? 3000);
 logger.info('server starting', { port });

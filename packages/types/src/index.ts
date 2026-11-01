@@ -17,3 +17,4 @@ export type Platform = 'web' | 'server' | 'desktop' | 'mobile';
 export * from './db';
 export * from './tenant';
 export * from './metadata';
+export * from './module';

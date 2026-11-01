@@ -13,3 +13,4 @@ export * from './rbac';
 export * from './crud';
 export * from './validation';
 export * from './relations';
+export * from './modules';
