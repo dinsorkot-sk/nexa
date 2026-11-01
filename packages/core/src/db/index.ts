@@ -3,3 +3,7 @@ export * from './postgres-dialect';
 export * from './sqlite-dialect';
 export * from './platform-schema';
 export * from './tenant-context';
+export * from './tenant-schema';
+export * from './metadata-diff';
+export * from './step-runner';
+export * from './soft-delete';
