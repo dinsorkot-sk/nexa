@@ -9,6 +9,7 @@ import { lookupTenant, provisionTenant } from './tenants';
 import { registerUser, loginUser } from './auth';
 import { createCrudRoutes } from './crud-routes';
 import { createModuleRoutes } from './module-routes';
+import { createWorkflowRoutes } from './workflow-routes';
 
 const db = createPlatformDb();
 
@@ -60,6 +61,7 @@ app.get('/api/me', (c) => {
 
 app.route('/api', createCrudRoutes());
 app.route('/api/modules', createModuleRoutes());
+app.route('/api/workflow', createWorkflowRoutes());
 
 const port = Number(process.env.PORT ?? 3000);
 logger.info('server starting', { port });

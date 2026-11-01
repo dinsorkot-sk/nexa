@@ -14,3 +14,7 @@ export * from './crud';
 export * from './validation';
 export * from './relations';
 export * from './modules';
+export * from './workflow';
+export * from './audit';
+export * from './report';
+export * from './notifications';
