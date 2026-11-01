@@ -1,5 +1,5 @@
 import type { Context, Next } from 'hono';
-import { runWithTenant, setTenantOnRequest } from '@nexa/core';
+import { runWithTenant, setTenantOnRequest } from '@nexa/core/db';
 import type { Tenant } from '@nexa/types';
 
 export type TenantResolver = (slug: string) => Promise<Tenant | null>;

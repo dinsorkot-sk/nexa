@@ -8,6 +8,6 @@
     "jsxImportSource": "solid-js",
     "noEmit": false
   },
-  "references": [{ "path": "../utils" }],
+  "references": [{ "path": "../types" }, { "path": "../utils" }],
   "include": ["src"]
 }

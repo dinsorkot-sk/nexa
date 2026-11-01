@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { getTenantContext } from '@nexa/core';
+import { getTenantContext } from '@nexa/core/db';
 import { getTenantDb } from './tenant-db';
 import {
   buildZodSchema,
@@ -15,9 +15,9 @@ import {
   canPerform,
   readableFields,
   writableFields,
-} from '@nexa/core';
+} from '@nexa/core/db';
 import type { Kysely } from 'kysely';
-import type { TenantDatabase } from '@nexa/core';
+import type { TenantDatabase } from '@nexa/core/db';
 
 export function createCrudRoutes() {
   const r = new Hono();

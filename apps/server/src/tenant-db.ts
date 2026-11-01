@@ -1,6 +1,6 @@
 import { Kysely, SqliteDialect } from 'kysely';
 import Database from 'better-sqlite3';
-import type { TenantDatabase } from '@nexa/core';
+import type { TenantDatabase } from '@nexa/core/db';
 
 const cache = new Map<string, Kysely<TenantDatabase>>();
 

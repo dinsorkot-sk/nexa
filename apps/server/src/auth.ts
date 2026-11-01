@@ -1,6 +1,6 @@
 import { scryptSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Kysely } from 'kysely';
-import type { PlatformDatabase } from '@nexa/core';
+import type { PlatformDatabase } from '@nexa/core/db';
 import type { User } from '@nexa/types';
 
 const KEYLEN = 64;

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { Kysely } from 'kysely';
-import type { PlatformDatabase } from '@nexa/core';
-import { PostgresDialectAdapter, SqliteDialectAdapter } from '@nexa/core';
+import type { PlatformDatabase } from '@nexa/core/db';
+import { PostgresDialectAdapter, SqliteDialectAdapter } from '@nexa/core/db';
 import type { Tenant, TenantStatus } from '@nexa/types';
 
 export async function lookupTenant(db: Kysely<PlatformDatabase>, slug: string): Promise<Tenant | null> {

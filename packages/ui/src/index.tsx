@@ -1,6 +1,8 @@
 import { cn } from '@nexa/utils';
 import type { JSX } from 'solid-js';
 
+export * from './fields';
+
 export interface ButtonProps extends JSX.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary';
 }

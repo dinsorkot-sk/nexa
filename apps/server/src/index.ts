@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { greet } from '@nexa/core';
 import { logger, runWithCorrelationId } from './logging';
-import { getTenantContext } from '@nexa/core';
+import { getTenantContext } from '@nexa/core/db';
 import { createPlatformDb } from './platform-db';
 import { tenantMiddleware } from './tenant-middleware';
 import { lookupTenant, provisionTenant } from './tenants';
