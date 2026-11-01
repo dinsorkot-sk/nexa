@@ -25,6 +25,14 @@ app.use('*', async (c, next) => {
 
 app.get('/health', (c) => c.json({ ok: true }));
 
+app.get('/metrics', (c) => {
+  return c.json({
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.get('/greet/:name', (c) => {
   const name = c.req.param('name');
   const message = greet({ id: '1', email: 'a@b.com', name, passwordHash: '', createdAt: new Date().toISOString() });

@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { getTenantContext } from '@nexa/core/db';
 import { standardModules } from './modules';
+import { businessModules } from './business-modules';
+import { accountingModule } from './accounting-module';
 import { JobRunner } from '@nexa/core/db';
 import type { ModuleRegistration } from '@nexa/types';
 
@@ -11,6 +13,11 @@ export function createModuleRoutes() {
 
   // List installed modules for current tenant (in-memory registry for now)
   const installed = new Map<string, ModuleRegistration[]>();
+
+  r.get('/available', (c) => {
+    const allModules = [...standardModules, ...businessModules, accountingModule];
+    return c.json({ data: allModules.map((m) => ({ name: m.name, version: m.version })) });
+  });
 
   r.get('/', (c) => {
     const ctx = getTenantContext();
@@ -23,7 +30,8 @@ export function createModuleRoutes() {
     const ctx = getTenantContext();
     if (!ctx) return c.json({ error: 'no tenant' }, 400);
     const body = await c.req.json<{ name: string }>();
-    const mod = standardModules.find((m) => m.name === body.name);
+    const allModules = [...standardModules, ...businessModules, accountingModule];
+    const mod = allModules.find((m) => m.name === body.name);
     if (!mod) return c.json({ error: 'module not found' }, 404);
     const reg: ModuleRegistration = {
       id: crypto.randomUUID(),
