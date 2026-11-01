@@ -3,6 +3,7 @@ import { Button } from '@nexa/ui';
 import { greet } from '@nexa/core';
 import { MetaForm } from './components/Form';
 import { MetaList } from './components/List';
+import { SchemaDesigner } from './components/SchemaDesigner';
 import type { MetaField } from '@nexa/types';
 
 const sampleFields: MetaField[] = [
@@ -14,6 +15,8 @@ const sampleFields: MetaField[] = [
 export function App() {
   const [rows, setRows] = createSignal<Record<string, unknown>[]>([]);
   const [showForm, setShowForm] = createSignal(false);
+  const [showDesigner, setShowDesigner] = createSignal(false);
+  const [entities] = createSignal([{ id: 'e1', name: 'Customer', tableName: 'customer', version: 1, status: 'published' as const, isSystem: false, createdAt: '', updatedAt: '' }]);
 
   const handleSubmit = (values: Record<string, unknown>) => {
     setRows((prev) => [...prev, { id: String(prev.length + 1), ...values }]);
@@ -25,7 +28,21 @@ export function App() {
       <h1>Nexa Web</h1>
       <p>{greet({ id: '1', email: 'a@b.com', name: 'Nexa', passwordHash: '', createdAt: new Date().toISOString() })}</p>
       <Button onClick={() => setShowForm((s) => !s)}>{showForm() ? 'Cancel' : 'New'}</Button>
+      <Button onClick={() => setShowDesigner((s) => !s)}>{showDesigner() ? 'Hide Designer' : 'Schema Designer'}</Button>
       {showForm() && <MetaForm fields={sampleFields} onSubmit={handleSubmit} />}
+      {showDesigner() && (
+        <div style={{ 'margin-top': '16px' }}>
+          <SchemaDesigner
+            entities={entities()}
+            fieldsByEntity={{ e1: sampleFields }}
+            versions={[{ version: 1, status: 'published' }]}
+            onCreateEntity={(name, table) => console.log('create', name, table)}
+            onAddField={(eid, f) => console.log('add field', eid, f.name)}
+            onPublish={(eid) => console.log('publish', eid)}
+            onRollback={(v) => console.log('rollback', v)}
+          />
+        </div>
+      )}
       <div style={{ 'margin-top': '16px' }}>
         <MetaList fields={sampleFields} rows={rows()} />
       </div>
