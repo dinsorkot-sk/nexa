@@ -1,0 +1,19 @@
+{
+  "name": "nexa-erp",
+  "version": "0.1.0",
+  "description": "Open-source no-code/low-code ERP for wholesale and distribution businesses",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.8.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @nexa/web --filter @nexa/api run dev",
+    "dev:web": "pnpm --filter @nexa/web run dev",
+    "dev:api": "pnpm --filter @nexa/api run dev",
+    "build": "pnpm -r --if-present run build",
+    "typecheck": "pnpm -r --if-present run typecheck"
+  }
+}
