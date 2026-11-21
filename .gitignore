@@ -1,0 +1,14 @@
+node_modules/
+.turbo/
+.nuxt/
+.output/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+.github/team/review/
