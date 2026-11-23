@@ -1,6 +1,7 @@
-# Nexa Monorepo Template
+# Nexa
 
-ใช้เป็นต้นแบบสำหรับสร้าง repo แยกของแต่ละโปรเจกต์ โดยใช้ Nuxt, NestJS และ SQLite ร่วมกับ pnpm workspaces และ Turborepo
+แพลตฟอร์ม ERP แบบ No-Code/Low-Code บน metadata-driven engine (`packages/engine`) ที่ออกแบบโดยศึกษาแนวคิดจาก Odoo
+(ดู `docs/adr/0001-engine-core.md`) ใช้ Nuxt, NestJS และ PGlite (Postgres แบบ embedded หนึ่งฐานต่อ tenant) ร่วมกับ pnpm workspaces และ Turborepo
 
 ## เริ่มโปรเจกต์
 
@@ -10,20 +11,43 @@
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm db:migrate
+cp apps/api/.env.example apps/api/.env
 pnpm dev
 ```
 
 เว็บเปิดที่ <http://localhost:3000> และ API เปิดที่ <http://localhost:3001> ตรวจว่า API รับคำขอได้ด้วย `curl -fsS http://localhost:3001/health` ซึ่งควรตอบ `{"status":"ok"}`
 
-ค่าเริ่มต้นของ SQLite คือ `file:./local.db` โดยอ้างตำแหน่งจาก `apps/api` ดู `apps/api/.env.example` สำหรับตัวแปรที่ตั้งได้ เมื่อแก้ Drizzle schema ให้รัน `pnpm db:generate` ตรวจ SQL แล้วรัน `pnpm db:migrate` จาก root เก็บ SQL migration และ metadata ไว้กับโค้ด
+ฐานข้อมูลไม่ต้อง migrate เอง: engine สร้างและปรับ schema ของแต่ละ tenant จาก model ของ module ที่ติดตั้ง
+ข้อมูลอยู่ใน `NEXA_DATA_DIR` (ค่าเริ่มต้น `apps/api/data/<tenant>`) และเปิดได้เฉพาะ tenant ใน `NEXA_TENANTS`
+ดูตัวแปรทั้งหมดใน `apps/api/.env.example`
+
+### Engine API (ช่วงพัฒนา)
+
+ทุกคำขอระบุผู้ใช้ด้วย header `X-Nexa-Tenant` และ `X-Nexa-Uid` ซึ่งใช้ได้เมื่อ `NEXA_DEV_AUTH=1` เท่านั้น
+(ห้ามเปิดใน production; uid 1 คือ superuser ภายในและเรียกผ่าน API ไม่ได้) ผู้ดูแลเริ่มต้นคือ user `admin`
+
+```sh
+curl -s -X POST localhost:3001/api/model/res.users/search_read \
+  -H 'content-type: application/json' -H 'x-nexa-tenant: dev' -H 'x-nexa-uid: 2' \
+  -d '{"fields":["login"],"limit":10}'
+```
+
+| Endpoint | หน้าที่ |
+|---|---|
+| `POST /api/model/:model/search_read` | `{domain, fields, offset, limit, order}` → `{records, length}` |
+| `POST /api/model/:model/search_count` · `read` · `create` · `write` · `unlink` · `onchange` | CRUD ตาม contract ใน `@nexa/shared` |
+| `POST /api/model/:model/call/:method` | เรียก method ที่ประกาศใน model เท่านั้น |
+| `GET /api/ui/view/:model/:type` · `/api/ui/action/:xmlId` · `/api/ui/menus` | metadata สำหรับ UI ตามสิทธิ์ผู้ใช้ |
+
+ข้อผิดพลาดตอบเป็น `{error: {type, message}}`: 400 คำขอผิดรูป, 401 ไม่ได้ยืนยันตัวตน, 403 ไม่มีสิทธิ์, 404 ไม่พบ record, 422 ข้อมูลไม่ผ่านการตรวจ
 
 ## ขอบเขตแพ็กเกจ
 
 | ส่วน | หน้าที่ |
 |---|---|
 | `apps/web` | หน้า Nuxt และ integration ฝั่งเว็บ ใช้ `@nexa/ui` กับ contracts ใน `@nexa/shared` |
-| `apps/api` | NestJS ประกอบ use cases กับ database adapter และเก็บ Drizzle schema กับ migrations |
+| `apps/api` | NestJS: HTTP adapter บาง ๆ ของ engine (auth, validation, error mapping) |
+| `packages/engine` | ORM, domain, security, module system และ UI metadata ของ ERP (ทำงานบน PGlite) |
 | `packages/core` | กติกาธุรกิจและ use cases พร้อม interface ของ dependency ที่ use case ต้องใช้ |
 | `packages/shared` | Types, validation schemas และ API contracts ที่ใช้ข้ามแอป |
 | `packages/ui` | Nuxt layer สำหรับธีมและ wrappers กลาง `NexaForm`, `NexaTable` และ `NexaDialog` |

@@ -168,7 +168,10 @@ function isColumnField(f: ResolvedField): boolean {
 export async function computeValues(records: RecordsetImpl, f: ResolvedField): Promise<Map<number, unknown>> {
   if (f.related) return followPath(records, f.related);
   const meta = records.env.registry.get(records.model);
-  const fn = (typeof f.compute === 'string' ? meta.def.methods?.[f.compute] : f.compute) as ComputeFn | undefined;
+  const methods = meta.def.methods;
+  const fn = (typeof f.compute === 'string'
+    ? (methods && Object.hasOwn(methods, f.compute) ? methods[f.compute] : undefined)
+    : f.compute) as ComputeFn | undefined;
   if (!fn) throw new EngineError(`No compute for '${records.model}.${f.name}'`);
   const raw = await fn(records);
   const map = raw instanceof Map ? raw : new Map(Object.entries(raw ?? {}).map(([k, v]) => [Number(k), v]));

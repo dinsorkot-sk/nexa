@@ -94,7 +94,7 @@ async function finish(
     if (!f) throw new ValidationError(`View for '${meta.name}' references unknown field '${name}'`);
     fields[name] = {
       type: f.type, string: f.string ?? humanize(name), required: !!f.required,
-      readonly: !!f.readonly || !!f.compute || !!f.related,
+      readonly: !!f.readonly || !!f.compute || !!f.related || (f.writeGroups?.length ? !can(f.writeGroups) : false),
       ...(f.help ? { help: f.help } : {}), ...(f.selection ? { selection: f.selection } : {}),
       ...(f.comodel ? { comodel: f.comodel } : {}), ...(f.compute || f.related ? { relatedOrComputed: true } : {}),
     };

@@ -8,24 +8,22 @@
     "start": "node dist/main.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "test": "vitest run"
   },
   "dependencies": {
-    "@libsql/client": "^0.15.15",
     "@nestjs/common": "^11.1.0",
     "@nestjs/core": "^11.1.0",
     "@nestjs/platform-express": "^11.1.0",
     "@nexa/core": "workspace:*",
+    "@nexa/engine": "workspace:*",
     "@nexa/shared": "workspace:*",
     "dotenv": "^16.6.1",
-    "drizzle-orm": "^0.44.7",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "zod": "^4.1.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
-    "drizzle-kit": "^0.31.5"
+    "@types/express": "^5.0.0"
   }
 }

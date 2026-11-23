@@ -31,8 +31,8 @@ export const securityModels: ModelDef[] = [
     name: 'res.users', origin: 'module', module: 'base', order: 'login asc',
     fields: {
       name: { type: 'char', required: true },
-      login: { type: 'char', required: true, unique: true },
-      active: { type: 'boolean', default: true },
+      login: { type: 'char', required: true, unique: true, writeGroups: [ACCESS_MANAGER] },
+      active: { type: 'boolean', default: true, writeGroups: [ACCESS_MANAGER] },
       // fields that grant privileges: only access managers may change them (Odoo groups_id is restricted too)
       company_id: { type: 'many2one', comodel: 'res.company', required: true, ondelete: 'restrict', groups: [ACCESS_MANAGER] },
       company_ids: {

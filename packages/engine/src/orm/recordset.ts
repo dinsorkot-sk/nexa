@@ -6,7 +6,7 @@ import { compileDomain, compileOrder } from '../domain/compile.js';
 import { affected, cascadeAffected, computeValues, isComputed, isStoredComputed, mergeTodo, recompute, type Todo } from './compute.js';
 import type { EnvImpl } from './env.js';
 import { isColumn, type ResolvedField } from './registry.js';
-import { checkModelAccess, checkRecordRules, hiddenFields, readRuleResolver, ruleDomain } from '../security/access.js';
+import { checkModelAccess, checkRecordRules, hiddenFields, readRuleResolver, ruleDomain, userSecurity } from '../security/access.js';
 
 const MAGIC = new Set(['id', 'create_date', 'write_date', 'create_uid', 'write_uid']);
 const MAX_ONCHANGE_ROUNDS = 10;
@@ -224,7 +224,8 @@ export class RecordsetImpl implements Recordset {
   }
 
   async call(method: string, ...args: unknown[]): Promise<unknown> {
-    const fn = this.meta.def.methods?.[method];
+    const methods = this.meta.def.methods;
+    const fn = methods && Object.hasOwn(methods, method) ? methods[method] : undefined;
     if (!fn) throw new EngineError(`Model '${this.model}' has no method '${method}'`);
     return fn(this, ...args);
   }
@@ -249,6 +250,13 @@ export class RecordsetImpl implements Recordset {
   private async checkFieldWrite(names: string[]): Promise<void> {
     const hidden = await hiddenFields(this.env, this.model);
     for (const n of names) if (hidden.has(n)) throw new AccessError(`Field '${this.model}.${n}' is restricted`);
+    if (this.env.su) return;
+    const fields = names.map((n) => this.meta.fields.get(n)).filter((f) => f?.writeGroups?.length);
+    if (!fields.length) return;
+    const sec = await userSecurity(this.env);
+    for (const f of fields) {
+      if (!f!.writeGroups!.some((g) => sec.groups.has(g))) throw new AccessError(`Field '${this.model}.${f!.name}' is read-only for you`);
+    }
   }
 
   async onchange(values: Vals, field: string): Promise<Vals> {
@@ -261,7 +269,8 @@ export class RecordsetImpl implements Recordset {
       if (round >= MAX_ONCHANGE_ROUNDS * Math.max(1, Object.keys(handlers).length)) {
         throw new EngineError(`onchange on '${this.model}' does not settle (cycle?)`);
       }
-      const h = handlers[queue.shift()!];
+      const key = queue.shift()!;
+      const h = Object.hasOwn(handlers, key) ? handlers[key] : undefined;
       if (!h) continue;
       const res = (await h(draft, this.env)) ?? {};
       for (const [k, v] of Object.entries(res)) {
@@ -476,11 +485,14 @@ async function sqlCall<T>(fn: () => Promise<T>): Promise<T> {
     return await fn();
   } catch (err) {
     const code = (err as { code?: string }).code;
-    const msg = err instanceof Error ? err.message : String(err);
-    if (code === '23505') throw new ValidationError(`Duplicate value: ${msg}`);
-    if (code === '23514') throw new ValidationError(`Check constraint failed: ${msg}`);
-    if (code === '23503') throw new ValidationError(`Referenced record missing or still in use: ${msg}`);
-    if (code === '23502') throw new ValidationError(`Missing required value: ${msg}`);
+    // never echo raw database messages (constraint names, SQL, values); name the column at most
+    const e = err as { column?: string; detail?: string };
+    const name = e.column ?? /Key \(([a-z0-9_, ]+)\)/.exec(e.detail ?? '')?.[1];
+    const col = name ? ` (${name})` : '';
+    if (code === '23505') throw new ValidationError(`Duplicate value for a unique field${col}`);
+    if (code === '23514') throw new ValidationError(`A value violates a check constraint${col}`);
+    if (code === '23503') throw new ValidationError('A referenced record is missing or still in use');
+    if (code === '23502') throw new ValidationError(`Missing required value${col}`);
     throw err;
   }
 }

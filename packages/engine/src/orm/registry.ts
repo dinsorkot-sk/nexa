@@ -133,7 +133,7 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
       }
       if (f.compute || f.related) {
         if (MAGIC_FIELDS[f.name]) throw new EngineError(`Field '${m.name}.${f.name}' cannot be computed`);
-        if (typeof f.compute === 'string' && !m.def.methods?.[f.compute]) {
+        if (typeof f.compute === 'string' && !(m.def.methods && Object.hasOwn(m.def.methods, f.compute))) {
           throw new EngineError(`Compute method '${f.compute}' not found on '${m.name}'`);
         }
         if (f.store && (f.type === 'one2many' || f.type === 'many2many')) {

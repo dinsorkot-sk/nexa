@@ -16,3 +16,4 @@ export * from './modules/index.js';
 export { ensureUiTables, writeModuleUi, removeModuleUi } from './ui-meta/tables.js';
 export { applyPatches, parseSelector, filterArch } from './ui-meta/arch.js';
 export { getView, getAction, getMenus, defaultArch, validateViews, type ResolvedView, type FieldInfo, type MenuNode, type ResolvedAction } from './ui-meta/views.js';
+export { baseModule } from './base/manifest.js';
