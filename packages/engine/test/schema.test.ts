@@ -110,7 +110,7 @@ describe('metadata store', () => {
   it('removes a custom model (destructive) and refuses when still referenced', async () => {
     await meta.createModel({ name: 'x_tag', fields: { x_name: { type: 'char' } } });
     await meta.addField('x_book', 'x_tag_id', { type: 'many2one', comodel: 'x_tag' });
-    await expect(meta.removeModel('x_tag', { allowDestructive: true })).rejects.toThrow(/unknown model/);
+    await expect(meta.removeModel('x_tag', { allowDestructive: true })).rejects.toThrow(/still referenced by x_book.x_tag_id/);
     expect(h.registry.models.has('x_tag')).toBe(true);
     await meta.removeField('x_book', 'x_tag_id', { allowDestructive: true });
     await expect(meta.removeModel('x_tag', { allowDestructive: false })).rejects.toThrow(EngineError);

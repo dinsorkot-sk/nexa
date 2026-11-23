@@ -13,3 +13,6 @@ export { securityModels, ACCESS_MANAGER } from './security/models.js';
 export { checkModelAccess, checkRecordRules, ruleDomain, combine as combineDomains, userSecurity } from './security/access.js';
 export { SUPERUSER_ID } from './orm/env.js';
 export * from './modules/index.js';
+export { ensureUiTables, writeModuleUi, removeModuleUi } from './ui-meta/tables.js';
+export { applyPatches, parseSelector, filterArch } from './ui-meta/arch.js';
+export { getView, getAction, getMenus, defaultArch, validateViews, type ResolvedView, type FieldInfo, type MenuNode, type ResolvedAction } from './ui-meta/views.js';

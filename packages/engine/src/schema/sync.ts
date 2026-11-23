@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 import { EngineError, type FieldDef, type Registry, type ResolvedModel, type SqlDriver } from '../contracts/index.js';
 import { isColumn } from '../orm/registry.js';
 
+/** Table of res.users; its id 1 is reserved for the superuser. */
+const USERS_TABLE = 'res_users';
+
 const IDENT_RE = /^[a-z_][a-z0-9_]*$/;
 
 /** Validate an SQL identifier before quoting it (never interpolate unchecked names). */
@@ -216,7 +219,13 @@ export async function applyMigration(
   };
   const ordered = [...plan.ops].sort((a, b) => rank[a.kind] - rank[b.kind]);
   await db.transaction(async (tx) => {
-    for (const op of ordered) await tx.query({ text: ddlFor(op, plan.models), params: [] });
+    for (const op of ordered) {
+      await tx.query({ text: ddlFor(op, plan.models), params: [] });
+      // uid 1 is the superuser (SUPERUSER_ID): no real user row may ever receive id 1
+      if (op.kind === 'create_table' && op.table === USERS_TABLE) {
+        await tx.query({ text: `ALTER SEQUENCE ${quoteIdent(USERS_TABLE + '_id_seq')} RESTART WITH 2`, params: [] });
+      }
+    }
   });
 }
 

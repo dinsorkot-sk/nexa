@@ -6,6 +6,8 @@ import { EnvImpl } from '../orm/env.js';
 import { isColumn, type ModelRegistry } from '../orm/registry.js';
 import { applyMigration, planMigration, quoteIdent, type MigrationOp } from '../schema/sync.js';
 import { removeModuleSecurity, writeModuleSecurity } from '../security/tables.js';
+import { removeModuleUi, writeModuleUi } from '../ui-meta/tables.js';
+import { validateViews } from '../ui-meta/views.js';
 import { compareVersions, type ModuleCatalog } from './catalog.js';
 import { withDriverLock } from './lock.js';
 
@@ -39,7 +41,7 @@ export interface UpgradeResult {
 }
 
 export interface ModuleWarning {
-  kind: 'orphan_module' | 'orphan_columns';
+  kind: 'orphan_module' | 'orphan_columns' | 'orphan_custom' | 'superuser_row';
   message: string;
   module?: string;
   columns?: string[];
@@ -268,6 +270,7 @@ export class ModuleService {
       if (!del.length) throw new EngineError(`Unknown module '${name}'`);
       await tx.query({ text: `DELETE FROM nx_model_data WHERE module = $1`, params: [name] });
       await removeModuleSecurity(tx, name);
+      await removeModuleUi(tx, name);
     }));
     this.ctx.warnings.splice(0, this.ctx.warnings.length, ...this.ctx.warnings.filter((w) => w.module !== name));
   }
@@ -334,6 +337,7 @@ export class ModuleService {
         for (const n of plan.uninstall) {
           await unloadData(oldEnv, tx, n);
           await removeModuleSecurity(tx, n);
+          await removeModuleUi(tx, n);
         }
         ({ dropTables, drops } = removedSchema(oldModels, models));
         await dropForeignKeys(tx, dropTables);
@@ -357,7 +361,10 @@ export class ModuleService {
         }
         await loadData(env, tx, m, from !== undefined, this.visible(n));
         await writeModuleSecurity(tx, n, m.access ?? [], m.rules ?? []);
+        await writeModuleUi(tx, n, models, m.views ?? [], m.actions ?? [], m.menus ?? []);
       }
+      // inheriting views of every module must still apply after this change (also catches uninstalled parents)
+      await validateViews(env);
       for (const n of plan.install) await catalog.get(n).hooks?.postInit?.(env);
       return {
         models,

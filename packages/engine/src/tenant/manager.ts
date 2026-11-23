@@ -1,12 +1,15 @@
 import { mkdir, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { EngineError, type Context, type Env, type ModelDef, type TenantHandle, type TenantManager } from '../contracts/index.js';
+import {
+  EngineError, type Context, type Env, type ModelDef, type Registry, type SqlDriver, type TenantHandle, type TenantManager,
+} from '../contracts/index.js';
 import { PgliteDriver } from '../driver/pglite.js';
 import { EnvImpl } from '../orm/env.js';
 import { ModelRegistry } from '../orm/registry.js';
-import { syncSchema } from '../schema/sync.js';
+import { quoteIdent, syncSchema } from '../schema/sync.js';
 import { combinedSource, ensureMetadataTables } from '../metadata/store.js';
 import { ensureSecurityTables } from '../security/tables.js';
+import { ensureUiTables } from '../ui-meta/tables.js';
 import { ModuleCatalog } from '../modules/catalog.js';
 import { ModuleService, ensureModuleTables, installedModuleDefs, type ModuleWarning } from '../modules/service.js';
 
@@ -73,11 +76,13 @@ export class PgliteTenantManager implements TenantManager {
       await mkdir(dir, { recursive: true });
     }
     const driver = await PgliteDriver.open(dir);
-    const registry = new ModelRegistry(combinedSource(driver, installedModuleDefs(driver, this.catalog, this.opts.models)));
+    const skip = (what: string) => this.opts.onWarning?.(tenant, { kind: 'orphan_custom', message: `Skipped ${what}` });
+    const registry = new ModelRegistry(combinedSource(driver, installedModuleDefs(driver, this.catalog, this.opts.models), skip));
     let attach: (h: TenantHandle) => void;
     try {
       await ensureMetadataTables(driver);
       await ensureSecurityTables(driver);
+      await ensureUiTables(driver);
       await ensureModuleTables(driver);
       // pending upgrades / new dependencies are applied atomically (with hooks) before the tenant is served
       const onWarning = this.opts.onWarning;
@@ -88,6 +93,7 @@ export class PgliteTenantManager implements TenantManager {
       attach = opened.attach;
       if (!opened.changed) await registry.reload();
       await syncSchema(registry, driver);
+      await guardSuperuserId(driver, registry, (message) => this.opts.onWarning?.(tenant, { kind: 'superuser_row', message }));
     } catch (err) {
       await driver.close(); // release the data dir before a retry reopens it
       throw err;
@@ -102,4 +108,20 @@ export class PgliteTenantManager implements TenantManager {
     attach(handle);
     return handle;
   }
+}
+
+/**
+ * uid 1 is the superuser. Keep the users sequence past 1 on every open (tenants created before the
+ * reservation existed) and report a real user row that already holds id 1: it runs as superuser.
+ */
+async function guardSuperuserId(driver: SqlDriver, registry: Registry, warn: (message: string) => void): Promise<void> {
+  const users = registry.models.get('res.users');
+  if (!users?.table) return;
+  const t = quoteIdent(users.table);
+  await driver.query({
+    text: `SELECT setval(pg_get_serial_sequence($1, 'id'), GREATEST((SELECT COALESCE(MAX(id), 1) FROM ${t}), 1))`,
+    params: [users.table],
+  });
+  const [row] = await driver.query<{ login: string }>({ text: `SELECT login FROM ${t} WHERE id = 1`, params: [] });
+  if (row) warn(`User '${row.login}' has id 1 and therefore runs as superuser; reassign it`);
 }

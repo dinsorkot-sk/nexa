@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   EngineError, MetadataStore, ModuleCatalog, type ModuleWarning, ModuleService, PgliteTenantManager, type ModuleManifest, type TenantHandle,
+  withDriverLock,
 } from '../src/index.js';
 
 const columns = async (h: TenantHandle, table: string) =>
@@ -283,6 +284,28 @@ describe('module system regressions', () => {
       await expect(svc.forceForget('base')).rejects.toThrow(/uninstall/);
     });
   }, 60_000);
+
+  it('an orphan module whose models were customised still opens (custom extensions/refs skipped)', async () => {
+    await withDir(async (dir) => {
+      const h0 = await diskManager(dir, [base(), sale()]).create('orph2', ['sale']);
+      const store = MetadataStore.for(h0);
+      await store.addField('sale.order', 'x_note', { type: 'char' });
+      await store.createModel({ name: 'x_link', fields: { x_order_id: { type: 'many2one', comodel: 'sale.order' }, x_name: { type: 'char' } } });
+      await closeLast();
+      const warnings: ModuleWarning[] = [];
+      const h = await diskManager(dir, [base()], warnings).open('orph2');
+      expect(h.registry.models.has('sale.order')).toBe(false);
+      expect(h.registry.get('x_link').fields.has('x_order_id')).toBe(false);
+      expect(h.registry.get('x_link').fields.has('x_name')).toBe(true);
+      expect(warnings.map((w) => w.kind)).toEqual(expect.arrayContaining(['orphan_module', 'orphan_custom']));
+    });
+  }, 60_000);
+
+  it('nested schema changes on the same tenant fail fast instead of deadlocking', async () => {
+    const h = await manager([base()]).create('lock2', ['base']);
+    await expect(withDriverLock(h.driver, () => withDriverLock(h.driver, async () => 1))).rejects.toThrow(/Nested schema change/);
+    expect(await withDriverLock(h.driver, async () => 2)).toBe(2); // lock released
+  });
 
   it('installs dependencies added by a new version at open; catalog rejects undeclared cross-module models', async () => {
     const crm: ModuleManifest = {

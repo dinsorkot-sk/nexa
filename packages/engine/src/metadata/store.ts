@@ -88,14 +88,34 @@ export async function loadCustomDefs(db: SqlDriver): Promise<ModelDef[]> {
   return out;
 }
 
-/** Registry source combining module definitions with the tenant's custom metadata. */
-export function combinedSource(db: SqlDriver, moduleDefs: () => Promise<readonly ModelDef[]>): () => Promise<ModelDef[]> {
+/**
+ * Registry source combining module definitions with the tenant's custom metadata.
+ * Custom extensions or relational fields that target models no longer present (e.g. the module
+ * defining them became an orphan) are skipped and reported via `onSkip`, so the tenant still opens.
+ */
+export function combinedSource(
+  db: SqlDriver, moduleDefs: () => Promise<readonly ModelDef[]>, onSkip?: (what: string) => void,
+): () => Promise<ModelDef[]> {
   return async () => {
     const custom = await loadCustomDefs(db);
+    const mods = await moduleDefs();
     // custom models first so module-independent; extensions of module models after module defs
     const customModels = custom.filter((d) => !d.extends);
-    const extensions = custom.filter((d) => d.extends);
-    return [...(await moduleDefs()), ...customModels, ...extensions];
+    const known = new Set([...mods.map((d) => d.name), ...customModels.map((d) => d.name)]);
+    const keep: ModelDef[] = [];
+    for (const d of [...customModels, ...custom.filter((x) => x.extends)]) {
+      if (d.extends && !known.has(d.name)) {
+        onSkip?.(`custom fields on missing model '${d.name}'`);
+        continue;
+      }
+      const fields = Object.fromEntries(Object.entries(d.fields).filter(([n, f]) => {
+        if (!f.comodel || known.has(f.comodel)) return true;
+        onSkip?.(`custom field '${d.name}.${n}' (target '${f.comodel}' missing)`);
+        return false;
+      }));
+      keep.push({ ...d, fields });
+    }
+    return [...mods, ...keep];
   };
 }
 
@@ -179,6 +199,12 @@ export class MetadataStore {
     await this.change(async (tx) => {
       const del = await tx.query({ text: `DELETE FROM nx_model WHERE name = $1 RETURNING id`, params: [name] });
       if (!del.length) throw new ValidationError(`No custom model '${name}'`);
+      const refs = await tx.query<{ model: string; name: string }>({
+        text: `SELECT model, name FROM nx_field WHERE comodel = $1 AND model <> $1 ORDER BY model, name`, params: [name],
+      });
+      if (refs.length) {
+        throw new ValidationError(`Model '${name}' is still referenced by ${refs.map((r) => `${r.model}.${r.name}`).join(', ')}`);
+      }
       await tx.query({ text: `DELETE FROM nx_field WHERE model = $1`, params: [name] });
     }, opts, (op) => op.kind === 'drop_table' && op.table === table, [table]);
   }
@@ -188,6 +214,10 @@ export class MetadataStore {
   }
 
   private async insertField(tx: SqlDriver, model: string, name: string, f: FieldDef): Promise<void> {
+    if (f.comodel && f.comodel !== model && !this.registry.models.has(f.comodel)) {
+      const known = await tx.query({ text: `SELECT 1 FROM nx_model WHERE name = $1`, params: [f.comodel] });
+      if (!known.length) throw new ValidationError(`Field '${model}.${name}' references unknown model '${f.comodel}'`);
+    }
     await tx.query({
       text: `INSERT INTO nx_field (model, name, ttype, string, help, required, readonly, "index", "unique",
         default_value, selection, comodel, inverse_name, relation_table, ondelete)
