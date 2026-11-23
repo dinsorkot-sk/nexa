@@ -131,3 +131,42 @@ describe('UI metadata', () => {
     expect((await call('GET', '/api/ui/view/res.users/nonsense', admin)).status).toBe(400);
   });
 });
+
+describe('no-code Studio', () => {
+  it('limits Studio to Settings admins and creates a model, field, and view usable by the generic API', async () => {
+    const denied = await call('GET', '/api/studio/models', bob);
+    expect([denied.status, errorType(denied.body)]).toEqual([403, 'access']);
+
+    const created = await post('/api/studio/model', admin, { name: 'x_studio_task', description: 'Tasks' });
+    expect(created.status).toBe(200);
+    expect(await post('/api/studio/field', admin, {
+      model: 'x_studio_task', name: 'x_title', type: 'char', label: 'Title',
+    })).toMatchObject({ status: 200, body: { field: 'x_title' } });
+    const view = await post('/api/studio/view', admin, {
+      model: 'x_studio_task', name: 'x_task_list', type: 'list',
+      arch: { tag: 'list', children: [{ tag: 'field', attrs: { name: 'x_title' } }] },
+    });
+    expect(view).toMatchObject({ status: 200, body: { xmlId: 'studio.x_task_list' } });
+    const duplicate = await post('/api/studio/view', admin, {
+      model: 'x_studio_task', name: 'x_second_list', type: 'list',
+      arch: { tag: 'list', children: [{ tag: 'field', attrs: { name: 'x_title' } }] },
+    });
+    expect([duplicate.status, errorType(duplicate.body)]).toEqual([422, 'validation']);
+    const generated = await call('GET', '/api/ui/view/x_studio_task/list', admin);
+    expect(generated.body).toMatchObject({ xmlId: 'studio.x_task_list' });
+    const [id] = (await post('/api/model/x_studio_task/create', admin, { values: { x_title: 'Draft' } })).body.ids as number[];
+    expect((await post('/api/model/x_studio_task/read', admin, { ids: [id], fields: ['x_title'] })).body.records)
+      .toEqual([{ id, x_title: 'Draft' }]);
+  });
+
+  it('rejects malformed Studio views without storing them and checks tenant access', async () => {
+    const invalid = await post('/api/studio/view', admin, {
+      model: 'x_studio_task', name: 'x_invalid', type: 'list',
+      arch: { tag: 'list', children: [{ tag: 'field', attrs: { name: 'missing' } }] },
+    });
+    expect([invalid.status, errorType(invalid.body)]).toEqual([422, 'validation']);
+    const unchanged = await call('GET', '/api/ui/view/x_studio_task/list', admin);
+    expect(unchanged.body).toMatchObject({ xmlId: 'studio.x_task_list' });
+    expect(await post('/api/studio/model', admin, { name: 'x_other' }, 'unknown')).toMatchObject({ status: 403 });
+  });
+});

@@ -1,12 +1,12 @@
 import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import {
-  AccessError, ModuleCatalog, ModuleService, PgliteTenantManager, SUPERUSER_ID, baseModule,
+  AccessError, ModuleCatalog, ModuleService, PgliteTenantManager, SUPERUSER_ID, baseModule, demoModules,
   type Env, type ModuleManifest, type TenantHandle,
 } from '@nexa/engine';
 import { loadEngineConfig, type EngineConfig } from './config';
 
-/** Modules this server ships; later loaded from addon packages. */
-export const MODULES: ModuleManifest[] = [baseModule];
+/** The demo modules are available for tenants configured to install them. */
+export const MODULES: ModuleManifest[] = [baseModule, ...demoModules];
 
 /**
  * Owns the per-tenant engine instances. Only tenants listed in NEXA_TENANTS can be opened; a listed

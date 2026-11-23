@@ -65,6 +65,10 @@ export function useEngine() {
   }
 
   return {
+    studioModels: () => request<{ models: { name: string; description?: string; fields: { name: string; type: string; string: string; comodel?: string }[] }[] }>('GET', 'studio/models'),
+    studioCreateModel: (body: { name: string; description?: string }) => request<{ model: string }>('POST', 'studio/model', body),
+    studioCreateField: (body: Record<string, unknown>) => request<{ model: string; field: string }>('POST', 'studio/field', body),
+    studioCreateView: (body: Record<string, unknown>) => request<{ xmlId: string }>('POST', 'studio/view', body),
     searchRead: (model: string, body: unknown) => rpc<{ records: RecordValues[]; length: number }>(model, 'search_read', body),
     read: (model: string, ids: number[], fields?: string[]) =>
       rpc<{ records: RecordValues[] }>(model, 'read', { ids, ...(fields ? { fields } : {}) }),

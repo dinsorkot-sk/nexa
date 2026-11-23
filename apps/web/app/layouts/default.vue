@@ -44,6 +44,7 @@ async function leave() {
         @click="menuOpen = true"
       />
       <NuxtLink to="/" class="font-semibold text-highlighted">Nexa</NuxtLink>
+      <NuxtLink to="/studio" class="text-sm text-muted hover:text-highlighted focus-visible:outline-2 focus-visible:outline-offset-2">Studio</NuxtLink>
       <span class="ms-auto text-sm text-muted" aria-label="Signed in as">
         {{ session?.tenant }} · user #{{ session?.uid }}
       </span>

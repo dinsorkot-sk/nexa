@@ -17,3 +17,9 @@ export { ensureUiTables, writeModuleUi, removeModuleUi } from './ui-meta/tables.
 export { applyPatches, parseSelector, filterArch } from './ui-meta/arch.js';
 export { getView, getAction, getMenus, defaultArch, validateViews, type ResolvedView, type FieldInfo, type MenuNode, type ResolvedAction } from './ui-meta/views.js';
 export { baseModule } from './base/manifest.js';
+export { contactsModule, salesLiteModule, demoModules } from './demo/index.js';
+export {
+  ensureServiceTables, SequenceService, SchedulerService, AutomationService, AuditService, AttachmentService,
+  type SequenceOptions, type ScheduledJob, type ClaimedJob, type AutomationEvent, type AutomationRule,
+  type AutomationHandler, type AuditEntry, type AttachmentInput, type Attachment,
+} from './services/index.js';

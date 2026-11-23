@@ -159,8 +159,13 @@ export class MetadataStore {
     return new MetadataStore(handle.driver, handle.registry);
   }
 
-  async createModel(input: CustomModelInput): Promise<void> {
+  async createModel(input: CustomModelInput, afterInsert?: (tx: SqlDriver) => Promise<void>): Promise<void> {
     if (!CUSTOM_MODEL_RE.test(input.name)) throw new ValidationError(`Custom model '${input.name}' must match ${CUSTOM_MODEL_RE}`);
+    const table = tableName(input.name);
+    if (table.length > 63) throw new ValidationError(`Custom model '${input.name}' produces a table name longer than 63 characters`);
+    if (!this.registry.models.has(input.name) && [...this.registry.models.values()].some((m) => m.table === table)) {
+      throw new ValidationError(`Custom model '${input.name}' conflicts with an existing table name`);
+    }
     const fields = input.fields ?? {};
     for (const [n, f] of Object.entries(fields)) validateField(input.name, n, f);
     await this.change(async (tx) => {
@@ -171,6 +176,7 @@ export class MetadataStore {
         params: [input.name, input.description ?? null, input.order ?? null],
       });
       for (const [n, f] of Object.entries(fields)) await this.insertField(tx, input.name, n, f);
+      await afterInsert?.(tx);
     });
   }
 

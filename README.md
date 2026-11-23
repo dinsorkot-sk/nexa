@@ -41,6 +41,10 @@ curl -s -X POST localhost:3001/api/model/res.users/search_read \
 
 ข้อผิดพลาดตอบเป็น `{error: {type, message}}`: 400 คำขอผิดรูป, 401 ไม่ได้ยืนยันตัวตน, 403 ไม่มีสิทธิ์, 404 ไม่พบ record, 422 ข้อมูลไม่ผ่านการตรวจ
 
+### ทดลอง Contacts และ Sales
+
+ตั้ง `NEXA_MODULES=base,contacts,sales_lite` ใน `apps/api/.env` แล้วรีสตาร์ต API เมื่อเปิด tenant ครั้งถัดไป engine จะติดตั้งโมดูลที่ยังขาด จากนั้นเปิดเมนู **Contacts** และ **Sales** เพื่อดูผู้ติดต่อและใบสั่งขายตัวอย่าง
+
 ## ขอบเขตแพ็กเกจ
 
 | ส่วน | หน้าที่ |
