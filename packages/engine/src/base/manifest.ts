@@ -52,5 +52,37 @@ export const baseModule: ModuleManifest = {
       perms: { read: false, write: true, create: true, unlink: true }, domain: [],
     },
   ],
-  menus: [{ xmlId: 'menu_settings', name: 'Settings', sequence: 100, groups: ['base.group_system'] }],
+  actions: [
+    { xmlId: 'action_users', type: 'window', name: 'Users', model: 'res.users', viewTypes: ['list', 'form'] },
+    { xmlId: 'action_groups', type: 'window', name: 'Groups', model: 'res.groups', viewTypes: ['list', 'form'] },
+    { xmlId: 'action_companies', type: 'window', name: 'Companies', model: 'res.company', viewTypes: ['list', 'form'] },
+  ],
+  menus: [
+    { xmlId: 'menu_settings', name: 'Settings', sequence: 100, groups: ['base.group_system'] },
+    { xmlId: 'menu_users', name: 'Users', parent: 'menu_settings', action: 'action_users', sequence: 1 },
+    { xmlId: 'menu_groups', name: 'Groups', parent: 'menu_settings', action: 'action_groups', sequence: 2 },
+    { xmlId: 'menu_companies', name: 'Companies', parent: 'menu_settings', action: 'action_companies', sequence: 3 },
+  ],
+  views: [
+    {
+      xmlId: 'view_users_list', model: 'res.users', type: 'list',
+      arch: { tag: 'list', children: [
+        { tag: 'field', attrs: { name: 'name' } }, { tag: 'field', attrs: { name: 'login' } },
+        { tag: 'field', attrs: { name: 'company_id' } }, { tag: 'field', attrs: { name: 'active' } },
+      ] },
+    },
+    {
+      xmlId: 'view_users_form', model: 'res.users', type: 'form',
+      arch: { tag: 'form', children: [{ tag: 'sheet', children: [
+        { tag: 'group', attrs: { string: 'User' }, children: [
+          { tag: 'field', attrs: { name: 'name' } }, { tag: 'field', attrs: { name: 'login' } },
+          { tag: 'field', attrs: { name: 'active' } },
+        ] },
+        { tag: 'group', attrs: { string: 'Access', groups: [ACCESS_MANAGER] }, children: [
+          { tag: 'field', attrs: { name: 'company_id' } }, { tag: 'field', attrs: { name: 'company_ids' } },
+          { tag: 'field', attrs: { name: 'group_ids' } },
+        ] },
+      ] }] },
+    },
+  ],
 };

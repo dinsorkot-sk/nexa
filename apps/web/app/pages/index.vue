@@ -1,75 +1,43 @@
 <script setup lang="ts">
-import type { FormSubmitEvent, TableColumn } from '@nuxt/ui'
-import { reactive, ref } from 'vue'
-import { z } from 'zod'
+defineOptions({ name: 'HomePage' })
 
-defineOptions({ name: 'NexaStarterPage' })
+import type { ComputedRef } from 'vue'
+import type { MenuNode } from '~/utils/engine'
 
-const schema = z.object({
-  label: z.string().trim().min(1, 'Enter a label.'),
-})
+const menus = inject<ComputedRef<MenuNode[]>>('menus', computed(() => []))
 
-type Entry = z.infer<typeof schema>
-
-const state = reactive<Entry>({ label: '' })
-const dialogOpen = ref(false)
-const entries = ref<Entry[]>([
-  { label: 'Example entry' },
-])
-const columns: TableColumn<Entry>[] = [
-  { accessorKey: 'label', header: 'Label' },
-]
-
-function addEntry(event: FormSubmitEvent<Entry>) {
-  entries.value.push(event.data)
-  state.label = ''
-}
+/** First-level apps with the actions reachable below them. */
+const apps = computed(() => menus.value.map((m) => {
+  const links: { name: string; to: string }[] = []
+  const walk = (n: MenuNode) => {
+    if (n.action) links.push({ name: n.name, to: `/a/${n.action}` })
+    n.children.forEach(walk)
+  }
+  walk(m)
+  return { name: m.name, links }
+}))
 </script>
 
 <template>
-  <UContainer as="main" class="max-w-3xl space-y-10 py-12 sm:py-16">
-    <header class="space-y-3">
-      <h1 class="text-3xl font-semibold text-highlighted">
-        Nexa Starter
-      </h1>
-      <p class="text-muted">
-        Add an entry to try the starter form and table. Entries are stored on this page until you reload.
-      </p>
-    </header>
-
-    <section aria-labelledby="form-heading" class="space-y-4">
-      <h2 id="form-heading" class="text-lg font-semibold text-highlighted">
-        Add an entry
-      </h2>
-      <NexaForm :schema="schema" :state="state" @submit="addEntry">
-        <UFormField label="Label" name="label">
-          <UInput v-model="state.label" class="w-full sm:max-w-sm" />
-        </UFormField>
-        <UButton type="submit" label="Add entry" />
-      </NexaForm>
-    </section>
-
-    <section aria-labelledby="entries-heading" class="space-y-4">
-      <h2 id="entries-heading" class="text-lg font-semibold text-highlighted">
-        Entries
-      </h2>
-      <NexaTable :data="entries" :columns="columns" aria-labelledby="entries-heading" />
-    </section>
-
-    <NexaDialog
-      v-model:open="dialogOpen"
-      title="About this example"
-      description="This dialog uses the shared Nexa UI layer."
-    >
-      <UButton label="About this example" color="neutral" variant="outline" />
-      <template #body>
-        <p class="text-muted">
-          Press Escape or choose Done to close the dialog.
-        </p>
-      </template>
-      <template #footer="{ close }">
-        <UButton label="Done" @click="close" />
-      </template>
-    </NexaDialog>
-  </UContainer>
+  <div class="mx-auto max-w-5xl space-y-6">
+    <h1 class="text-2xl font-semibold text-highlighted">Home</h1>
+    <div v-if="!apps.length" class="rounded-lg border border-dashed border-default p-8 text-center">
+      <p class="font-medium text-highlighted">No apps available yet</p>
+      <p class="mt-1 text-sm text-muted">You do not have access to any menu. Ask an administrator to grant you a group.</p>
+    </div>
+    <ul v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <li v-for="app in apps" :key="app.name">
+        <UCard>
+          <template #header>
+            <h2 class="font-semibold text-highlighted">{{ app.name }}</h2>
+          </template>
+          <ul class="space-y-1">
+            <li v-for="l in app.links" :key="l.to">
+              <ULink :to="l.to" class="text-primary hover:underline">{{ l.name }}</ULink>
+            </li>
+          </ul>
+        </UCard>
+      </li>
+    </ul>
+  </div>
 </template>

@@ -122,7 +122,9 @@ describe('UI metadata', () => {
   it('serves per-user menus and generated views', async () => {
     const adminMenus = await call('GET', '/api/ui/menus', admin);
     expect(adminMenus.status).toBe(200);
-    expect(adminMenus.body.menus).toEqual([]); // the Settings root has no action or children yet, so it is hidden
+    const tree = (adminMenus.body.menus as { name: string; children: { name: string }[] }[]).map((m) => [m.name, m.children.map((c) => c.name)]);
+    expect(tree).toEqual([['Settings', ['Users', 'Groups', 'Companies']]]);
+    expect((await call('GET', '/api/ui/menus', bob)).body.menus).toEqual([]); // Settings is for base.group_system
     const view = await call('GET', '/api/ui/view/res.users/form', bob);
     expect(view.status).toBe(200);
     expect(Object.keys(view.body.fields as object)).not.toContain('group_ids'); // restricted field hidden
