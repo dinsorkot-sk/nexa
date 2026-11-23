@@ -56,7 +56,7 @@ describe('domain compiler', () => {
   it('compiles polish notation with parameters', () => {
     const params: unknown[] = [];
     const sql = compileDomain(reg, m, ['|', ['name', 'ilike', "o'k%"], '!', ['kind', 'in', ['company']]], params);
-    expect(sql).toBe('(t."name"::text ILIKE $1 OR (NOT (t."kind" = ANY($2))))');
+    expect(sql).toBe('(t."name"::text ILIKE $1 OR (NOT COALESCE((t."kind" = ANY($2)), FALSE)))');
     expect(params).toEqual(["%o'k\\%%", ['company']]);
   });
   it('rejects unknown fields (no injection through identifiers)', () => {

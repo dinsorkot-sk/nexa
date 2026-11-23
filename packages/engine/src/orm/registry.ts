@@ -40,6 +40,7 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
         ...existing,
         ...def,
         extends: existing.extends,
+        origin: existing.origin, // a custom extension must not turn a module model into a custom one
         fields: { ...existing.fields, ...def.fields },
         constraints: [...(existing.constraints ?? []), ...(def.constraints ?? [])],
         onchange: { ...existing.onchange, ...def.onchange },
@@ -47,7 +48,7 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
       });
       continue;
     }
-    let base: ModelDef = { ...def, fields: {} };
+    let base: ModelDef = { ...def, fields: {}, constraints: [], onchange: {}, methods: {} };
     for (const parent of def.extends ?? []) {
       const p = merged.get(parent);
       if (!p) throw new EngineError(`Model '${def.name}' extends unknown model '${parent}'`);
@@ -88,7 +89,102 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
       }
     }
   }
+  const byTable = new Map<string, string>();
+  for (const m of out.values()) {
+    if (!m.table) continue;
+    const other = byTable.get(m.table);
+    if (other) throw new EngineError(`Models '${other}' and '${m.name}' both map to table '${m.table}'`);
+    byTable.set(m.table, m.name);
+  }
+  for (const m of out.values()) {
+    for (const f of m.fields.values() as Iterable<ResolvedField>) resolveRelational(out, m, f);
+  }
+  // A relation table may be shared only by the two sides of one relation (same tables and columns).
+  const relations = new Map<string, { key: string; owner: string }>();
+  for (const m of out.values()) {
+    for (const f of m.fields.values() as Iterable<ResolvedField>) {
+      if (f.type !== 'many2many' || !f.relationTable || f.compute || f.related) continue;
+      if (byTable.has(f.relationTable) || f.relationTable.startsWith('nx_')) {
+        throw new EngineError(`many2many '${m.name}.${f.name}' relation table '${f.relationTable}' clashes with a model or engine table`);
+      }
+      const coTable = out.get(f.comodel!)!.table!;
+      const a = `${m.table}.${f.column1}`;
+      const b = `${coTable}.${f.column2}`;
+      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+      const seen = relations.get(f.relationTable);
+      if (seen && seen.key !== key) {
+        throw new EngineError(`many2many '${m.name}.${f.name}' reuses relation table '${f.relationTable}' of ${seen.owner} with different tables/columns`);
+      }
+      relations.set(f.relationTable, { key, owner: `${m.name}.${f.name}` });
+    }
+  }
+  for (const m of out.values()) {
+    for (const f of m.fields.values() as Iterable<ResolvedField>) {
+      if (f.related) {
+        if (f.compute) throw new EngineError(`Field '${m.name}.${f.name}' cannot be both related and computed`);
+        const end = walkPath(out, m, f.related, `${m.name}.${f.name} related`);
+        if (end.type !== f.type) {
+          throw new EngineError(`Related field '${m.name}.${f.name}' is ${f.type} but '${f.related}' is ${end.type}`);
+        }
+        f.depends = [f.related];
+        if (!f.comodel && end.comodel) f.comodel = end.comodel;
+      }
+      if (f.compute || f.related) {
+        if (MAGIC_FIELDS[f.name]) throw new EngineError(`Field '${m.name}.${f.name}' cannot be computed`);
+        if (typeof f.compute === 'string' && !m.def.methods?.[f.compute]) {
+          throw new EngineError(`Compute method '${f.compute}' not found on '${m.name}'`);
+        }
+        if (f.store && (f.type === 'one2many' || f.type === 'many2many')) {
+          throw new EngineError(`Stored computed x2many '${m.name}.${f.name}' is not supported`);
+        }
+        for (const dep of f.depends ?? []) walkPath(out, m, dep, `${m.name}.${f.name} depends`);
+      }
+    }
+  }
   return out;
+}
+
+/** Follow a dotted path through relational fields and return the last field. */
+export function walkPath(
+  models: ReadonlyMap<string, ResolvedModel>, model: ResolvedModel, path: string, what: string,
+): ResolvedField {
+  const parts = path.split('.');
+  let cur = model;
+  let f: ResolvedField | undefined;
+  for (let i = 0; i < parts.length; i++) {
+    f = cur.fields.get(parts[i]) as ResolvedField | undefined;
+    if (!f) throw new EngineError(`${what}: unknown field '${cur.name}.${parts[i]}' in '${path}'`);
+    if (i < parts.length - 1) {
+      if (!f.comodel) throw new EngineError(`${what}: '${cur.name}.${parts[i]}' is not relational in '${path}'`);
+      cur = models.get(f.comodel)!;
+    }
+  }
+  return f!;
+}
+
+/** Fill many2many relation defaults and check one2many inverses (mutates the resolved field copy). */
+function resolveRelational(models: ReadonlyMap<string, ResolvedModel>, m: ResolvedModel, f: ResolvedField): void {
+  if (f.compute || f.related) return;
+  const co = f.comodel ? models.get(f.comodel)! : undefined;
+  if (f.type === 'one2many') {
+    const inv = f.inverseName ? co!.fields.get(f.inverseName) : undefined;
+    if (!inv || inv.type !== 'many2one' || inv.comodel !== m.name) {
+      throw new EngineError(`one2many '${m.name}.${f.name}' needs inverseName = a many2one on '${co!.name}' to '${m.name}'`);
+    }
+  }
+  if (f.type === 'many2many') {
+    if (!m.table || !co!.table) throw new EngineError(`many2many '${m.name}.${f.name}' needs concrete models`);
+    if (m.table === co!.table && !(f.relationTable && f.column1 && f.column2)) {
+      throw new EngineError(`Self many2many '${m.name}.${f.name}' needs relationTable, column1 and column2`);
+    }
+    f.relationTable ??= `${[m.table, co!.table].sort().join('_')}_rel`;
+    f.column1 ??= `${m.table}_id`;
+    f.column2 ??= `${co!.table}_id`;
+    for (const id of [f.relationTable, f.column1, f.column2]) {
+      if (!FIELD_RE.test(id) || id.length > 63) throw new EngineError(`Invalid many2many identifier '${id}' on '${m.name}.${f.name}'`);
+    }
+    if (f.column1 === f.column2) throw new EngineError(`many2many '${m.name}.${f.name}' columns must differ`);
+  }
 }
 
 /** A field is a real column when stored and not x2many. */

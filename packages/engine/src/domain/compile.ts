@@ -39,7 +39,8 @@ class Compiler {
     const next = (): string => {
       if (pos >= domain.length) throw new EngineError('Malformed domain: missing operand');
       const term: DomainTerm = domain[pos++];
-      if (term === '!') return `(NOT ${next()})`;
+      // Odoo pushes '!' down to the leaf, so rows where the operand is NULL (unknown) match.
+      if (term === '!') return `(NOT COALESCE(${next()}, FALSE))`;
       if (term === '&' || term === '|') {
         const a = next();
         const b = next();
@@ -83,6 +84,7 @@ class Compiler {
       // a.b.c op v  ==>  a any [(b.c op v)]
       const head = path.slice(0, dot);
       const f = this.field(model, head);
+      if (f.related && !f.store) return this.leaf(model, [`${f.related}${path.slice(dot)}`, op, value], alias);
       if (f.type !== 'many2one' && f.type !== 'one2many' && f.type !== 'many2many') {
         throw new EngineError(`Field '${model.name}.${head}' is not relational; cannot traverse '${path}'`);
       }
@@ -90,6 +92,8 @@ class Compiler {
     }
 
     const f = this.field(model, path);
+    // non-stored related field: search through its path instead
+    if (f.related && !f.store) return this.leaf(model, [f.related, op, value], alias);
     switch (op) {
       case 'any':
       case 'not any':
@@ -119,7 +123,13 @@ class Compiler {
       const ex = `EXISTS (SELECT 1 FROM ${this.table(co)} ${a} WHERE ${a}."${inv}" = ${alias}.id AND ${where})`;
       return negate ? `NOT ${ex}` : ex;
     }
-    throw new EngineError(`many2many search on '${model.name}.${f.name}' arrives with relational fields (T5)`);
+    if (f.type === 'many2many') {
+      const r = this.newAlias();
+      const ex = `EXISTS (SELECT 1 FROM "${f.relationTable}" ${r} JOIN ${this.table(co)} ${a} ON ${a}.id = ${r}."${f.column2}" `
+        + `WHERE ${r}."${f.column1}" = ${alias}.id AND ${where})`;
+      return negate ? `NOT ${ex}` : ex;
+    }
+    throw new EngineError(`'${model.name}.${f.name}' is not relational`);
   }
 
   private inverse(model: ResolvedModel, f: ResolvedField, co: ResolvedModel): string {

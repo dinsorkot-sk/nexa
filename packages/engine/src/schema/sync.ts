@@ -33,12 +33,13 @@ const DATA_TYPE: Record<string, string> = {
   BOOLEAN: 'boolean', DATE: 'date', TIMESTAMP: 'timestamp without time zone', JSONB: 'jsonb', BYTEA: 'bytea',
 };
 
-/** Deterministic index name `<table>_<column>_<uniq|idx>`, hashed when over Postgres' 63-char limit. */
+/**
+ * Deterministic, unambiguous index name: readable prefix + hash of the exact (table, column) pair,
+ * so `x_a`.`x_b_c` and `x_a_x_b`.`c` never collide (index names are schema-wide in Postgres).
+ */
 export function indexName(table: string, column: string, unique: boolean): string {
-  const name = `${table}_${column}_${unique ? 'uniq' : 'idx'}`;
-  if (name.length <= 63) return name;
-  const h = createHash('sha1').update(name).digest('hex').slice(0, 10);
-  return `${name.slice(0, 52)}_${h}`;
+  const h = createHash('sha1').update(`${table}\0${column}`).digest('hex').slice(0, 12);
+  return `${table.slice(0, 22)}_${column.slice(0, 20)}_${h}_${unique ? 'uniq' : 'idx'}`;
 }
 
 export type MigrationOp =
@@ -47,7 +48,9 @@ export type MigrationOp =
   | { kind: 'create_index'; table: string; column: string; name: string; unique: boolean; destructive: false }
   | { kind: 'alter_type'; table: string; column: string; from: string; to: string; destructive: true }
   | { kind: 'drop_column'; table: string; column: string; destructive: true }
-  | { kind: 'drop_table'; table: string; destructive: true };
+  | { kind: 'drop_table'; table: string; destructive: true }
+  | { kind: 'create_relation'; table: string; column1: string; table1: string; column2: string; table2: string; destructive: false }
+  | { kind: 'create_constraint'; table: string; name: string; sql: string; destructive: false };
 
 export interface MigrationPlan {
   ops: MigrationOp[];
@@ -107,7 +110,52 @@ export async function planMigration(
         if (!idx.has(name)) ops.push({ kind: 'create_index', table, column: f.name, name, unique: !!f.unique, destructive: false });
       }
     }
+    // NOTE: any column not owned by a field is proposed for dropping (destructive). Callers that apply
+    // destructive ops must filter them to an explicit target (see MetadataStore), never apply blindly.
     for (const c of cols.keys()) if (!wanted.has(c)) ops.push({ kind: 'drop_column', table, column: c, destructive: true });
+  }
+
+  // many2many relation tables (shared by both sides; created once)
+  const relations = new Set<string>();
+  for (const m of tables) {
+    for (const f of m.fields.values()) {
+      if (f.type !== 'many2many' || f.compute || f.related || !f.relationTable) continue;
+      if (relations.has(f.relationTable)) continue;
+      if (existingTables.has(f.relationTable)) {
+        // reuse only a table that really is this relation
+        const cols = new Set((await db.query<{ column_name: string }>({
+          text: `SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1`,
+          params: [f.relationTable],
+        })).map((r) => r.column_name));
+        if (cols.size !== 2 || !cols.has(f.column1!) || !cols.has(f.column2!)) {
+          throw new EngineError(`Existing table '${f.relationTable}' is not the relation table of '${m.name}.${f.name}'`);
+        }
+        relations.add(f.relationTable);
+        continue;
+      }
+      relations.add(f.relationTable);
+      ops.push({
+        kind: 'create_relation', table: f.relationTable, destructive: false,
+        column1: f.column1!, table1: m.table!, column2: f.column2!, table2: models.get(f.comodel!)!.table!,
+      });
+    }
+  }
+
+  // SQL constraints (module code only), named <table>_<constraint>
+  const existingConstraints = new Set((await db.query<{ conname: string }>({
+    text: `SELECT c.conname FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace WHERE n.nspname = current_schema()`,
+    params: [],
+  })).map((r) => r.conname));
+  for (const m of tables) {
+    for (const c of m.def.constraints ?? []) {
+      if (!c.sql) continue;
+      if (m.def.origin !== 'module') throw new EngineError(`SQL constraint '${c.name}' is only allowed in module code`);
+      const name = `${m.table}_${c.name}`;
+      quoteIdent(name);
+      if (existingConstraints.has(name)) continue;
+      existingConstraints.add(name);
+      ops.push({ kind: 'create_constraint', table: m.table!, name, sql: c.sql, destructive: false });
+    }
   }
 
   const live = new Set(tables.map((m) => m.table));
@@ -134,7 +182,8 @@ function ddlFor(op: MigrationOp, models: ReadonlyMap<string, ResolvedModel>): st
       return ddl;
     }
     case 'create_index':
-      return `CREATE ${op.unique ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS ${quoteIdent(op.name)} ON ${t} (${quoteIdent(op.column)})`;
+      // no IF NOT EXISTS: a name clash must fail loudly instead of silently skipping a unique index
+      return `CREATE ${op.unique ? 'UNIQUE ' : ''}INDEX ${quoteIdent(op.name)} ON ${t} (${quoteIdent(op.column)})`;
     case 'alter_type': {
       if (!(op.to in DATA_TYPE)) throw new EngineError(`Unsupported column type '${op.to}'`);
       const c = quoteIdent(op.column);
@@ -142,6 +191,14 @@ function ddlFor(op: MigrationOp, models: ReadonlyMap<string, ResolvedModel>): st
     }
     case 'drop_column': return `ALTER TABLE ${t} DROP COLUMN ${quoteIdent(op.column)}`;
     case 'drop_table': return `DROP TABLE ${t}`;
+    case 'create_relation': {
+      const c1 = quoteIdent(op.column1);
+      const c2 = quoteIdent(op.column2);
+      return `CREATE TABLE ${t} (${c1} INTEGER NOT NULL REFERENCES ${quoteIdent(op.table1)}(id) ON DELETE CASCADE, `
+        + `${c2} INTEGER NOT NULL REFERENCES ${quoteIdent(op.table2)}(id) ON DELETE CASCADE, PRIMARY KEY (${c1}, ${c2}))`;
+    }
+    // module-defined SQL (trusted code, never from no-code metadata)
+    case 'create_constraint': return `ALTER TABLE ${t} ADD CONSTRAINT ${quoteIdent(op.name)} ${op.sql}`;
   }
 }
 
@@ -154,7 +211,9 @@ export async function applyMigration(
     throw new EngineError(`Migration has destructive operations (${bad.map((o) => `${o.kind} ${o.table}${'column' in o ? '.' + o.column : ''}`).join(', ')}); pass allowDestructive to apply`);
   }
   // tables first, then columns (FKs need target tables), then indexes, then destructive ops
-  const rank: Record<MigrationOp['kind'], number> = { create_table: 0, add_column: 1, alter_type: 2, create_index: 3, drop_column: 4, drop_table: 5 };
+  const rank: Record<MigrationOp['kind'], number> = {
+    create_table: 0, add_column: 1, alter_type: 2, create_relation: 3, create_index: 4, create_constraint: 5, drop_column: 6, drop_table: 7,
+  };
   const ordered = [...plan.ops].sort((a, b) => rank[a.kind] - rank[b.kind]);
   await db.transaction(async (tx) => {
     for (const op of ordered) await tx.query({ text: ddlFor(op, plan.models), params: [] });

@@ -23,7 +23,9 @@ export interface FieldDef {
   /** relational */
   comodel?: string;
   inverseName?: string;       // one2many
-  relationTable?: string;     // many2many
+  relationTable?: string;     // many2many (default '<t1>_<t2>_rel', tables sorted)
+  column1?: string;           // many2many: column pointing at this model
+  column2?: string;           // many2many: column pointing at comodel
   ondelete?: OnDelete;
   /** computed / related */
   compute?: string | ComputeFn;
@@ -36,7 +38,13 @@ export interface FieldDef {
   groups?: string[];
 }
 
-export type ComputeFn = (records: Recordset) => void | Promise<void>;
+/**
+ * Compute values for a batch of records; return a value per id (missing ids get null).
+ * Read dependencies through `records.read([...])`; the engine recomputes stored fields when
+ * any `depends` path changes.
+ */
+export type ComputeFn = (records: Recordset) => ComputedValues | Promise<ComputedValues>;
+export type ComputedValues = Record<number, unknown> | Map<number, unknown>;
 
 // ---------- Models ----------
 export interface ModelDef {
@@ -152,6 +160,8 @@ export interface Recordset {
   unlink(): Promise<void>;
   call(method: string, ...args: unknown[]): Promise<unknown>;
   checkAccess(op: AccessOperation): Promise<void>;
+  /** Run onchange handlers for `field` on unsaved values; returns the resulting values patch. */
+  onchange(values: Record<string, unknown>, field: string): Promise<Record<string, unknown>>;
 }
 
 /** Relational write commands (Odoo Command equivalents) */

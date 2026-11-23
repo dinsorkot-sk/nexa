@@ -2,6 +2,7 @@ import {
   EngineError, ValidationError, type FieldDef, type FieldType, type ModelDef, type OnDelete, type ResolvedModel,
   type SqlDriver, type TenantHandle,
 } from '../contracts/index.js';
+import { compileOrder } from '../domain/compile.js';
 import { ModelRegistry, tableName } from '../orm/registry.js';
 import { applyMigration, planMigration, type MigrationOp } from '../schema/sync.js';
 
@@ -112,6 +113,9 @@ export interface DestructiveOptions {
 function validateField(model: string, name: string, f: FieldDef): void {
   if (!CUSTOM_FIELD_RE.test(name)) throw new ValidationError(`Custom field '${model}.${name}' must match ${CUSTOM_FIELD_RE}`);
   if (!FIELD_TYPES.has(f.type)) throw new ValidationError(`Unknown field type '${String(f.type)}'`);
+  if (f.relationTable !== undefined || f.column1 !== undefined || f.column2 !== undefined) {
+    throw new ValidationError(`Custom field '${model}.${name}' cannot choose its relation table or columns`);
+  }
   if (typeof f.default === 'function' || f.compute || f.related || f.depends) {
     throw new ValidationError(`Custom field '${model}.${name}' cannot use code (default function, compute, related)`);
   }
@@ -159,10 +163,13 @@ export class MetadataStore {
   }
 
   async removeField(model: string, name: string, opts: DestructiveOptions): Promise<void> {
-    const table = this.registry.models.get(model)?.table ?? null;
+    let table: string | null = null;
     await this.change(async (tx) => {
+      // resolve the table inside the transaction, from the registry as it stands now
+      table = this.registry.models.get(model)?.table ?? null;
       const del = await tx.query({ text: `DELETE FROM nx_field WHERE model = $1 AND name = $2 RETURNING id`, params: [model, name] });
       if (!del.length) throw new ValidationError(`No custom field '${model}.${name}'`);
+      if (!table) throw new ValidationError(`Model '${model}' has no table`);
     }, opts, (op) => op.kind === 'drop_column' && op.table === table && op.column === name);
   }
 
@@ -210,6 +217,8 @@ export class MetadataStore {
     const next = await this.db.transaction(async (tx) => {
       await mutate(tx);
       const models: Map<string, ResolvedModel> = await this.registry.build();
+      // reject metadata that would break queries later (e.g. an invalid default order)
+      for (const m of models.values()) if (m.def.origin === 'custom' && m.table) compileOrder(m, undefined);
       const plan = await planMigration(models, tx, { dropTables });
       const ops = plan.ops.filter((o) => !o.destructive || (target?.(o) ?? false));
       await applyMigration({ ...plan, ops }, tx, { allowDestructive: opts?.allowDestructive === true });
