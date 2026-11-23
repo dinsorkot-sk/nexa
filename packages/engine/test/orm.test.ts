@@ -50,15 +50,17 @@ describe('registry', () => {
 });
 
 describe('domain compiler', () => {
-  const m = resolveModels(models).get('res.partner')!;
+  const all = resolveModels(models);
+  const reg = { models: all, get: (n: string) => all.get(n)!, reload: async () => undefined };
+  const m = all.get('res.partner')!;
   it('compiles polish notation with parameters', () => {
     const params: unknown[] = [];
-    const sql = compileDomain(m, ['|', ['name', 'ilike', "o'k%"], '!', ['kind', 'in', ['company']]], params);
+    const sql = compileDomain(reg, m, ['|', ['name', 'ilike', "o'k%"], '!', ['kind', 'in', ['company']]], params);
     expect(sql).toBe('(t."name"::text ILIKE $1 OR (NOT (t."kind" = ANY($2))))');
     expect(params).toEqual(["%o'k\\%%", ['company']]);
   });
   it('rejects unknown fields (no injection through identifiers)', () => {
-    expect(() => compileDomain(m, [['name"; drop', '=', 1]], [])).toThrow(/Unknown field/);
+    expect(() => compileDomain(reg, m, [['name"; drop', '=', 1]], [])).toThrow(/Unknown field/);
   });
 });
 

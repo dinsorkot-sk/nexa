@@ -6,3 +6,5 @@ export { RecordsetImpl } from './orm/recordset.js';
 export { compileDomain, compileOrder } from './domain/compile.js';
 export { syncSchema, columnType } from './schema/sync.js';
 export { PgliteTenantManager, type TenantManagerOptions } from './tenant/manager.js';
+export { planMigration, applyMigration, indexName, quoteIdent, type MigrationOp, type MigrationPlan, type PlanOptions } from './schema/sync.js';
+export { MetadataStore, ensureMetadataTables, loadCustomDefs, combinedSource, type CustomModelInput, type DestructiveOptions } from './metadata/store.js';

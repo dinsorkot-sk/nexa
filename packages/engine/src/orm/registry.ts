@@ -115,6 +115,16 @@ export class ModelRegistry implements Registry {
 
   /** Build the new map fully before swapping, so readers never see a half-built registry. */
   async reload(): Promise<void> {
-    this.current = resolveModels(await this.source());
+    this.swap(await this.build());
+  }
+
+  /** Resolve the source into a new model map without installing it (throws on invalid defs). */
+  async build(): Promise<Map<string, ResolvedModel>> {
+    return resolveModels(await this.source());
+  }
+
+  /** Install a map previously produced by `build()` (atomic reference swap). */
+  swap(models: Map<string, ResolvedModel>): void {
+    this.current = models;
   }
 }

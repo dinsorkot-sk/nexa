@@ -38,7 +38,7 @@ export class RecordsetImpl implements Recordset {
   async search(domain: Domain, opts: SearchOptions = {}): Promise<Recordset> {
     await this.checkAccess('read');
     const params: unknown[] = [];
-    const where = compileDomain(this.meta, domain, params);
+    const where = compileDomain(this.env.registry, this.meta, domain, params);
     let text = `SELECT t.id FROM "${this.table}" t WHERE ${where} ORDER BY ${compileOrder(this.meta, opts.order)}`;
     if (opts.limit !== undefined) text += ` LIMIT ${nonNegInt(opts.limit, 'limit')}`;
     if (opts.offset) text += ` OFFSET ${nonNegInt(opts.offset, 'offset')}`;
@@ -49,7 +49,7 @@ export class RecordsetImpl implements Recordset {
   async searchCount(domain: Domain): Promise<number> {
     await this.checkAccess('read');
     const params: unknown[] = [];
-    const where = compileDomain(this.meta, domain, params);
+    const where = compileDomain(this.env.registry, this.meta, domain, params);
     const [row] = await this.env.db.query<{ n: number }>({
       text: `SELECT COUNT(*)::int AS n FROM "${this.table}" t WHERE ${where}`, params,
     });

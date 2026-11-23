@@ -5,6 +5,7 @@ import { PgliteDriver } from '../driver/pglite.js';
 import { EnvImpl } from '../orm/env.js';
 import { ModelRegistry } from '../orm/registry.js';
 import { syncSchema } from '../schema/sync.js';
+import { combinedSource, ensureMetadataTables } from '../metadata/store.js';
 
 const TENANT_RE = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 /** Windows device names cannot be used as directory names. */
@@ -60,8 +61,9 @@ export class PgliteTenantManager implements TenantManager {
       await mkdir(dir, { recursive: true });
     }
     const driver = await PgliteDriver.open(dir);
-    const registry = new ModelRegistry(this.opts.models);
+    const registry = new ModelRegistry(combinedSource(driver, this.opts.models));
     try {
+      await ensureMetadataTables(driver);
       await registry.reload();
       await syncSchema(registry, driver);
     } catch (err) {
