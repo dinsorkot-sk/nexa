@@ -1,0 +1,25 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": ["tsconfig.base.json", "eslint.config.mjs"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env"],
+      "outputs": ["dist/**", ".nuxt/**", ".output/**"]
+    },
+    "dev": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["PORT", "DATABASE_URL", "NUXT_*"]
+    },
+    "lint": {},
+    "typecheck": {
+      "dependsOn": ["^build"],
+      "outputs": [".nuxt/**"]
+    },
+    "test": {
+      "dependsOn": ["^build"]
+    }
+  }
+}
