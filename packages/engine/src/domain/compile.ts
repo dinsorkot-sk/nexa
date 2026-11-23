@@ -14,11 +14,7 @@ import { isColumn, type ResolvedField } from '../orm/registry.js';
  * - Odoo NULL semantics: NULL counts as false/unset; negative operators include NULL rows.
  * - Values are always parameters; identifiers come from the registry only.
  */
-export function compileDomain(
-  registry: Registry, model: ResolvedModel, domain: Domain, params: unknown[], alias = 't',
-): string {
-  return new Compiler(registry, params).domain(model, domain, alias);
-}
+/** Read record rules per model (null = none); applied inside every subquery on a traversed comodel. */export type RuleResolver = (model: string) => Domain | null;export function compileDomain(  registry: Registry, model: ResolvedModel, domain: Domain, params: unknown[], alias = 't', rules?: RuleResolver,): string {  return new Compiler(registry, params, rules).domain(model, domain, alias);}
 
 /** Field used for hierarchy operators (Odoo `_parent_name` default). */
 const PARENT_FIELD = 'parent_id';
@@ -28,7 +24,12 @@ class Compiler {
   private aliasSeq = 0;
   private depth = 0;
 
-  constructor(private readonly registry: Registry, private readonly params: unknown[]) {}
+  /** > 0 while compiling a rule domain: rules are evaluated as superuser (no nested rules) */
+  private inRule = 0;
+
+  constructor(
+    private readonly registry: Registry, private readonly params: unknown[], private readonly rules?: RuleResolver,
+  ) {}
 
   domain(model: ResolvedModel, domain: Domain, alias: string): string {
     if (!Array.isArray(domain)) throw new EngineError('Domain must be an array');
@@ -112,7 +113,17 @@ class Compiler {
   private any(model: ResolvedModel, f: ResolvedField, sub: Domain, alias: string, negate: boolean): string {
     const co = this.registry.get(f.comodel!);
     const a = this.newAlias();
-    const where = this.domain(co, sub, a);
+    let where = this.domain(co, sub, a);
+    // apply the comodel's read rules so paths/any cannot reveal records the user may not read
+    const rule = this.rules && !this.inRule ? this.rules(co.name) : null;
+    if (rule && rule.length) {
+      this.inRule++;
+      try {
+        where = `(${where} AND ${this.domain(co, rule, a)})`;
+      } finally {
+        this.inRule--;
+      }
+    }
     if (f.type === 'many2one') {
       const col = `${alias}."${f.name}"`;
       const subq = `SELECT ${a}.id FROM ${this.table(co)} ${a} WHERE ${where}`;

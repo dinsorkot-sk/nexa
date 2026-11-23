@@ -128,6 +128,8 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
         }
         f.depends = [f.related];
         if (!f.comodel && end.comodel) f.comodel = end.comodel;
+        // a related field must not expose a field restricted to some groups
+        if (!f.groups && end.groups) f.groups = end.groups;
       }
       if (f.compute || f.related) {
         if (MAGIC_FIELDS[f.name]) throw new EngineError(`Field '${m.name}.${f.name}' cannot be computed`);

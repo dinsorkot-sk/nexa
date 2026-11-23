@@ -5,6 +5,7 @@ import {
 import { compileOrder } from '../domain/compile.js';
 import { ModelRegistry, tableName } from '../orm/registry.js';
 import { applyMigration, planMigration, type MigrationOp } from '../schema/sync.js';
+import { withDriverLock } from '../modules/lock.js';
 
 /** Custom (no-code) names must carry the `x_` prefix so they never clash with module names. */
 const CUSTOM_MODEL_RE = /^x_[a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/;
@@ -214,6 +215,16 @@ export class MetadataStore {
     if (target && opts?.allowDestructive !== true) {
       throw new EngineError('Removing custom metadata drops data; pass { allowDestructive: true }');
     }
+    // shared with ModuleService so module and metadata changes never interleave
+    await withDriverLock(this.db, () => this.changeLocked(mutate, opts, target, dropTables));
+  }
+
+  private async changeLocked(
+    mutate: (tx: SqlDriver) => Promise<void>,
+    opts?: DestructiveOptions,
+    target?: (op: MigrationOp) => boolean,
+    dropTables?: string[],
+  ): Promise<void> {
     const next = await this.db.transaction(async (tx) => {
       await mutate(tx);
       const models: Map<string, ResolvedModel> = await this.registry.build();

@@ -6,6 +6,9 @@ import { EnvImpl } from '../orm/env.js';
 import { ModelRegistry } from '../orm/registry.js';
 import { syncSchema } from '../schema/sync.js';
 import { combinedSource, ensureMetadataTables } from '../metadata/store.js';
+import { ensureSecurityTables } from '../security/tables.js';
+import { ModuleCatalog } from '../modules/catalog.js';
+import { ModuleService, ensureModuleTables, installedModuleDefs, type ModuleWarning } from '../modules/service.js';
 
 const TENANT_RE = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 /** Windows device names cannot be used as directory names. */
@@ -15,15 +18,22 @@ const validTenant = (t: string): boolean => TENANT_RE.test(t) && !RESERVED.test(
 export interface TenantManagerOptions {
   /** root folder holding one PGlite data dir per tenant; undefined = in-memory (tests) */
   rootDir?: string;
-  /** model definitions; the module loader (T7) replaces this */
-  models: () => Promise<readonly ModelDef[]>;
+  /** model definitions always present in every tenant (no module bookkeeping); loaded before module models */
+  models?: () => Promise<readonly ModelDef[]>;
+  /** available modules; each tenant's registry holds the models of the modules installed there */
+  catalog?: ModuleCatalog;
+  /** called for module warnings (orphan modules at open, orphan columns after upgrades) */
+  onWarning?: (tenant: string, warning: ModuleWarning) => void;
 }
 
 /** Database-per-tenant (ADR 0001 §5): one PGlite instance + one registry per tenant. */
 export class PgliteTenantManager implements TenantManager {
   private readonly open_ = new Map<string, Promise<TenantHandle>>();
+  private readonly catalog: ModuleCatalog;
 
-  constructor(private readonly opts: TenantManagerOptions) {}
+  constructor(private readonly opts: TenantManagerOptions) {
+    this.catalog = opts.catalog ?? new ModuleCatalog([]);
+  }
 
   open(tenant: string): Promise<TenantHandle> {
     if (!validTenant(tenant)) return Promise.reject(new EngineError(`Invalid tenant name '${tenant}'`));
@@ -36,10 +46,12 @@ export class PgliteTenantManager implements TenantManager {
     return h;
   }
 
-  /** Module selection is ignored until the module system (T7). */
-  async create(tenant: string, _modules: string[]): Promise<TenantHandle> {
-    void _modules;
-    return this.open(tenant);
+  /** Open (creating if needed) the tenant and install `modules` plus their dependencies. */
+  async create(tenant: string, modules: string[]): Promise<TenantHandle> {
+    for (const m of modules) this.catalog.get(m); // fail fast on unknown modules
+    const h = await this.open(tenant);
+    if (modules.length) await ModuleService.for(h).install(modules);
+    return h;
   }
 
   async list(): Promise<string[]> {
@@ -61,21 +73,33 @@ export class PgliteTenantManager implements TenantManager {
       await mkdir(dir, { recursive: true });
     }
     const driver = await PgliteDriver.open(dir);
-    const registry = new ModelRegistry(combinedSource(driver, this.opts.models));
+    const registry = new ModelRegistry(combinedSource(driver, installedModuleDefs(driver, this.catalog, this.opts.models)));
+    let attach: (h: TenantHandle) => void;
     try {
       await ensureMetadataTables(driver);
-      await registry.reload();
+      await ensureSecurityTables(driver);
+      await ensureModuleTables(driver);
+      // pending upgrades / new dependencies are applied atomically (with hooks) before the tenant is served
+      const onWarning = this.opts.onWarning;
+      const opened = await ModuleService.openTenant({
+        tenant, db: driver, registry, catalog: this.catalog,
+        ...(onWarning ? { onWarning: (w: ModuleWarning) => onWarning(tenant, w) } : {}),
+      });
+      attach = opened.attach;
+      if (!opened.changed) await registry.reload();
       await syncSchema(registry, driver);
     } catch (err) {
       await driver.close(); // release the data dir before a retry reopens it
       throw err;
     }
-    return {
+    const handle: TenantHandle = {
       tenant,
       driver,
       registry,
       env: (ctx: { uid: number; companyIds?: number[]; context?: Context }): Env =>
         new EnvImpl({ tenant, registry, db: driver, ...ctx }),
     };
+    attach(handle);
+    return handle;
   }
 }

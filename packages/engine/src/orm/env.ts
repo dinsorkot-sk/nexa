@@ -1,6 +1,14 @@
 import type { Context, Env, Recordset, Registry, SqlDriver } from '../contracts/index.js';
 import { RecordsetImpl } from './recordset.js';
 
+/** Odoo convention: uid 1 is the superuser (__system__) and always runs in superuser mode. */
+export const SUPERUSER_ID = 1;
+
+/** Per-user security facts, loaded lazily once per env family (see security/access.ts). */
+export interface SecurityHolder {
+  promise?: Promise<unknown>;
+}
+
 /** Record cache: model -> id -> column values. */
 export class RecordCache {
   private readonly data = new Map<string, Map<number, Record<string, unknown>>>();
@@ -32,6 +40,7 @@ export interface EnvInit {
   registry: Registry;
   db: SqlDriver;
   cache?: RecordCache;
+  security?: SecurityHolder;
 }
 
 /**
@@ -48,22 +57,24 @@ export class EnvImpl implements Env {
   readonly registry: Registry;
   readonly db: SqlDriver;
   readonly cache: RecordCache;
+  readonly security: SecurityHolder;
 
   constructor(init: EnvInit) {
     this.tenant = init.tenant;
     this.uid = init.uid;
     this.companyIds = init.companyIds ?? [];
     this.context = Object.freeze({ ...init.context });
-    this.su = init.su ?? false;
+    this.su = init.su ?? init.uid === SUPERUSER_ID;
     this.registry = init.registry;
     this.db = init.db;
     this.cache = init.cache ?? new RecordCache();
+    this.security = init.security ?? {};
   }
 
   private derive(patch: Partial<EnvInit>): EnvImpl {
     return new EnvImpl({
       tenant: this.tenant, uid: this.uid, companyIds: this.companyIds, context: this.context,
-      su: this.su, registry: this.registry, db: this.db, cache: this.cache, ...patch,
+      su: this.su, registry: this.registry, db: this.db, cache: this.cache, security: this.security, ...patch,
     });
   }
 
