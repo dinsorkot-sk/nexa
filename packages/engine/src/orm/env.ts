@@ -41,7 +41,24 @@ export interface EnvInit {
   db: SqlDriver;
   cache?: RecordCache;
   security?: SecurityHolder;
+  automationStack?: readonly string[];
+  actionState?: object;
 }
+
+/**
+ * Record lifecycle hooks (installed by the automation service). They run inside the ORM
+ * transaction with the caller's env; a rejection rolls the operation back.
+ */
+export interface RecordHooks {
+  afterCreate(env: EnvImpl, model: string, ids: readonly number[]): Promise<void>;
+  beforeWrite(env: EnvImpl, model: string, ids: readonly number[], vals: Record<string, unknown>): Promise<unknown>;
+  afterWrite(env: EnvImpl, model: string, ids: readonly number[], vals: Record<string, unknown>, state: unknown): Promise<void>;
+  beforeUnlink(env: EnvImpl, model: string, ids: readonly number[]): Promise<void>;
+}
+
+let installedHooks: RecordHooks | undefined;
+export function setRecordHooks(hooks: RecordHooks | undefined): void { installedHooks = hooks; }
+export function recordHooks(): RecordHooks | undefined { return installedHooks; }
 
 /**
  * Execution environment. Envs are meant to be short-lived (one per request/job): the cache
@@ -58,6 +75,10 @@ export class EnvImpl implements Env {
   readonly db: SqlDriver;
   readonly cache: RecordCache;
   readonly security: SecurityHolder;
+  /** Automation rules currently executing in this call chain (not caller-controllable context). */
+  readonly automationStack: readonly string[];
+  /** Shared server-action run state (row budget) for a whole action/automation cascade. */
+  readonly actionState: object | undefined;
 
   constructor(init: EnvInit) {
     this.tenant = init.tenant;
@@ -69,12 +90,15 @@ export class EnvImpl implements Env {
     this.db = init.db;
     this.cache = init.cache ?? new RecordCache();
     this.security = init.security ?? {};
+    this.automationStack = Object.freeze([...(init.automationStack ?? [])]);
+    this.actionState = init.actionState;
   }
 
   private derive(patch: Partial<EnvInit>): EnvImpl {
     return new EnvImpl({
       tenant: this.tenant, uid: this.uid, companyIds: this.companyIds, context: this.context,
-      su: this.su, registry: this.registry, db: this.db, cache: this.cache, security: this.security, ...patch,
+      su: this.su, registry: this.registry, db: this.db, cache: this.cache, security: this.security,
+      automationStack: this.automationStack, actionState: this.actionState, ...patch,
     });
   }
 
@@ -85,6 +109,17 @@ export class EnvImpl implements Env {
 
   sudo(): Env {
     return this.derive({ su: true });
+  }
+
+  /** Env marked as running automation rule `key` (used to stop self-triggering). */
+  withAutomation(key: string): EnvImpl {
+    // automations never inherit sudo from the triggering operation; only uid 1 stays superuser
+    return this.derive({ automationStack: [...this.automationStack, key], su: this.uid === SUPERUSER_ID });
+  }
+
+  /** Env carrying a server-action run state shared by nested actions and the automations they trigger. */
+  withActionState(state: object): EnvImpl {
+    return this.derive({ actionState: state });
   }
 
   withContext(patch: Partial<Context>): Env {

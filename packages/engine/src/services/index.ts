@@ -1,42 +1,20 @@
-﻿import { AccessError, ValidationError, type Env, type SqlDriver } from '../contracts/index.js';
-import { checkRecordRules, userSecurity } from '../security/access.js';
+﻿import { AccessError, ValidationError, type Env } from '../contracts/index.js';
+import { userSecurity } from '../security/access.js';
+import { EnvImpl, SUPERUSER_ID } from '../orm/env.js';
+import {
+  assertReadable, assertSystem, assertWritable, ensureServiceTables, nonNegativeInt, positiveInt, requireKey, requireModel, tenantDriver,
+} from './common.js';
+import { ServerActionService } from './actions.js';
+import { runTimeAutomations } from './automation.js';
+
+export { ensureServiceTables } from './common.js';
+export {
+  ServerActionService, ButtonService, postMessage,
+  type ServerActionDef, type ServerActionType, type ServerActionRunOptions, type ServerActionLimits, type ButtonDef, type ButtonCall,
+} from './actions.js';
+export { AutomationRuleService, MAX_AUTOMATION_DEPTH, type AutomationRuleDef, type AutomationTrigger } from './automation.js';
 
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
-const IDENTIFIER = /^[a-z][a-z0-9_.-]{0,127}$/;
-
-/** Creates the tenant-local persistence used by the optional engine services. */
-export async function ensureServiceTables(env: Env): Promise<void> {
-  const driver = tenantDriver(env);
-  await driver.query({ text: `
-    CREATE TABLE IF NOT EXISTS nx_sequence (
-      code TEXT PRIMARY KEY, next_number BIGINT NOT NULL DEFAULT 1,
-      step INTEGER NOT NULL DEFAULT 1, padding INTEGER NOT NULL DEFAULT 5, prefix TEXT NOT NULL DEFAULT ''
-    )`, params: [] });
-  await driver.query({ text: `
-    CREATE TABLE IF NOT EXISTS nx_scheduled_job (
-      id BIGSERIAL PRIMARY KEY, key TEXT NOT NULL UNIQUE, interval_ms BIGINT NOT NULL,
-      next_run TIMESTAMPTZ NOT NULL, enabled BOOLEAN NOT NULL DEFAULT TRUE,
-      last_error TEXT, updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )`, params: [] });
-  await driver.query({ text: `
-    CREATE TABLE IF NOT EXISTS nx_automation_rule (
-      id BIGSERIAL PRIMARY KEY, key TEXT NOT NULL UNIQUE, model TEXT NOT NULL,
-      event TEXT NOT NULL CHECK (event IN ('create','write','unlink')), enabled BOOLEAN NOT NULL DEFAULT TRUE
-    )`, params: [] });
-  await driver.query({ text: `
-    CREATE TABLE IF NOT EXISTS nx_audit_log (
-      id BIGSERIAL PRIMARY KEY, model TEXT NOT NULL, record_id BIGINT NOT NULL,
-      event TEXT NOT NULL, uid BIGINT NOT NULL, payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )`, params: [] });
-  await driver.query({ text: `CREATE INDEX IF NOT EXISTS nx_audit_log_record_idx ON nx_audit_log(model, record_id, id DESC)`, params: [] });
-  await driver.query({ text: `
-    CREATE TABLE IF NOT EXISTS nx_attachment (
-      id BIGSERIAL PRIMARY KEY, model TEXT NOT NULL, record_id BIGINT NOT NULL,
-      name TEXT NOT NULL, mimetype TEXT NOT NULL, data BYTEA NOT NULL,
-      uid BIGINT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )`, params: [] });
-}
 
 export interface SequenceOptions { prefix?: string; padding?: number; step?: number }
 
@@ -64,10 +42,26 @@ export class SequenceService {
   }
 }
 
-export interface ScheduledJob { key: string; intervalMs: number; nextRun?: Date; enabled?: boolean }
+/** Built-in job bodies that need no application handler. */
+export type ScheduledBuiltin = 'automation.on_time';
+
+export interface ScheduledJob {
+  key: string; intervalMs: number; nextRun?: Date; enabled?: boolean;
+  /** Server action run by the job (no records). Requires `userId`. */
+  action?: string;
+  /** Built-in body, e.g. evaluating time-based automation rules. Requires `userId`. */
+  builtin?: ScheduledBuiltin;
+  /**
+   * Active user the action/builtin runs as. The superuser may only be configured by the superuser.
+   * For `automation.on_time`, the due-record search uses this user's rights: records it cannot see are
+   * skipped, and because the watermark moves past them they are never processed later (permanently).
+   * Admins may configure any active non-superuser user here.
+   */
+  userId?: number;
+}
 export interface ClaimedJob { id: number; key: string }
 
-/** Stores schedules and claims due work. Handlers stay in application code, not persisted expressions. */
+/** Stores schedules and claims due work. Handlers stay in application code, or the job names a server action. */
 export class SchedulerService {
   constructor(private readonly env: Env) {}
 
@@ -75,11 +69,23 @@ export class SchedulerService {
     requireKey(job.key, 'job key');
     positiveInt(job.intervalMs, 'job interval');
     await assertSystem(this.env);
+    if (job.action !== undefined && job.builtin !== undefined) throw new ValidationError('A job runs either an action or a built-in');
+    if (job.builtin !== undefined && job.builtin !== 'automation.on_time') throw new ValidationError('Unknown built-in job');
+    if (job.action !== undefined || job.builtin !== undefined) {
+      if (job.userId === undefined) throw new ValidationError('Action jobs need the user they run as');
+      positiveInt(job.userId, 'job user');
+      if (job.userId === SUPERUSER_ID && !this.env.su) throw new AccessError('Only the superuser can schedule jobs as the superuser');
+      await jobEnv(this.env, job.userId); // must be an existing, active user
+    } else if (job.userId !== undefined) throw new ValidationError('Only action jobs have a user');
+    if (job.action !== undefined) {
+      if (!(await new ServerActionService(this.env).resolve(job.action))) throw new ValidationError(`Unknown server action '${job.action}'`);
+    }
     await ensureServiceTables(this.env);
     await tenantDriver(this.env).query({
-      text: `INSERT INTO nx_scheduled_job(key, interval_ms, next_run, enabled) VALUES ($1,$2,$3,$4)
-        ON CONFLICT (key) DO UPDATE SET interval_ms=EXCLUDED.interval_ms, next_run=EXCLUDED.next_run, enabled=EXCLUDED.enabled, updated_at=now()`,
-      params: [job.key, job.intervalMs, job.nextRun ?? new Date(), job.enabled ?? true],
+      text: `INSERT INTO nx_scheduled_job(key, interval_ms, next_run, enabled, action, builtin, user_id) VALUES ($1,$2,$3,$4,$5,$6,$7)
+        ON CONFLICT (key) DO UPDATE SET interval_ms=EXCLUDED.interval_ms, next_run=EXCLUDED.next_run, enabled=EXCLUDED.enabled,
+          action=EXCLUDED.action, builtin=EXCLUDED.builtin, user_id=EXCLUDED.user_id, updated_at=now()`,
+      params: [job.key, job.intervalMs, job.nextRun ?? new Date(), job.enabled ?? true, job.action ?? null, job.builtin ?? null, job.userId ?? null],
     });
   }
 
@@ -101,12 +107,33 @@ export class SchedulerService {
     await tenantDriver(this.env).query({ text: `UPDATE nx_scheduled_job SET last_error=$2, updated_at=now() WHERE key=$1`, params: [key, message] });
   }
 
-  /** Claims and dispatches available handlers once. Failed handlers are recorded for inspection. */
-  async runDue(handlers: ReadonlyMap<string, () => Promise<void>>, limit = 10, now = new Date()): Promise<{ completed: string[]; failed: string[] }> {
+  /**
+   * Claims and dispatches available jobs once. Action jobs run in their own transaction as the
+   * configured user; failures roll back and are recorded for inspection.
+   */
+  async runDue(handlers: ReadonlyMap<string, () => Promise<void>> = new Map(), limit = 10, now = new Date()): Promise<{ completed: string[]; failed: string[] }> {
     const jobs = await this.claimDue(limit, now);
     const completed: string[] = [];
     const failed: string[] = [];
     for (const job of jobs) {
+      const [config] = await tenantDriver(this.env).query<{ action: string | null; builtin: string | null; user_id: number | string | null }>({
+        text: `SELECT action, builtin, user_id FROM nx_scheduled_job WHERE id=$1`, params: [job.id],
+      });
+      if (config && (config.action !== null || config.builtin !== null)) {
+        try {
+          if (config.user_id === null) throw new ValidationError('Job has no configured user');
+          const env = await jobEnv(this.env, Number(config.user_id));
+          // time automations commit per rule page (one failing rule must not undo the others);
+          // a server action is atomic on its own (ServerActionService.run is transactional)
+          if (config.builtin === 'automation.on_time') await runTimeAutomations(env, now);
+          else await new ServerActionService(env).run(config.action!);
+          completed.push(job.key);
+        } catch (error) {
+          await this.recordFailure(job.key, error);
+          failed.push(job.key);
+        }
+        continue;
+      }
       const handler = handlers.get(job.key);
       if (!handler) {
         const error = new Error(`No handler registered for scheduled job '${job.key}'`);
@@ -249,53 +276,10 @@ export class AttachmentService {
   }
 }
 
-async function assertReadable(env: Env, model: string, recordId: number): Promise<void> {
-  try {
-    const rows = await env.model(model).browse(recordId).read(['id']);
-    if (rows.length !== 1) throw new AccessError('Record is unavailable');
-  } catch (error) {
-    if (error instanceof AccessError) throw error;
-    throw new AccessError('Record is unavailable');
-  }
+/** Fresh env for a job's configured user; fails for unknown or archived users. */
+async function jobEnv(base: Env, uid: number): Promise<EnvImpl> {
+  const source = base as EnvImpl;
+  const env = new EnvImpl({ tenant: source.tenant, uid, registry: source.registry, db: source.db });
+  if (!env.su) await userSecurity(env);
+  return env;
 }
-
-/** Record must exist, be visible, and be writable by the current user (ACL + record rules). */
-async function assertWritable(env: Env, model: string, recordId: number): Promise<void> {
-  await assertReadable(env, model, recordId);
-  try {
-    await env.model(model).browse(recordId).checkAccess('write');
-    await checkRecordRules(env as Parameters<typeof checkRecordRules>[0], model, [recordId], 'write');
-  } catch (error) {
-    if (error instanceof AccessError) throw error;
-    throw new AccessError('Record is unavailable');
-  }
-}
-
-/** Configuration changes require superuser or base.group_system. */
-async function assertSystem(env: Env): Promise<void> {
-  if (env.su) return;
-  let ok = false;
-  try { ok = (await userSecurity(env as Parameters<typeof userSecurity>[0])).groups.has('base.group_system'); } catch { ok = false; }
-  if (!ok) throw new AccessError('Only system administrators can change service configuration');
-}
-
-function requireModel(model: string): void {
-  if (!IDENTIFIER.test(model)) throw new ValidationError('Invalid model name');
-}
-function requireKey(key: string, label: string): void {
-  if (!IDENTIFIER.test(key)) throw new ValidationError(`Invalid ${label}`);
-}
-function positiveInt(value: number, label: string): number {
-  if (!Number.isSafeInteger(value) || value <= 0) throw new ValidationError(`${label} must be a positive integer`);
-  return value;
-}
-function nonNegativeInt(value: number, label: string): number {
-  if (!Number.isSafeInteger(value) || value < 0) throw new ValidationError(`${label} must be a non-negative integer`);
-  return value;
-}
-
-/** The concrete engine Env exposes its tenant driver internally while the public contract stays transport-neutral. */
-function tenantDriver(env: Env): SqlDriver {
-  return (env as Env & { db: SqlDriver }).db;
-}
-

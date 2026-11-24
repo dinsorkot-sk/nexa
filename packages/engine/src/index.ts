@@ -22,5 +22,8 @@ export { contactsModule, salesLiteModule, demoModules } from './demo/index.js';
 export {
   ensureServiceTables, SequenceService, SchedulerService, AutomationService, AuditService, AttachmentService,
   type SequenceOptions, type ScheduledJob, type ClaimedJob, type AutomationEvent, type AutomationRule,
-  type AutomationHandler, type AuditEntry, type AttachmentInput, type Attachment,
+  type AutomationHandler, type AuditEntry, type AttachmentInput, type Attachment, type ScheduledBuiltin,
+  ServerActionService, ButtonService, AutomationRuleService, postMessage, MAX_AUTOMATION_DEPTH,
+  type ServerActionDef, type ServerActionType, type ServerActionRunOptions, type ServerActionLimits,
+  type ButtonDef, type ButtonCall, type AutomationRuleDef, type AutomationTrigger,
 } from './services/index.js';

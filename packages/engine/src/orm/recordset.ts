@@ -4,7 +4,7 @@ import {
 } from '../contracts/index.js';
 import { compileDomain, compileOrder } from '../domain/compile.js';
 import { affected, cascadeAffected, computeValues, isComputed, isStoredComputed, mergeTodo, recompute, type Todo } from './compute.js';
-import type { EnvImpl } from './env.js';
+import { recordHooks, type EnvImpl } from './env.js';
 import { roundMonetary } from './decimal.js';
 import { isColumn, translationLanguage, type ResolvedField } from './registry.js';
 import { checkModelAccess, checkRecordRules, combine, hiddenFields, readRuleResolver, ruleDomain, userSecurity } from '../security/access.js';
@@ -398,6 +398,7 @@ export class RecordsetImpl implements Recordset {
       const done = await recompute(this.env, mergeTodo(own, await affected(this.env, this.model, 'all', ids)));
       await created.checkConstraints('all');
       await validateRecomputed(this.env, done);
+      await recordHooks()?.afterCreate(this.env, this.model, ids);
       return created;
     });
   }
@@ -414,6 +415,8 @@ export class RecordsetImpl implements Recordset {
       return;
     }
     await this.env.transaction(async () => {
+      const hooks = recordHooks();
+      const hookState = await hooks?.beforeWrite(this.env, this.model, this.ids, vals);
       const adminCount = await beginAdminStateChange(this.env.db, this.env.registry, this.model, Object.keys(vals));
       for (const id of this.ids) await this.validateCompanyLinks(vals, id);
       if ('parent_id' in vals) await this.validateParentLink(vals);
@@ -450,6 +453,7 @@ export class RecordsetImpl implements Recordset {
       await this.checkConstraints(changed);
       await validateRecomputed(this.env, done);
       await assertAdminRemains(this.env.db, adminCount);
+      await hooks?.afterWrite(this.env, this.model, this.ids, vals, hookState);
     });
   }
 
@@ -459,6 +463,7 @@ export class RecordsetImpl implements Recordset {
     await this.env.transaction(async () => {
       const adminCount = await beginAdminStateChange(this.env.db, this.env.registry, this.model, [], true);
       await checkRecordRules(this.env, this.model, this.ids, 'unlink');
+      await recordHooks()?.beforeUnlink(this.env, this.model, this.ids);
       const { todo } = await cascadeAffected(this.env, this.model, this.ids);
       await sqlCall(() => this.env.db.query({ text: `DELETE FROM "${this.table}" WHERE id = ANY($1)`, params: [[...this.ids]] }));
       // ON DELETE CASCADE / SET NULL may change rows of other models: drop the whole cache.

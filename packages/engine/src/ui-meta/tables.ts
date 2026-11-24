@@ -86,7 +86,14 @@ export async function writeModuleUi(
     if (a.type === 'window' && (!a.model || !models.has(a.model))) {
       throw new ValidationError(`Action '${a.xmlId}': window actions need a known model`);
     }
-    if (a.code !== undefined) throw new ValidationError(`Action '${a.xmlId}': server code needs the sandbox (D4)`);
+    if (a.code !== undefined) {
+      // stored only; executed exclusively by ServerActionService in the QuickJS sandbox as the caller
+      if (a.type !== 'server') throw new ValidationError(`Action '${a.xmlId}': only server actions carry code`);
+      if (typeof a.code !== 'string' || !a.code.trim() || a.code.length > 50_000) {
+        throw new ValidationError(`Action '${a.xmlId}': server code must contain 1 to 50000 characters`);
+      }
+      if (a.model !== undefined && !models.has(a.model)) throw new ValidationError(`Action '${a.xmlId}': unknown model '${a.model}'`);
+    }
   }
   await db.transaction(async (tx) => {
     await removeModuleUi(tx, module);
@@ -104,11 +111,11 @@ export async function writeModuleUi(
     }
     for (const a of actions) {
       await tx.query({
-        text: `INSERT INTO nx_action (module, xml_id, type, name, model, view_types, domain, context)
-               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
+        text: `INSERT INTO nx_action (module, xml_id, type, name, model, view_types, domain, context, code)
+               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9)`,
         params: [
           module, qualifyOwn(module, a.xmlId), a.type, a.name, a.model ?? null, a.viewTypes ?? null,
-          a.domain ? JSON.stringify(a.domain) : null, a.context ? JSON.stringify(a.context) : null,
+          a.domain ? JSON.stringify(a.domain) : null, a.context ? JSON.stringify(a.context) : null, a.code ?? null,
         ],
       });
     }

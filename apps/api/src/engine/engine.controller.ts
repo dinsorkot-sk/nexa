@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, UnauthorizedException, Req } from '@nestjs/common';
-import { AccessError, getAction, getMenus, getView, MetadataStore, userSecurity, ValidationError, type Domain, type Env, type FieldDef, type ViewNode, type ViewType } from '@nexa/engine';
+import { AccessError, ButtonService, getAction, getMenus, getView, MetadataStore, userSecurity, ValidationError, type Domain, type Env, type FieldDef, type ViewNode, type ViewType } from '@nexa/engine';
 import {
   callRequestSchema, copyRequestSchema, createRequestSchema, defaultGetRequestSchema, fieldsGetRequestSchema,
   nameSearchRequestSchema, onchangeRequestSchema, readGroupRequestSchema, readRequestSchema, searchCountRequestSchema,
@@ -25,6 +25,13 @@ const revokeKeyRequest = z.object({ id: z.number().int().positive() });
 
 const modelName = z.string().regex(/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/).max(120);
 const methodName = z.string().regex(/^[a-z][a-zA-Z0-9_]*$/).max(80);
+const buttonRequest = z.strictObject({
+  ids: z.array(z.number().int().positive()).min(1).max(1000),
+  action: z.string().regex(/^[a-z][a-z0-9_.-]{0,127}$/).optional(),
+  method: methodName.optional(),
+  args: z.array(z.unknown()).max(20).optional(),
+}).refine((b) => (b.action === undefined) !== (b.method === undefined), { message: 'Exactly one of action or method is required' })
+  .refine((b) => b.args === undefined || b.method !== undefined, { message: 'args only apply to method buttons' });
 const viewType = z.enum(['list', 'form', 'kanban', 'search', 'calendar', 'pivot', 'graph']);
 const xmlId = z.string().regex(/^[a-z][a-z0-9_]*\.[a-z0-9_]+$/).max(200);
 const studioModel = z.object({
@@ -422,6 +429,22 @@ export class EngineController {
     // the target records must exist and pass the user's read rules before any method runs on them
     if (req.ids.length) await m.browse(req.ids).read(['id']);
     return { result: await m.browse(req.ids).call(methodName.parse(method), ...req.args) };
+  }
+
+  /**
+   * Runs a button on records as the caller: a registered server action (`action`) or a model method
+   * (`method`). Button guards (NX-Expr) must hold for every record; failures roll back the whole call.
+   */
+  @Post('model/:model/button')
+  @HttpCode(200)
+  async button(@CallerParam() c: Caller, @Param('model') model: string, @Body() body: unknown) {
+    const req = buttonRequest.parse(body ?? {});
+    const env = await this.env(c);
+    const result = await new ButtonService(env).execute(modelName.parse(model), req.ids, {
+      ...(req.action !== undefined ? { action: req.action } : {}),
+      ...(req.method !== undefined ? { method: req.method, args: req.args ?? [] } : {}),
+    });
+    return { result };
   }
 
   @Get('ui/view/:model/:type')
