@@ -16,7 +16,7 @@ const readOnly = { read: true, write: false, create: false, unlink: false };
  */
 export const baseModule: ModuleManifest = {
   name: 'base',
-  version: '1.1.0',
+  version: '1.2.0',
   summary: 'Companies, users, groups, access control, partners, currencies, countries and languages',
   depends: [],
   models: [...securityModels, ...configModels, ...currencyModels, ...countryModels, ...langModels, ...partnerModels],
@@ -85,6 +85,8 @@ export const baseModule: ModuleManifest = {
     { xmlId: 'action_defaults', type: 'window', name: 'Default Values', model: 'ir.default', viewTypes: ['list', 'form'] },
     { xmlId: 'action_crons', type: 'window', name: 'Scheduled Actions', model: 'ir.cron', viewTypes: ['list', 'form'] },
     { xmlId: 'action_automations', type: 'window', name: 'Automation Rules', model: 'ir.automation', viewTypes: ['list', 'form'] },
+    { xmlId: 'action_server_actions', type: 'window', name: 'Server Actions', model: 'ir.actions.server', viewTypes: ['list', 'form'] },
+    { xmlId: 'action_buttons', type: 'window', name: 'Buttons', model: 'ir.button', viewTypes: ['list', 'form'] },
     { xmlId: 'action_currencies', type: 'window', name: 'Currencies', model: 'res.currency', viewTypes: ['list', 'form'] },
     { xmlId: 'action_countries', type: 'window', name: 'Countries', model: 'res.country', viewTypes: ['list', 'form'] },
     { xmlId: 'action_langs', type: 'window', name: 'Languages', model: 'res.lang', viewTypes: ['list', 'form'] },
@@ -101,6 +103,8 @@ export const baseModule: ModuleManifest = {
     { xmlId: 'menu_defaults', name: 'Default Values', parent: 'menu_technical', action: 'action_defaults', sequence: 3 },
     { xmlId: 'menu_crons', name: 'Scheduled Actions', parent: 'menu_technical', action: 'action_crons', sequence: 4 },
     { xmlId: 'menu_automations', name: 'Automation Rules', parent: 'menu_technical', action: 'action_automations', sequence: 5 },
+    { xmlId: 'menu_server_actions', name: 'Server Actions', parent: 'menu_technical', action: 'action_server_actions', sequence: 6 },
+    { xmlId: 'menu_buttons', name: 'Buttons', parent: 'menu_technical', action: 'action_buttons', sequence: 7 },
     { xmlId: 'menu_currencies', name: 'Currencies', parent: 'menu_technical', action: 'action_currencies', sequence: 10 },
     { xmlId: 'menu_countries', name: 'Countries', parent: 'menu_technical', action: 'action_countries', sequence: 11 },
     { xmlId: 'menu_langs', name: 'Languages', parent: 'menu_technical', action: 'action_langs', sequence: 12 },

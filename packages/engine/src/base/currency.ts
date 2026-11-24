@@ -1,5 +1,6 @@
 import { ValidationError, type DataRecord, type Env, type ModelDef, type Recordset } from '../contracts/index.js';
 import { roundMonetary } from '../orm/decimal.js';
+import { precisionDigits } from '../orm/expr-helpers.js';
 import { CURRENCIES_CSV, ACTIVE_CURRENCIES, DECIMAL_PRECISIONS } from './data/currencies.js';
 
 /** Currency-like value accepted by the helpers: a record id or anything carrying `rounding`. */
@@ -154,10 +155,9 @@ export async function currencyConvert(
   return opts.round === false ? value : currencyRound(env, value, toId);
 }
 
-/** Digits of a named decimal precision (2 when it does not exist), read with superuser rights. */
+/** Digits of a named decimal precision (2 when it does not exist), read with superuser rights and cached per env family. */
 export async function precisionGet(env: Env, name: string): Promise<number> {
-  const [row] = await env.sudo().model('decimal.precision').searchRead([['name', '=', name]], ['digits'], { limit: 1 });
-  return row ? Number(row.digits) : 2;
+  return precisionDigits(env, name);
 }
 
 /** Round a float to a number of decimal digits (ties away from zero). */

@@ -1,8 +1,8 @@
 import { AccessError, EngineError, UserError, ValidationError, type Context, type Domain, type Env } from '../contracts/index.js';
 import {
-  evaluateExpression, parseExpression, runServerScript, type ExprValue, type SafeScriptBridge,
+  parseExpression, runServerScript, type ExprValue, type SafeScriptBridge,
 } from '../expr/index.js';
-import { expressionContext } from '../orm/compute.js';
+import { evaluateEnvExpression } from '../orm/expr-helpers.js';
 import type { EnvImpl } from '../orm/env.js';
 import { addFollowers, createMessage, mailInstalled, resolveSubtype, userPartner } from '../mail/message.js';
 import { textToHtml } from '../mail/sanitize.js';
@@ -243,8 +243,7 @@ async function readRecord(env: Env, model: string, id: number): Promise<Record<s
 }
 
 async function evaluateFor(env: Env, source: string, record: Record<string, ExprValue> | null): Promise<ExprValue> {
-  const helpers = await expressionContext(env as EnvImpl);
-  return evaluateExpression(source, record ? { ...record, record, ...helpers } : helpers);
+  return evaluateEnvExpression(env, source, record ? { ...record, record } : {});
 }
 
 async function evaluateValues(env: Env, values: Record<string, string>, record: Record<string, ExprValue> | null): Promise<Record<string, unknown>> {
@@ -533,4 +532,43 @@ function buttonTarget(call: { action?: string; method?: string }): { kind: 'acti
   }
   if (typeof call.method !== 'string' || !METHOD.test(call.method)) throw new ValidationError('Invalid method name');
   return { kind: 'object', ref: call.method };
+}
+
+// ---------- T25: ir.actions.server / ir.button records -> runtime rows (one-way sync helpers) ----------
+
+/**
+ * Removes stored server action definitions (admin-only). Fails while an automation rule, scheduled job,
+ * button or multi action still refers to one of them, so live references never dangle.
+ */
+export async function removeServerActionDefinitions(env: Env, keys: readonly string[]): Promise<void> {
+  if (!keys.length) return;
+  await assertSystem(env);
+  await ensureServiceTables(env);
+  const db = tenantDriver(env);
+  const list = [...new Set(keys)];
+  const [ref] = await db.query<{ what: string; key: string }>({
+    text: `SELECT 'automation rule ' || key AS what, action AS key FROM nx_automation WHERE action = ANY($1)
+      UNION ALL SELECT 'scheduled job ' || key, action FROM nx_scheduled_job WHERE action = ANY($1)
+      UNION ALL SELECT 'button on ' || model, ref FROM nx_button WHERE kind = 'action' AND ref = ANY($1)
+      UNION ALL SELECT 'server action ' || s.key, c.child FROM nx_server_action s
+        CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(s.definition->'children', '[]'::jsonb)) AS c(child)
+        WHERE c.child = ANY($1) AND NOT (s.key = ANY($1))
+      LIMIT 1`,
+    params: [list],
+  });
+  if (ref) throw new ValidationError(`Server action '${ref.key}' is still used by ${ref.what}`);
+  await db.query({ text: `DELETE FROM nx_server_action WHERE key = ANY($1)`, params: [list] });
+}
+
+/** Removes button definitions (admin-only). Each entry names exactly one of `action` / `method`. */
+export async function removeButtonDefinitions(env: Env, buttons: readonly { model: string; action?: string | null; method?: string | null }[]): Promise<void> {
+  if (!buttons.length) return;
+  await assertSystem(env);
+  await ensureServiceTables(env);
+  for (const button of buttons) {
+    const kind = button.action ? 'action' : 'object';
+    const ref = button.action || button.method;
+    if (!ref) continue;
+    await tenantDriver(env).query({ text: `DELETE FROM nx_button WHERE model=$1 AND kind=$2 AND ref=$3`, params: [button.model, kind, ref] });
+  }
 }

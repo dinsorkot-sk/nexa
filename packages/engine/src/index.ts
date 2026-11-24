@@ -44,3 +44,5 @@ export {
 } from './services/data-transfer.js';
 export { SavedFilterService, type SavedFilterInput, type SavedFilter } from './services/filters.js';
 export * from './mail/index.js';
+export { evaluateEnvExpression, registerExpressionHelper, precisionDigits, fieldDigits, type ExpressionHelperDef, type EvaluateOptions } from './orm/expr-helpers.js';
+export { localClock } from './orm/clock.js';

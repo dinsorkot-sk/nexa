@@ -1,5 +1,5 @@
 import {
-  EngineError, ValidationError, type FieldDef, type FieldType, type ModelDef, type OnDelete, type ResolvedModel,
+  AccessError, EngineError, ValidationError, type Env, type FieldDef, type FieldType, type ModelDef, type OnDelete, type ResolvedModel,
   type SqlDriver, type TenantHandle,
 } from '../contracts/index.js';
 import { compileOrder } from '../domain/compile.js';
@@ -9,6 +9,8 @@ import { EnvImpl, SUPERUSER_ID } from '../orm/env.js';
 import { ModelRegistry, tableName } from '../orm/registry.js';
 import { applyMigration, planMigration, type MigrationOp } from '../schema/sync.js';
 import { withDriverLock } from '../modules/lock.js';
+import { PRECISION_NAME_RE } from '../orm/registry.js';
+import { userSecurity } from '../security/access.js';
 
 /** Custom (no-code) names must carry the `x_` prefix so they never clash with module names. */
 const CUSTOM_MODEL_RE = /^x_[a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/;
@@ -38,6 +40,12 @@ export async function ensureMetadataTables(db: SqlDriver): Promise<void> {
     });
     // Existing tenant metadata is upgraded additively; older rows keep an empty options object.
     await tx.query({ text: `ALTER TABLE nx_field ADD COLUMN IF NOT EXISTS field_options JSONB NOT NULL DEFAULT '{}'::jsonb`, params: [] });
+    // Abstract mixins attached through metadata (custom models, or module models by an administrator).
+    await tx.query({
+      text: `CREATE TABLE IF NOT EXISTS nx_model_mixin (
+        id SERIAL PRIMARY KEY, model TEXT NOT NULL, mixin TEXT NOT NULL,
+        create_date TIMESTAMP NOT NULL DEFAULT now(), UNIQUE (model, mixin))`, params: [],
+    });
   });
 }
 
@@ -47,7 +55,7 @@ interface FieldRow {
   required: boolean; readonly: boolean; index: boolean; unique: boolean;
   default_value: unknown; selection: [string, string][] | null; comodel: string | null;
   inverse_name: string | null; relation_table: string | null; ondelete: OnDelete | null;
-  field_options: Pick<FieldDef, 'digits' | 'translate' | 'copy' | 'aggregator' | 'currencyField' | 'computeExpr' | 'defaultExpr' | 'depends' | 'store'>;
+  field_options: Pick<FieldDef, 'digits' | 'translate' | 'copy' | 'aggregator' | 'currencyField' | 'computeExpr' | 'defaultExpr' | 'depends' | 'store' | 'tracking'>;
 }
 
 function rowToField(r: FieldRow): FieldDef {
@@ -61,6 +69,7 @@ function rowToField(r: FieldRow): FieldDef {
   if (r.field_options?.defaultExpr !== undefined) f.defaultExpr = r.field_options.defaultExpr;
   if (r.field_options?.depends !== undefined) f.depends = r.field_options.depends;
   if (r.field_options?.store !== undefined) f.store = r.field_options.store;
+  if (r.field_options?.tracking !== undefined) f.tracking = r.field_options.tracking;
   if (r.string !== null) f.string = r.string;
   if (r.help !== null) f.help = r.help;
   if (r.required) f.required = true;
@@ -82,6 +91,9 @@ function rowToField(r: FieldRow): FieldDef {
  */
 export async function loadCustomDefs(db: SqlDriver): Promise<ModelDef[]> {
   const models = await db.query<ModelRow>({ text: `SELECT name, description, "order", expression_hooks FROM nx_model ORDER BY id`, params: [] });
+  const mixinRows = await db.query<{ model: string; mixin: string }>({ text: `SELECT model, mixin FROM nx_model_mixin ORDER BY id`, params: [] });
+  const mixins = new Map<string, string[]>();
+  for (const r of mixinRows) mixins.set(r.model, [...(mixins.get(r.model) ?? []), r.mixin]);
   const fields = await db.query<FieldRow>({
     text: `SELECT model, name, ttype, string, help, required, readonly, "index", "unique", default_value, selection,
       comodel, inverse_name, relation_table, ondelete, field_options FROM nx_field ORDER BY id`, params: [],
@@ -95,12 +107,15 @@ export async function loadCustomDefs(db: SqlDriver): Promise<ModelDef[]> {
   const custom = new Set(models.map((m) => m.name));
   const out: ModelDef[] = models.map((m) => ({
     name: m.name, origin: 'custom', fields: byModel.get(m.name) ?? {},
+    ...(mixins.has(m.name) ? { extends: mixins.get(m.name)! } : {}),
     ...(m.description !== null ? { description: m.description } : {}),
     ...(m.order !== null ? { order: m.order } : {}),
     ...modelExpressions(m.expression_hooks ?? {}),
   }));
-  for (const [model, fs] of byModel) {
-    if (!custom.has(model)) out.push({ name: model, extends: [model], origin: 'custom', fields: fs });
+  // Extensions of module models: custom fields and/or attached mixins, one def per model.
+  const extended = new Set([...byModel.keys(), ...mixins.keys()].filter((model) => !custom.has(model)));
+  for (const model of extended) {
+    out.push({ name: model, extends: [model, ...(mixins.get(model) ?? [])], origin: 'custom', fields: byModel.get(model) ?? {} });
   }
   return out;
 }
@@ -117,13 +132,25 @@ export function combinedSource(
     const custom = await loadCustomDefs(db);
     const mods = await moduleDefs();
     // custom models first so module-independent; extensions of module models after module defs
-    const customModels = custom.filter((d) => !d.extends);
+    const isExtension = (d: ModelDef) => !!d.extends?.includes(d.name);
+    const customModels = custom.filter((d) => !isExtension(d));
     const known = new Set([...mods.map((d) => d.name), ...customModels.map((d) => d.name)]);
+    const moduleNames = new Set(mods.map((d) => d.name));
     const keep: ModelDef[] = [];
-    for (const d of [...customModels, ...custom.filter((x) => x.extends)]) {
-      if (d.extends && !known.has(d.name)) {
+    for (const def of [...customModels, ...custom.filter(isExtension)]) {
+      let d = def;
+      if (isExtension(d) && !known.has(d.name)) {
         onSkip?.(`custom fields on missing model '${d.name}'`);
         continue;
+      }
+      if (d.extends) {
+        const parents = d.extends.filter((p) => {
+          if (p === d.name || moduleNames.has(p)) return true;
+          onSkip?.(`mixin '${p}' on '${d.name}' (mixin missing)`);
+          return false;
+        });
+        d = { ...d, extends: parents };
+        if (!parents.length) delete d.extends;
       }
       const fields = Object.fromEntries(Object.entries(d.fields).filter(([n, f]) => {
         if (!f.comodel || known.has(f.comodel)) return true;
@@ -213,14 +240,27 @@ function validateField(model: string, name: string, f: FieldDef): void {
     throw new ValidationError('Invalid compute dependencies');
   }
   if (f.selectionAdd) throw new ValidationError(`Custom field '${model}.${name}' cannot extend a selection`);
+  if (f.digits !== undefined) {
+    const valid = typeof f.digits === 'string'
+      ? PRECISION_NAME_RE.test(f.digits)
+      : Array.isArray(f.digits) && f.digits.length === 2 && f.digits.every((n) => Number.isInteger(n)) && f.digits[0] >= 1 && f.digits[0] <= 1000 && f.digits[1] >= 0 && f.digits[1] <= f.digits[0];
+    if (f.type !== 'float' || !valid) throw new ValidationError(`Invalid digits on '${model}.${name}'`);
+  }
   if (f.translate !== undefined && (typeof f.translate !== 'boolean' || (f.translate && !['char', 'text', 'html'].includes(f.type)))) throw new ValidationError('Invalid translate flag');
   if (f.translate && f.unique) throw new ValidationError('Translated fields cannot be unique');
   if (f.copy !== undefined && typeof f.copy !== 'boolean') throw new ValidationError('Invalid copy flag');
+  if (f.tracking !== undefined && typeof f.tracking !== 'boolean') throw new ValidationError('Invalid tracking flag');
   if (f.aggregator !== undefined && !['sum', 'avg', 'min', 'max', 'count', 'count_distinct'].includes(f.aggregator)) throw new ValidationError('Invalid aggregator');
   if (f.ondelete !== undefined && !ON_DELETES.has(f.ondelete)) throw new ValidationError(`Invalid ondelete '${String(f.ondelete)}'`);
   if (f.selection && !f.selection.every((p) => Array.isArray(p) && p.length === 2 && p.every((s) => typeof s === 'string'))) {
     throw new ValidationError(`Invalid selection for '${model}.${name}'`);
   }
+}
+
+function inheritsModel(registry: ModelRegistry, model: string, mixin: string, seen = new Set<string>()): boolean {
+  if (seen.has(model) || !registry.models.has(model)) return false;
+  seen.add(model);
+  return (registry.get(model).def.extends ?? []).some((p) => p === mixin || (p !== model && inheritsModel(registry, p, mixin, seen)));
 }
 
 /**
@@ -305,7 +345,71 @@ export class MetadataStore {
         throw new ValidationError(`Model '${name}' is still referenced by ${refs.map((r) => `${r.model}.${r.name}`).join(', ')}`);
       }
       await tx.query({ text: `DELETE FROM nx_field WHERE model = $1`, params: [name] });
+      await tx.query({ text: `DELETE FROM nx_model_mixin WHERE model = $1`, params: [name] });
     }, { destructive: opts, target: (op) => op.kind === 'drop_table' && op.table === table, dropTables: [table] });
+  }
+
+  /**
+   * Attach an abstract module mixin (e.g. 'mail.thread', 'mail.activity.mixin') to a model; it is
+   * persisted in nx_model_mixin and reapplied on every registry rebuild, and the schema is synced.
+   * Only administrators may do this, on any target: `actor` must be the superuser (uid 1) or a
+   * member of base.group_system; sudo() does not count. Stored computed fields the mixin adds are
+   * initialized on existing rows; a mixin with required fields cannot be added to a populated table.
+   */
+  async addMixin(model: string, mixin: string, opts: { actor?: Env } = {}): Promise<void> {
+    await this.checkMixinTarget(model, mixin, opts.actor);
+    const parent = this.registry.models.get(mixin);
+    if (!parent || !parent.def.abstract || parent.def.origin !== 'module') throw new ValidationError(`'${mixin}' is not an abstract module mixin`);
+    if (inheritsModel(this.registry, model, mixin)) throw new ValidationError(`Model '${model}' already inherits '${mixin}'`);
+    const existing = this.registry.get(model);
+    const added = [...parent.fields.values()].filter((f) => !existing.fields.has(f.name));
+    await this.change(async (tx) => {
+      await tx.query({ text: `INSERT INTO nx_model_mixin (model, mixin) VALUES ($1, $2)`, params: [model, mixin] });
+      const required = added.filter((f) => f.required);
+      if (required.length) {
+        const rows = await tx.query({ text: `SELECT 1 FROM "${existing.table}" LIMIT 1`, params: [] });
+        if (rows.length) throw new ValidationError(`Mixin '${mixin}' adds required fields (${required.map((f) => f.name).join(', ')}) to '${model}', which has records`);
+      }
+    }, {
+      initialize: async (tx, models) => {
+        const target = models.get(model)!;
+        for (const f of added) {
+          const field = target.fields.get(f.name);
+          if (field && (field.compute || field.computeExpr || field.related) && field.store) await this.initializeStoredExpression(tx, models, model, f.name);
+        }
+      },
+    });
+  }
+
+  /** Detach a mixin attached with addMixin. Columns the mixin added are dropped (destructive). */
+  async removeMixin(model: string, mixin: string, opts: DestructiveOptions & { actor?: Env }): Promise<void> {
+    await this.checkMixinTarget(model, mixin, opts.actor);
+    const table = this.registry.models.get(model)?.table ?? null;
+    const own = new Set(this.registry.models.get(mixin)?.fields.keys() ?? []);
+    await this.change(async (tx) => {
+      const del = await tx.query({ text: `DELETE FROM nx_model_mixin WHERE model = $1 AND mixin = $2 RETURNING id`, params: [model, mixin] });
+      if (!del.length) throw new ValidationError(`Mixin '${mixin}' was not attached to '${model}' through metadata`);
+    }, { destructive: opts, target: (op) => op.kind === 'drop_column' && op.table === table && own.has(op.column) });
+  }
+
+  /** Mixins attached through metadata, optionally for one model (metadata read, like list(); callers gate access). */
+  async listMixins(model?: string): Promise<{ model: string; mixin: string }[]> {
+    return this.db.query<{ model: string; mixin: string }>(model === undefined
+      ? { text: `SELECT model, mixin FROM nx_model_mixin ORDER BY id`, params: [] }
+      : { text: `SELECT model, mixin FROM nx_model_mixin WHERE model = $1 ORDER BY id`, params: [model] });
+  }
+
+  private async checkMixinTarget(model: string, mixin: string, actor?: Env): Promise<void> {
+    if (typeof model !== 'string' || typeof mixin !== 'string') throw new ValidationError('Model and mixin names are required');
+    const target = this.registry.models.get(model);
+    if (!target || !target.table) throw new ValidationError(`Unknown concrete model '${model}'`);
+    const denied = () => new AccessError(`Changing mixins of '${model}' requires an administrator`);
+    if (!actor) throw denied();
+    if (this.tenant && actor.tenant !== this.tenant) throw new AccessError('Actor belongs to another tenant');
+    if (actor.uid === SUPERUSER_ID) return;
+    // decide on the real user: a sudo() env of a normal user is not an administrator
+    const user = new EnvImpl({ tenant: this.tenant || actor.tenant, uid: actor.uid, registry: this.registry, db: this.db });
+    if (!(await userSecurity(user)).groups.has('base.group_system')) throw denied();
   }
 
   async list(): Promise<ModelDef[]> {
@@ -344,7 +448,7 @@ export class MetadataStore {
         f.comodel ?? null, f.inverseName ?? null, f.relationTable ?? null, f.ondelete ?? null,
         JSON.stringify({
           digits: f.digits, translate: f.translate, copy: f.copy, aggregator: f.aggregator, currencyField: f.currencyField,
-          computeExpr: f.computeExpr, defaultExpr: f.defaultExpr, depends: f.depends, store: f.store,
+          computeExpr: f.computeExpr, defaultExpr: f.defaultExpr, depends: f.depends, store: f.store, tracking: f.tracking,
         }),
       ],
     });

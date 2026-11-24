@@ -14,6 +14,7 @@ const fieldPath = z.string().min(1).max(300);
 const cell = z.union([z.string().max(DATA_TRANSFER_LIMITS.maxCellChars), z.number(), z.boolean(), z.null()]);
 const importContext = z.strictObject({
   lang: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/).optional(),
+  tz: z.string().regex(/^[A-Za-z0-9_+/-]{1,64}$/).optional(),
   activeTest: z.boolean().optional(),
 }).optional();
 
@@ -95,10 +96,12 @@ export class DataTransferController {
   async import(@CallerParam() c: Caller, @Param('model') model: string, @Body() body: unknown) {
     const name = modelName.parse(model);
     const req = importRequest.parse(body);
-    const env = await this.env(c);
+    // explicit lang / tz are validated (active language, known zone) and override the user's preferences
+    const env = await this.engine.withRequestContext(await this.env(c), { lang: req.context?.lang, tz: req.context?.tz });
     const { header, rows } = req.csv !== undefined ? parseCsv(req.csv) : { header: req.header!, rows: req.rows! };
+    const activeTest = req.context?.activeTest;
     return new DataImportService(env).load(name, header, rows, {
-      dryRun: req.dryRun, ...(req.context ? { context: req.context } : {}),
+      dryRun: req.dryRun, ...(activeTest !== undefined ? { context: { activeTest } } : {}),
     });
   }
 

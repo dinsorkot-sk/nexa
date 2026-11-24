@@ -7,6 +7,9 @@ import { userSecurity } from '../security/access.js';
 import { assertSystem, ensureServiceTables, requireKey, tenantDriver } from './common.js';
 import { AutomationRuleService, type AutomationTrigger } from './automation.js';
 import { SchedulerService } from './index.js';
+import {
+  ButtonService, ServerActionService, removeButtonDefinitions, removeServerActionDefinitions, type ServerActionType,
+} from './actions.js';
 import { dropBacking, sequenceAfterWrite, sequenceBeforeWrite } from './sequence.js';
 
 export { checkSequenceRanges, checkSequences, computeNumberNextActual } from './sequence.js';
@@ -320,11 +323,100 @@ export async function checkAutomationRecords(records: Recordset): Promise<void> 
   }
 }
 
-const RUNTIME_TABLE: Record<string, string> = { 'ir.cron': 'nx_scheduled_job', 'ir.automation': 'nx_automation' };
+// ---------- ir.actions.server / ir.button records -> runtime tables ----------
+
+const MAX_VALUES_JSON = 200_000;
+
+function parseActionValues(text: string | null, key: string): Record<string, string> | undefined {
+  if (text === null || text.trim() === '') return undefined;
+  if (text.length > MAX_VALUES_JSON) throw new ValidationError(`Field values of server action '${key}' are too long`);
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { throw new ValidationError(`Field values of server action '${key}' must be a JSON object`); }
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || !Object.values(value).every((v) => typeof v === 'string')) {
+    throw new ValidationError(`Field values of server action '${key}' must map field names to NX-Expr strings`);
+  }
+  return value as Record<string, string>;
+}
+
+/**
+ * Validates ir.actions.server records through ServerActionService.define with the writer's env
+ * (admin-only) and stores the runtime definition. Archived actions are removed from the runtime,
+ * which is refused while an automation rule, job, button or multi action still uses them.
+ */
+export async function checkServerActionRecords(records: Recordset): Promise<void> {
+  const env = records.env;
+  const rows = await tenantDriver(env).query<{
+    key: string; name: string | null; model_name: string | null; type: ServerActionType; values_json: string | null;
+    target_model: string | null; message: string | null; child_keys: string | null; code: string | null; active: boolean | null;
+  }>({
+    text: `SELECT key, name, model_name, type, values_json, target_model, message, child_keys, code, active
+      FROM ir_actions_server WHERE id = ANY($1) ORDER BY id`,
+    params: [[...records.ids]],
+  });
+  for (const row of rows) {
+    requireKey(row.key, 'server action key');
+    if (!row.active) { await removeServerActionDefinitions(env, [row.key]); continue; }
+    const values = parseActionValues(row.values_json, row.key);
+    const children = (row.child_keys ?? '').split(',').map((c) => c.trim()).filter(Boolean);
+    await new ServerActionService(env).define({
+      key: row.key, type: row.type,
+      ...(row.name ? { name: row.name } : {}),
+      ...(row.model_name ? { model: row.model_name } : {}),
+      ...(values ? { values } : {}),
+      ...(row.target_model ? { targetModel: row.target_model } : {}),
+      ...(row.message !== null ? { message: row.message } : {}),
+      ...(children.length ? { children } : {}),
+      ...(row.code !== null ? { code: row.code } : {}),
+    });
+  }
+}
+
+/** Validates ir.button records through ButtonService.define (admin-only) and stores the button. */
+export async function checkButtonRecords(records: Recordset): Promise<void> {
+  const env = records.env;
+  const rows = await tenantDriver(env).query<{
+    model_name: string; action: string | null; method: string | null; guard: string | null; dup: boolean;
+  }>({
+    text: `SELECT b.model_name, b.action, b.method, b.guard,
+        EXISTS (SELECT 1 FROM ir_button o WHERE o.id <> b.id AND o.model_name = b.model_name
+          AND o.action IS NOT DISTINCT FROM b.action AND o.method IS NOT DISTINCT FROM b.method) AS dup
+      FROM ir_button b WHERE b.id = ANY($1) ORDER BY b.id`,
+    params: [[...records.ids]],
+  });
+  for (const row of rows) {
+    if (row.dup) throw new ValidationError(`This button already exists on '${row.model_name}'`);
+    await new ButtonService(env).define({
+      model: row.model_name,
+      ...(row.action ? { action: row.action } : {}),
+      ...(row.method ? { method: row.method } : {}),
+      ...(row.guard !== null && row.guard.trim() !== '' ? { guard: row.guard } : {}),
+    });
+  }
+}
+
+const RUNTIME_TABLE: Record<string, string> = {
+  'ir.cron': 'nx_scheduled_job', 'ir.automation': 'nx_automation', 'ir.actions.server': 'nx_server_action', 'ir.button': 'nx_button',
+};
+/** Fields identifying the runtime row: they cannot change once the record exists. */
+const IMMUTABLE: Record<string, string[]> = {
+  'ir.cron': ['key'], 'ir.automation': ['key'], 'ir.actions.server': ['key'], 'ir.button': ['model_name', 'action', 'method'],
+};
 
 async function removeRuntime(env: EnvImpl, model: string, ids: readonly number[]): Promise<void> {
   const runtime = RUNTIME_TABLE[model];
   if (!runtime) return;
+  if (model === 'ir.actions.server') {
+    const rows = await env.db.query<{ key: string }>({ text: `SELECT key FROM ir_actions_server WHERE id = ANY($1)`, params: [[...ids]] });
+    await removeServerActionDefinitions(env, rows.map((r) => r.key));
+    return;
+  }
+  if (model === 'ir.button') {
+    const rows = await env.db.query<{ model_name: string; action: string | null; method: string | null }>({
+      text: `SELECT model_name, action, method FROM ir_button WHERE id = ANY($1)`, params: [[...ids]],
+    });
+    await removeButtonDefinitions(env, rows.map((r) => ({ model: r.model_name, action: r.action, method: r.method })));
+    return;
+  }
   await assertSystem(env);
   await ensureServiceTables(env);
   const table = model === 'ir.cron' ? 'ir_cron' : 'ir_automation';
@@ -348,6 +440,23 @@ export async function importServiceConfigRecords(env: Env): Promise<number> {
   await ensureServiceTables(env);
   const db = tenantDriver(env);
   let created = 0;
+  if (registered(env, 'ir.actions.server')) {
+    const actions = await db.query<{ key: string; name: string; model: string | null; type: string; definition: Record<string, unknown> | null }>({
+      text: `SELECT key, name, model, type, definition FROM nx_server_action s
+        WHERE NOT EXISTS (SELECT 1 FROM ir_actions_server r WHERE r.key = s.key) ORDER BY id`, params: [],
+    });
+    for (const action of actions) {
+      const d = action.definition ?? {};
+      const values = d.values && typeof d.values === 'object' && Object.keys(d.values).length ? JSON.stringify(d.values) : null;
+      const children = Array.isArray(d.children) && d.children.length ? (d.children as string[]).join(',') : null;
+      await env.model('ir.actions.server').create({
+        key: action.key, name: action.name, model_name: action.model, type: action.type, values_json: values,
+        target_model: (d.targetModel as string | null) ?? null, message: (d.message as string | null) ?? null,
+        child_keys: children, code: (d.code as string | null) ?? null, active: true,
+      });
+      created += 1;
+    }
+  }
   if (registered(env, 'ir.cron')) {
     const jobs = await db.query<{ key: string; interval_ms: string | number; next_run: Date; enabled: boolean; action: string | null; builtin: string | null; user_id: string | number | null }>({
       text: `SELECT key, interval_ms, next_run, enabled, action, builtin, user_id FROM nx_scheduled_job j
@@ -380,6 +489,19 @@ export async function importServiceConfigRecords(env: Env): Promise<number> {
       created += 1;
     }
   }
+  if (registered(env, 'ir.button')) {
+    const buttons = await db.query<{ model: string; kind: 'action' | 'object'; ref: string; guard: string | null }>({
+      text: `SELECT model, kind, ref, guard FROM nx_button b WHERE NOT EXISTS (SELECT 1 FROM ir_button r WHERE r.model_name = b.model
+        AND (CASE WHEN b.kind = 'action' THEN r.action ELSE r.method END) = b.ref) ORDER BY id`, params: [],
+    });
+    for (const button of buttons) {
+      await env.model('ir.button').create({
+        name: button.ref, model_name: button.model, guard: button.guard,
+        ...(button.kind === 'action' ? { action: button.ref } : { method: button.ref }),
+      });
+      created += 1;
+    }
+  }
   return created;
 }
 
@@ -390,12 +512,19 @@ if (!previous) throw new Error('Automation record hooks must be installed before
 setRecordHooks({
   afterCreate: async (env, model, ids) => { await previous?.afterCreate(env, model, ids); },
   beforeWrite: async (env, model, ids, vals) => {
-    if (RUNTIME_TABLE[model] && 'key' in vals) {
+    for (const field of IMMUTABLE[model] ?? []) {
+      if (!(field in vals)) continue;
+      const table = env.registry.get(model).table!;
+      const value = vals[field] === false || vals[field] === '' || vals[field] === undefined ? null : vals[field];
       const [row] = await env.db.query<{ n: number }>({
-        text: `SELECT count(*)::int AS n FROM ${model === 'ir.cron' ? 'ir_cron' : 'ir_automation'} WHERE id = ANY($1) AND key IS DISTINCT FROM $2`,
-        params: [[...ids], vals.key],
+        text: `SELECT count(*)::int AS n FROM "${table}" WHERE id = ANY($1) AND "${field}" IS DISTINCT FROM $2`,
+        params: [[...ids], value],
       });
-      if (row && row.n > 0) throw new ValidationError('The key of a scheduled job or automation rule cannot be changed');
+      if (row && row.n > 0) {
+        throw new ValidationError(field === 'key'
+          ? 'The key of a scheduled job, automation rule or server action cannot be changed'
+          : 'The model and target of a button cannot be changed');
+      }
     }
     const sequence = await sequenceBeforeWrite(env, model, ids, vals);
     return { sequence, previous: await previous?.beforeWrite(env, model, ids, vals) };

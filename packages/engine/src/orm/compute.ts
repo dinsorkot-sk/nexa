@@ -2,8 +2,10 @@ import { EngineError, ValidationError, type ComputeFn, type ResolvedModel } from
 import type { EnvImpl } from './env.js';
 import type { RecordsetImpl } from './recordset.js';
 import type { ResolvedField } from './registry.js';
-import { createExpressionHelpers, evaluateExpression, extractDependencies, type ExprValue } from '../expr/index.js';
+import { createExpressionHelpers, extractDependencies, type ExprValue } from '../expr/index.js';
 import { userSecurity } from '../security/access.js';
+import { localClock } from './clock.js';
+import { evaluateEnvExpression, registeredSyncHelpers, roundFieldValue } from './expr-helpers.js';
 
 /**
  * Stored-compute dependency tracking (Odoo `@api.depends` triggers).
@@ -119,6 +121,9 @@ export async function recompute(env: EnvImpl, todo: Todo, done: Todo = new Map()
       if (!ids.length) continue;
       const f = meta.fields.get(fname) as ResolvedField;
       const values = await computeValues(su.model(model).browse(ids) as RecordsetImpl, f);
+      if (f.type === 'float' && typeof f.digits === 'string') {
+        for (const [id, value] of values) values.set(id, await roundFieldValue(su, f, fname, value));
+      }
       await (su.model(model) as RecordsetImpl).storeRaw(fname, values);
       mergeTodo(done, new Map([[model, new Map([[fname, new Set(ids)]])]]));
       mergeTodo(next, await affected(su, model, new Set([fname]), ids));
@@ -174,7 +179,7 @@ export async function computeValues(records: RecordsetImpl, f: ResolvedField): P
     const out = new Map<number, unknown>();
     for (const id of records.ids) {
       const record = await expressionRecord(records, id, paths);
-      const value = evaluateExpression(f.computeExpr, { ...(record as Record<string, ExprValue>), record: record as ExprValue, ...await expressionContext(records.env) });
+      const value = await evaluateEnvExpression(records.env, f.computeExpr, { ...(record as Record<string, ExprValue>), record: record as ExprValue });
       if (!validExpressionValue(f, value)) throw new ValidationError(`Expression result has the wrong type for '${records.model}.${f.name}'`);
       out.set(id, value);
     }
@@ -233,7 +238,7 @@ export async function expressionRecord(records: RecordsetImpl, id: number, paths
       const rows = await records.env.model(model).browse(ids).read([name]);
       const values = new Map(rows.map((row) => [row.id as number, row[name]]));
       if (!child.children.size) {
-        for (const recordId of ids) out.get(recordId)![name] = values.get(recordId) ?? null;
+        for (const recordId of ids) out.get(recordId)![name] = expressionScalar(field.type, values.get(recordId) ?? null);
         continue;
       }
       if (!field.comodel) throw new EngineError(`Expression dependency '${model}.${name}' is not relational`);
@@ -261,6 +266,13 @@ export async function expressionRecord(records: RecordsetImpl, id: number, paths
   return (await hydrate(records.model, [id], rootNode)).get(id)!;
 }
 
+/** Driver values that are not plain data (Date) become ISO strings: dates 'YYYY-MM-DD', datetimes full ISO. */
+function expressionScalar(type: string, value: unknown): unknown {
+  if (!(value instanceof Date)) return value;
+  if (!Number.isFinite(value.getTime())) return null;
+  return type === 'date' ? value.toISOString().slice(0, 10) : value.toISOString();
+}
+
 export async function expressionContext(env: EnvImpl): Promise<Record<string, unknown>> {
   const security = env.su ? undefined : await userSecurity(env);
   const companies = security?.companyIds ?? env.companyIds;
@@ -269,13 +281,16 @@ export async function expressionContext(env: EnvImpl): Promise<Record<string, un
     const json = JSON.stringify(env.context);
     if (json && json.length <= 16_384) context = JSON.parse(json);
   } catch { /* omit values that cannot be safely represented as expression data */ }
+  const clock = localClock(env);
   return {
-    ...createExpressionHelpers(),
+    ...createExpressionHelpers(registeredSyncHelpers()),
     user: { id: env.uid, company_id: security?.companyId ?? companies[0] ?? null },
     company: { id: security?.companyId ?? companies[0] ?? false },
     companies: companies.map((id) => ({ id })),
     context: context && typeof context === 'object' ? context : {},
-    today: new Date().toISOString().slice(0, 10),
+    // today and local_now follow the user's time zone (context.tz); now is the UTC instant
+    today: clock.today,
+    local_now: clock.localNow,
     now: new Date().toISOString(),
   };
 }

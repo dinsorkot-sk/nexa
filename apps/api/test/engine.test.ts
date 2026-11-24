@@ -284,6 +284,15 @@ describe('no-code Studio', () => {
     const generated = await call('GET', '/api/ui/view/x_studio_task/list', admin);
     expect(generated.body).toMatchObject({ xmlId: 'studio.x_task_list' });
     const [id] = (await post('/api/model/x_studio_task/create', admin, { values: { x_title: 'Draft' } })).body.ids as number[];
+    // request languages must be active (T25)
+    expect((await post('/api/model/x_studio_task/write', admin, {
+      ids: [id], values: { x_title: 'ร่าง' }, context: { lang: 'th_TH' },
+    })).status).toBe(422);
+    const thai = await post('/api/model/res.lang/search_read', admin, {
+      domain: [['code', '=', 'th_TH']], fields: ['id'], context: { activeTest: false },
+    });
+    const thaiId = (thai.body.records as { id: number }[])[0]!.id;
+    expect((await post(`/api/model/res.lang/call/action_activate`, admin, { ids: [thaiId] })).status).toBe(200);
     expect(await post('/api/model/x_studio_task/write', admin, {
       ids: [id], values: { x_title: 'ร่าง' }, context: { lang: 'th_TH' },
     })).toEqual({ status: 200, body: { ok: true } });

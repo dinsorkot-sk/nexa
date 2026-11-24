@@ -1,8 +1,8 @@
 import type { ExprEnvironment, ExprOptions, ExprValue } from './types.js';
 import type { ExprNode } from './parser.js';
+import { checkLocalHelperNames, isHelperName } from './names.js';
 
 const forbidden = new Set(['__proto__', 'prototype', 'constructor']);
-const builtins = new Set(['user', 'company', 'companies', 'context', 'today', 'now', 'ref', 'search', 'read_group', 'currency', 'float', 'uom', 'date', 'round', 'abs']);
 const decimalTag = Symbol('nx-decimal');
 type Decimal = { [decimalTag]: true; coefficient: bigint; scale: number };
 type Internal = ExprValue | Decimal | Internal[] | Record<string, unknown> | ((...args: ExprValue[]) => ExprValue) | undefined;
@@ -126,6 +126,7 @@ export function evaluateAst(ast: ExprNode, environment: ExprEnvironment, options
   const timeoutMs = Math.min(options.timeoutMs ?? 25, 1_000);
   const maxCollectionSize = Math.min(options.maxCollectionSize ?? 2_000, 2_000);
   const maxDepth = Math.min(options.maxDepth ?? 128, 128);
+  checkLocalHelperNames(options.helpers);
   if (![maxSteps, timeoutMs, maxCollectionSize, maxDepth].every((value) => Number.isFinite(value) && value > 0)) throw new RangeError('Expression runtime quotas must be positive finite values');
   const deadline = Date.now() + timeoutMs;
   let steps = 0;
@@ -193,7 +194,7 @@ export function evaluateAst(ast: ExprNode, environment: ExprEnvironment, options
           return collectionCall(receiver, path[memberIndex]!.slice(1), args, maxCollectionSize, tick);
         }
         const name = path.length === 1 ? path[0]! : '';
-        if (!builtins.has(name)) throw new TypeError(`Call to '${name || 'expression'}' is not allowed`);
+        if (!name || !isHelperName(name, options.helpers)) throw new TypeError(`Call to '${name || 'expression'}' is not allowed`);
         const fn = safeProperty(environment, name);
         if (typeof fn !== 'function') throw new TypeError(`Helper '${name}' is not available`);
         return fn(...args.map((arg) => output(arg, tick, maxCollectionSize, maxDepth)));

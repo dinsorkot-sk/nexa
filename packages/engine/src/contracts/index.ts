@@ -26,8 +26,12 @@ export interface FieldDef {
   selection?: ReadonlyArray<readonly [value: string, label: string]>;
   /** Options appended to an inherited selection; existing keys update their label. */
   selectionAdd?: ReadonlyArray<readonly [value: string, label: string]>;
-  /** Total precision and decimal scale for float columns. */
-  digits?: readonly [precision: number, scale: number];
+  /**
+   * Float precision: a [precision, scale] pair stored as NUMERIC, or the name of a
+   * `decimal.precision` record (column stays DOUBLE PRECISION; values are rounded on write
+   * to the record's digits, 2 when the record is missing).
+   */
+  digits?: readonly [precision: number, scale: number] | string;
   /** Store language-specific values for a textual field. */
   translate?: boolean;
   copy?: boolean;

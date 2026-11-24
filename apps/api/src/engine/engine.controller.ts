@@ -176,8 +176,8 @@ export class EngineController {
     if (!context) return env.model(name);
     const { lang, activeTest, defaults } = context;
     const fieldDefaults = Object.fromEntries(Object.entries(defaults ?? {}).map(([field, value]) => [`default_${field}`, value]));
-    return env.withContext({
-      ...(lang !== undefined ? { lang } : {}),
+    // an explicit request language (validated: active) overrides the user's preference
+    return (await this.engine.withRequestContext(env, { lang })).withContext({
       ...(activeTest !== undefined ? { activeTest } : {}),
       ...fieldDefaults,
     }).model(name);

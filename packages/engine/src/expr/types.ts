@@ -29,6 +29,26 @@ export interface ExprOptions {
   maxTokens?: number;
   /** Maximum expression nesting. Defaults to 128. */
   maxDepth?: number;
+  /**
+   * Extra helper names callable in this evaluation (besides built-in and registered helpers).
+   * The function itself is supplied through the environment under the same name.
+   */
+  helpers?: readonly string[];
+}
+
+/**
+ * A helper that needs asynchronous data (e.g. a database lookup). The evaluator stays
+ * synchronous: see evaluateExpressionAsync for the bounded replay protocol.
+ */
+export interface AsyncExprHelper {
+  resolve(args: ExprValue[]): Promise<ExprValue> | ExprValue;
+}
+
+export interface AsyncExprOptions extends ExprOptions {
+  /** Helpers resolved outside the synchronous evaluator; they override environment entries. */
+  asyncHelpers?: Readonly<Record<string, AsyncExprHelper>>;
+  /** Distinct async helper calls per evaluation. Defaults to 16, capped at 64. */
+  maxHelperCalls?: number;
 }
 
 export interface ExprEnvironment extends ExprHelpers {

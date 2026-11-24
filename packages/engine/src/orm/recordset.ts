@@ -9,8 +9,9 @@ import { roundMonetary } from './decimal.js';
 import { isColumn, translationLanguage, type ResolvedField } from './registry.js';
 import { checkModelAccess, checkRecordRules, combine, hiddenFields, readRuleResolver, ruleDomain, userSecurity } from '../security/access.js';
 import { assertAdminRemains, beginAdminStateChange } from '../security/last-admin.js';
-import { evaluateExpression, extractDependencies, type ExprValue } from '../expr/index.js';
-import { expressionContext, expressionRecord } from './compute.js';
+import { extractDependencies, type ExprValue } from '../expr/index.js';
+import { expressionRecord } from './compute.js';
+import { evaluateEnvExpression, fieldDigits, roundNamedPrecision } from './expr-helpers.js';
 
 const MAGIC = new Set(['id', 'create_date', 'write_date', 'create_uid', 'write_uid']);
 const MAX_ONCHANGE_ROUNDS = 10;
@@ -180,7 +181,7 @@ export class RecordsetImpl implements Recordset {
         ...(field.comodel ? { relation: field.comodel } : {}),
         ...(field.selection ? { selection: field.selection } : {}),
         ...(field.translate ? { translate: true } : {}),
-        ...(field.digits ? { digits: field.digits } : {}),
+        ...(field.digits ? { digits: await fieldDigits(this.env, field) } : {}),
       };
     }
     if ((!fields || fields.includes('display_name')) && !this.meta.fields.has('display_name')) {
@@ -201,7 +202,7 @@ export class RecordsetImpl implements Recordset {
       const contextValue = this.env.context['default_' + name];
       if (contextValue !== undefined) out[name] = contextValue;
       else if (stored?.has(name)) out[name] = stored.get(name);
-      else if (field.defaultExpr !== undefined) out[name] = evaluateExpression(field.defaultExpr, await expressionContext(this.env)) as unknown;
+      else if (field.defaultExpr !== undefined) out[name] = await evaluateEnvExpression(this.env, field.defaultExpr) as unknown;
       else if (field.default !== undefined) out[name] = typeof field.default === 'function'
         ? await (field.default as (env: unknown) => unknown)(this.env)
         : field.default;
@@ -372,7 +373,7 @@ export class RecordsetImpl implements Recordset {
         await this.checkFieldWrite(Object.keys(v));
         await this.checkFieldWrite([...this.meta.fields.keys()].filter((name) =>
           !(name in v) && Object.hasOwn(this.env.context, 'default_' + name)));
-        const values = await this.roundMonetaryValues(await this.delegateValues(await this.withDefaults(v), true));
+        const values = await roundNamedPrecision(this.env, this.meta.fields, await this.roundMonetaryValues(await this.delegateValues(await this.withDefaults(v), true)));
         await this.validateReferences(values);
         await this.validateCompanyLinks(values);
         await this.validateParentLink(values);
@@ -425,7 +426,7 @@ export class RecordsetImpl implements Recordset {
       for (const id of this.ids) await this.validateCompanyLinks(vals, id);
       if ('parent_id' in vals) await this.validateParentLink(vals);
       const delegated = delegation ? await this.delegateValues(vals, false) : vals;
-      const values = monetary ? await this.roundMonetaryValues(delegated, this.ids[0]) : delegated;
+      const values = await roundNamedPrecision(this.env, this.meta.fields, monetary ? await this.roundMonetaryValues(delegated, this.ids[0]) : delegated);
       await this.checkFieldWrite(Object.keys(values));
       const { columns, x2many } = this.split(values, false);
       const changed = new Set([...Object.keys(values), ...Object.keys(vals)]);
@@ -584,7 +585,7 @@ export class RecordsetImpl implements Recordset {
       if (!h) continue;
       const expressionHandler = typeof h === 'string';
       const res = typeof h === 'string'
-        ? expressionPatch(evaluateExpression(h, { ...(draft as Record<string, ExprValue>), record: draft as ExprValue, ...await expressionContext(this.env) }))
+        ? expressionPatch(await evaluateEnvExpression(this.env, h, { ...(draft as Record<string, ExprValue>), record: draft as ExprValue }))
         : (await h(draft, this.env)) ?? {};
       for (const [k, v] of Object.entries(res)) {
         const output = this.field(k);
@@ -649,7 +650,7 @@ export class RecordsetImpl implements Recordset {
           const dependencies = extractDependencies(c.expression);
           for (const id of this.ids) {
             const record = await expressionRecord(this, id, dependencies);
-            if (evaluateExpression(c.expression, { ...(record as Record<string, ExprValue>), record: record as ExprValue, ...await expressionContext(this.env) }) !== true) {
+            if (await evaluateEnvExpression(this.env, c.expression, { ...(record as Record<string, ExprValue>), record: record as ExprValue }) !== true) {
               throw new ValidationError(c.message ?? `Constraint '${c.name}' failed`);
             }
           }
@@ -759,7 +760,7 @@ export class RecordsetImpl implements Recordset {
       } else if (stored?.has(f.name)) {
         out[f.name] = stored.get(f.name);
       } else if (f.defaultExpr !== undefined) {
-        out[f.name] = evaluateExpression(f.defaultExpr, await expressionContext(this.env)) as unknown;
+        out[f.name] = await evaluateEnvExpression(this.env, f.defaultExpr) as unknown;
       } else if (f.default !== undefined) {
         out[f.name] = typeof f.default === 'function' ? await (f.default as (e: unknown) => unknown)(this.env) : f.default;
       }

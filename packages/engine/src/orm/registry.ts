@@ -1,5 +1,5 @@
 import { EngineError, type FieldDef, type ModelDef, type Registry, type ResolvedModel } from '../contracts/index.js';
-import { extractDependencies, parseExpression, type ExprNode } from '../expr/index.js';
+import { extractDependencies, isImpureHelper, parseExpression, type ExprNode } from '../expr/index.js';
 
 export type ResolvedField = FieldDef & { name: string; model: string };
 
@@ -12,6 +12,8 @@ const MAGIC_FIELDS: Record<string, FieldDef> = {
   write_uid: { type: 'integer', readonly: true, string: 'Last Updated by' },
 };
 
+/** decimal.precision name referenced by FieldDef.digits. */
+export const PRECISION_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 _.\-/]{0,63}$/;
 const NAME_RE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/;
 const FIELD_RE = /^[a-z][a-z0-9_]*$/;
 
@@ -60,15 +62,32 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
       if (!def.extends?.includes(def.name)) {
         throw new EngineError(`Model '${def.name}' defined twice; use extends: ['${def.name}'] to extend it`);
       }
+      // Mixins listed next to the model itself (extends: ['res.partner', 'mail.thread']) are copied
+      // like prototype inheritance; members the model already has win over the mixin's.
+      let current = existing;
+      for (const parent of def.extends) {
+        if (parent === def.name || current.extends?.includes(parent)) continue;
+        const p = merged.get(parent);
+        if (!p) throw new EngineError(`Model '${def.name}' extends unknown model '${parent}'`);
+        const names = new Set((current.constraints ?? []).map((c) => c.name));
+        current = {
+          ...current,
+          extends: [...(current.extends ?? []), parent],
+          fields: { ...Object.fromEntries(Object.entries(p.fields).filter(([n]) => !Object.hasOwn(current.fields, n))), ...current.fields },
+          constraints: [...(current.constraints ?? []), ...(p.constraints ?? []).filter((c) => !names.has(c.name))],
+          onchange: { ...p.onchange, ...current.onchange },
+          methods: { ...p.methods, ...current.methods },
+        };
+      }
       merged.set(def.name, {
-        ...existing,
+        ...current,
         ...def,
-        extends: existing.extends,
+        extends: current.extends,
         origin: existing.origin, // a custom extension must not turn a module model into a custom one
-        fields: mergeFields(existing.fields, def.fields),
-        constraints: [...(existing.constraints ?? []), ...(def.constraints ?? [])],
-        onchange: { ...existing.onchange, ...def.onchange },
-        methods: { ...existing.methods, ...def.methods },
+        fields: mergeFields(current.fields, def.fields),
+        constraints: [...(current.constraints ?? []), ...(def.constraints ?? [])],
+        onchange: { ...current.onchange, ...def.onchange },
+        methods: { ...current.methods, ...def.methods },
       });
       continue;
     }
@@ -111,7 +130,9 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
       if (f.translate && f.unique) throw new EngineError(`Translated field '${name}.${fname}' cannot be unique`);
       if (f.copy !== undefined && typeof f.copy !== 'boolean') throw new EngineError(`Invalid copy flag on '${name}.${fname}'`);
       if (f.aggregator !== undefined && !['sum', 'avg', 'min', 'max', 'count', 'count_distinct'].includes(f.aggregator)) throw new EngineError(`Invalid aggregator on '${name}.${fname}'`);
-      if (f.digits && (!Array.isArray(f.digits) || f.digits.length !== 2 || f.type !== 'float' || !Number.isInteger(f.digits[0]) || !Number.isInteger(f.digits[1]) || f.digits[0] < 1 || f.digits[0] > 1000 || f.digits[1] < 0 || f.digits[1] > f.digits[0])) {
+      if (typeof f.digits === 'string') {
+        if (f.type !== 'float' || !PRECISION_NAME_RE.test(f.digits)) throw new EngineError(`Invalid digits on '${name}.${fname}'`);
+      } else if (f.digits && (!Array.isArray(f.digits) || f.digits.length !== 2 || f.type !== 'float' || !Number.isInteger(f.digits[0]) || !Number.isInteger(f.digits[1]) || f.digits[0] < 1 || f.digits[0] > 1000 || f.digits[1] < 0 || f.digits[1] > f.digits[0])) {
         throw new EngineError(`Invalid digits on '${name}.${fname}'`);
       }
       if ((f.type === 'many2one' || f.type === 'one2many' || f.type === 'many2many') && !f.comodel) {
@@ -308,10 +329,9 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
   return out;
 }
 
-const expressionGlobals = new Set(['user', 'company', 'companies', 'context', 'today', 'now', 'ref', 'search', 'read_group']);
 function containsExternalExpressionReference(node: ExprNode): boolean {
   switch (node.kind) {
-    case 'path': return node.parts.length > 0 && (expressionGlobals.has(node.parts[0]!) || node.parts[0] === 'record' && node.parts.length < 2);
+    case 'path': return node.parts.length > 0 && (isImpureHelper(node.parts[0]!) || node.parts[0] === 'record' && node.parts.length < 2);
     case 'array': return node.values.some(containsExternalExpressionReference);
     case 'unary': return containsExternalExpressionReference(node.value);
     case 'binary': return containsExternalExpressionReference(node.left) || containsExternalExpressionReference(node.right);

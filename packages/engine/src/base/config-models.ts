@@ -1,6 +1,7 @@
 import type { AccessRule, ModelDef, RecordRule } from '../contracts/index.js';
 import {
-  checkAutomationRecords, checkConfigParameters, computeNumberNextActual, checkCronRecords, checkDefaults, checkSequenceRanges, checkSequences,
+  checkAutomationRecords, checkButtonRecords, checkConfigParameters, checkServerActionRecords, computeNumberNextActual, checkCronRecords,
+  checkDefaults, checkSequenceRanges, checkSequences,
 } from '../services/config.js';
 
 const all = { read: true, write: true, create: true, unlink: true };
@@ -113,6 +114,37 @@ export const configModels: ModelDef[] = [
     },
     constraints: [{ name: 'ir_automation_valid', check: checkAutomationRecords }],
   },
+  {
+    name: 'ir.actions.server', origin: 'module', module: 'base', order: 'key asc', description: 'Server Action',
+    fields: {
+      name: { type: 'char' },
+      key: { type: 'char', required: true, unique: true },
+      model_name: { type: 'char', string: 'Model' },
+      type: {
+        type: 'selection', required: true, default: 'update_record',
+        selection: [['update_record', 'Update record'], ['create_record', 'Create record'], ['post_message', 'Post message'],
+          ['multi', 'Multiple actions'], ['script', 'Execute code']],
+      },
+      values_json: { type: 'text', string: 'Field Values (JSON)', help: 'JSON object: field name -> NX-Expr (update/create record)' },
+      target_model: { type: 'char', string: 'Target Model', help: 'Create record: model to create in (defaults to Model)' },
+      message: { type: 'text', help: 'Post message: NX-Expr producing the text' },
+      child_keys: { type: 'char', string: 'Child Actions', help: 'Multiple actions: comma-separated server action keys, run in order' },
+      code: { type: 'text', help: 'Execute code: sandboxed JavaScript (records = { model, ids })' },
+      active: { type: 'boolean', default: true },
+    },
+    constraints: [{ name: 'ir_actions_server_valid', check: checkServerActionRecords }],
+  },
+  {
+    name: 'ir.button', origin: 'module', module: 'base', order: 'model_name asc, id asc', description: 'Button',
+    fields: {
+      name: { type: 'char' },
+      model_name: { type: 'char', required: true, string: 'Model' },
+      action: { type: 'char', string: 'Server Action' },
+      method: { type: 'char', string: 'Model Method' },
+      guard: { type: 'text', help: 'NX-Expr that must be true for every record (e.g. state == \'draft\')' },
+    },
+    constraints: [{ name: 'ir_button_valid', check: checkButtonRecords }],
+  },
 ];
 
 export const configAccess: AccessRule[] = [
@@ -123,6 +155,8 @@ export const configAccess: AccessRule[] = [
   { model: 'ir.default', group: SYSTEM, perms: all },
   { model: 'ir.cron', group: SYSTEM, perms: all },
   { model: 'ir.automation', group: SYSTEM, perms: all },
+  { model: 'ir.actions.server', group: SYSTEM, perms: all },
+  { model: 'ir.button', group: SYSTEM, perms: all },
 ];
 
 export const configRules: RecordRule[] = [

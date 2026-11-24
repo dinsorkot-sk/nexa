@@ -1,12 +1,13 @@
 import { evaluateAst } from './evaluate.js';
 import { parseExpression, type ExprNode } from './parser.js';
-import type { ExprEnvironment, ExprOptions, ExprValue } from './types.js';
+import { checkLocalHelperNames, isHelperName } from './names.js';
+import type { AsyncExprOptions, ExprEnvironment, ExprOptions, ExprValue } from './types.js';
 export { createExpressionHelpers } from './helpers.js';
+export { CORE_HELPERS, ENGINE_HELPERS, isHelperName, isImpureHelper, reserveHelperName } from './names.js';
 
 export * from './types.js';
 export { parseExpression, type ExprNode } from './parser.js';
 
-const helperNames = new Set(['user', 'company', 'companies', 'context', 'today', 'now', 'ref', 'search', 'read_group', 'currency', 'float', 'uom', 'date', 'round', 'abs']);
 
 /** Parse and evaluate the data-only NX-Expr language. No JavaScript evaluation is used. */
 export function evaluateExpression(source: string, environment: ExprEnvironment = {}, options: ExprOptions = {}): ExprValue {
@@ -16,9 +17,85 @@ export function evaluateExpression(source: string, environment: ExprEnvironment 
   return evaluateAst(parseExpression(source, options), environment, options);
 }
 
-/** Statically collect record field paths. A leading `record.` is removed. */
-export function extractDependencies(source: string, options: Pick<ExprOptions, 'maxLength'> = {}): string[] {
+/** Thrown inside the synchronous evaluator when an async helper result is not known yet. */
+class PendingHelperCall {
+  constructor(readonly name: string, readonly args: ExprValue[], readonly key: string) {}
+}
+
+const MAX_HELPER_KEY = 4_096;
+
+/** Strict cache key: only JSON-exact data, so NaN/Infinity/undefined/functions cannot alias null. */
+function helperKey(value: unknown, depth = 0): string {
+  if (depth > 32) throw new RangeError('Expression helper argument nesting quota exceeded');
+  if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new TypeError('Expression helper arguments must be finite numbers');
+    return Object.is(value, -0) ? '0' : JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return `[${value.map((v) => helperKey(v, depth + 1)).join(',')}]`;
+  if (typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+    return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${helperKey((value as Record<string, unknown>)[k], depth + 1)}`).join(',')}}`;
+  }
+  throw new TypeError('Expression helper arguments must be plain data');
+}
+const MAX_HELPER_RESULT = 65_536;
+
+function plainResult(value: ExprValue): ExprValue {
+  if (value === undefined) return null;
+  const json = JSON.stringify(value);
+  if (json === undefined || json.length > MAX_HELPER_RESULT) throw new RangeError('Expression helper result quota exceeded');
+  return JSON.parse(json) as ExprValue;
+}
+
+/**
+ * Evaluate with helpers that need asynchronous data, keeping the evaluator synchronous.
+ *
+ * Bounded replay: the expression is evaluated; the first async helper call whose result is not
+ * known aborts the pass (NX-Expr has no try/catch, so the expression cannot observe or swallow
+ * it). The helper is then awaited outside the evaluator, its JSON-plain result memoized by
+ * (name, arguments), and the pure expression is evaluated again. Each pass keeps the normal
+ * step, time and collection quotas; at most `maxHelperCalls` distinct calls are resolved.
+ * Helpers receive only plain data produced by the evaluator and return plain data.
+ */
+export async function evaluateExpressionAsync(source: string, environment: ExprEnvironment = {}, options: AsyncExprOptions = {}): Promise<ExprValue> {
   if (typeof source !== 'string') throw new TypeError('Expression must be a string');
+  const maxLength = options.maxLength ?? 10_000;
+  if (source.length > maxLength) throw new RangeError('Expression size quota exceeded');
+  const ast = parseExpression(source, options);
+  const asyncHelpers = options.asyncHelpers ?? {};
+  const names = Object.keys(asyncHelpers);
+  checkLocalHelperNames(names);
+  const maxCalls = Math.min(options.maxHelperCalls ?? 16, 64);
+  if (!Number.isInteger(maxCalls) || maxCalls < 0) throw new RangeError('Expression helper call quota must be a non-negative integer');
+  const results = new Map<string, ExprValue>();
+  const scope: ExprEnvironment = { ...environment };
+  for (const name of names) {
+    scope[name] = (...args: ExprValue[]): ExprValue => {
+      const key = `${name}:${helperKey(args)}`;
+      if (key.length > MAX_HELPER_KEY) throw new RangeError('Expression helper argument quota exceeded');
+      if (results.has(key)) return results.get(key)!;
+      throw new PendingHelperCall(name, args, key);
+    };
+  }
+  const evalOptions: ExprOptions = { ...options, helpers: [...(options.helpers ?? []), ...names] };
+  for (;;) {
+    try {
+      return evaluateAst(ast, scope, evalOptions);
+    } catch (error) {
+      if (!(error instanceof PendingHelperCall)) throw error;
+      if (results.size >= maxCalls) throw new RangeError('Expression helper call quota exceeded');
+      const helper = Object.hasOwn(asyncHelpers, error.name) ? asyncHelpers[error.name] : undefined;
+      if (!helper) throw new TypeError(`Helper '${error.name}' is not available`);
+      results.set(error.key, plainResult(await helper.resolve(error.args)));
+    }
+  }
+}
+
+/** Statically collect record field paths. A leading `record.` is removed. */
+export function extractDependencies(source: string, options: Pick<ExprOptions, 'maxLength' | 'helpers'> = {}): string[] {
+  if (typeof source !== 'string') throw new TypeError('Expression must be a string');
+  checkLocalHelperNames(options.helpers);
+  const helperNames = { has: (name: string) => isHelperName(name, options.helpers) };
   if (source.length > (options.maxLength ?? 10_000)) throw new RangeError('Expression size quota exceeded');
   const dependencies = new Set<string>();
   const receiverPath = (node: ExprNode): string | null => {

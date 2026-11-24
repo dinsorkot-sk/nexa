@@ -23,7 +23,7 @@ export function columnType(f: FieldDef): string {
     case 'char': case 'text': case 'html': case 'selection': case 'reference': return 'TEXT';
     case 'integer': return 'INTEGER';
     case 'float': {
-      if (!f.digits) return 'DOUBLE PRECISION';
+      if (!f.digits || typeof f.digits === 'string') return 'DOUBLE PRECISION';
       const [precision, scale] = f.digits;
       if (!Number.isInteger(precision) || precision < 1 || precision > 1000 || !Number.isInteger(scale) || scale < 0 || scale > precision) {
         throw new EngineError('Invalid float digits');
@@ -141,7 +141,7 @@ export async function planMigration(
       if (have === undefined) {
         ops.push({ kind: 'add_column', table, column: f.name, field: f, destructive: false });
       } else if (have.data_type !== (ddlType.startsWith('NUMERIC(') ? 'numeric' : DATA_TYPE[ddlType]) ||
-        (f.digits !== undefined && (have.numeric_precision !== f.digits[0] || have.numeric_scale !== f.digits[1])) ||
+        (Array.isArray(f.digits) && (have.numeric_precision !== f.digits[0] || have.numeric_scale !== f.digits[1])) ||
         (ddlType === 'NUMERIC' && have.numeric_precision !== null)) {
         ops.push({ kind: 'alter_type', table, column: f.name, from: have.data_type, to: ddlType, ...((f.translate || opts.translatedFrom?.includes(`${table}.${f.name}`)) ? { translated: true } : {}), ...(opts.jsonFrom?.includes(`${table}.${f.name}`) ? { jsonConversion: true } : {}), destructive: true });
       }

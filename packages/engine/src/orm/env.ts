@@ -12,6 +12,8 @@ export interface SecurityHolder {
 /** Record cache: model -> id -> column values. */
 export class RecordCache {
   private readonly data = new Map<string, Map<number, Record<string, unknown>>>();
+  /** Small derived lookups (e.g. decimal precisions); dropped on every invalidation. */
+  readonly memo = new Map<string, unknown>();
 
   get(model: string, id: number): Record<string, unknown> | undefined {
     return this.data.get(model)?.get(id);
@@ -24,6 +26,7 @@ export class RecordCache {
   }
 
   invalidate(model?: string, ids?: readonly number[]): void {
+    this.memo.clear();
     if (!model) return this.data.clear();
     if (!ids) return void this.data.delete(model);
     const m = this.data.get(model);
