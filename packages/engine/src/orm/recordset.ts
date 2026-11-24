@@ -8,6 +8,7 @@ import type { EnvImpl } from './env.js';
 import { roundMonetary } from './decimal.js';
 import { isColumn, translationLanguage, type ResolvedField } from './registry.js';
 import { checkModelAccess, checkRecordRules, combine, hiddenFields, readRuleResolver, ruleDomain, userSecurity } from '../security/access.js';
+import { assertAdminRemains, beginAdminStateChange } from '../security/last-admin.js';
 
 const MAGIC = new Set(['id', 'create_date', 'write_date', 'create_uid', 'write_uid']);
 const MAX_ONCHANGE_ROUNDS = 10;
@@ -410,6 +411,7 @@ export class RecordsetImpl implements Recordset {
       return;
     }
     await this.env.transaction(async () => {
+      const adminCount = await beginAdminStateChange(this.env.db, this.env.registry, this.model, Object.keys(vals));
       for (const id of this.ids) await this.validateCompanyLinks(vals, id);
       if ('parent_id' in vals) await this.validateParentLink(vals);
       const delegated = delegation ? await this.delegateValues(vals, false) : vals;
@@ -444,6 +446,7 @@ export class RecordsetImpl implements Recordset {
       const done = await recompute(this.env, todo);
       await this.checkConstraints(changed);
       await validateRecomputed(this.env, done);
+      await assertAdminRemains(this.env.db, adminCount);
     });
   }
 
@@ -451,6 +454,7 @@ export class RecordsetImpl implements Recordset {
     await this.checkAccess('unlink');
     if (this.ids.length === 0) return;
     await this.env.transaction(async () => {
+      const adminCount = await beginAdminStateChange(this.env.db, this.env.registry, this.model, [], true);
       await checkRecordRules(this.env, this.model, this.ids, 'unlink');
       const { todo } = await cascadeAffected(this.env, this.model, this.ids);
       await sqlCall(() => this.env.db.query({ text: `DELETE FROM "${this.table}" WHERE id = ANY($1)`, params: [[...this.ids]] }));
@@ -458,6 +462,7 @@ export class RecordsetImpl implements Recordset {
       this.env.cache.invalidate();
       if (this.hasParentPath()) await this.updateParentPaths();
       await validateRecomputed(this.env, await recompute(this.env, todo));
+      await assertAdminRemains(this.env.db, adminCount);
     });
   }
 

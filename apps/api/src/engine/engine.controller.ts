@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Post, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, UnauthorizedException, Req } from '@nestjs/common';
 import { AccessError, getAction, getMenus, getView, MetadataStore, userSecurity, ValidationError, type Domain, type Env, type FieldDef, type ViewNode, type ViewType } from '@nexa/engine';
 import {
   callRequestSchema, copyRequestSchema, createRequestSchema, defaultGetRequestSchema, fieldsGetRequestSchema,
@@ -8,6 +8,20 @@ import {
 import { z } from 'zod';
 import { EngineService } from './engine.service';
 import { CallerParam, type Caller } from './request-env';
+import { AuthService, type AuthenticatedToken } from './auth.service';
+import type { Request } from 'express';
+
+const loginRequest = z.object({
+  tenant: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,62}$/),
+  login: z.string().min(1).max(120),
+  password: z.string().min(1).max(1024),
+});
+const apiKeyRequest = z.object({
+  name: z.string().trim().min(1).max(80),
+  password: z.string().min(1).max(1024),
+  expiresInDays: z.number().int().min(1).max(365).optional(),
+});
+const revokeKeyRequest = z.object({ id: z.number().int().positive() });
 
 const modelName = z.string().regex(/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/).max(120);
 const methodName = z.string().regex(/^[a-z][a-zA-Z0-9_]*$/).max(80);
@@ -67,11 +81,70 @@ const studioView = z.object({
 @Controller('api')
 export class EngineController {
   // explicit token: test runners (esbuild) do not emit decorator metadata
-  constructor(@Inject(EngineService) private readonly engine: EngineService) {}
+  constructor(
+    @Inject(EngineService) private readonly engine: EngineService,
+    @Inject(AuthService) private readonly auth: AuthService,
+  ) {}
+
+  private async resolveCaller(caller: Caller): Promise<{ tenant: string; uid: number }> {
+    if (caller.bearerToken) {
+      const authenticated = await this.auth.authenticate(caller.bearerToken);
+      return { tenant: authenticated.tenant, uid: authenticated.uid };
+    }
+    if (!this.engine.config.devAuth || caller.tenant === undefined || caller.uid === undefined) {
+      throw new UnauthorizedException('A valid bearer token is required');
+    }
+    return { tenant: caller.tenant, uid: caller.uid };
+  }
 
   private async env(caller: Caller): Promise<Env> {
-    if (!this.engine.config.devAuth) throw new UnauthorizedException('Authentication is not configured (set NEXA_DEV_AUTH=1 for development)');
-    return this.engine.env(caller.tenant, caller.uid);
+    const identity = await this.resolveCaller(caller);
+    return this.engine.env(identity.tenant, identity.uid);
+  }
+
+  private async tokenCaller(caller: Caller): Promise<AuthenticatedToken> {
+    if (!caller.bearerToken) throw new UnauthorizedException('A bearer token is required');
+    return this.auth.authenticate(caller.bearerToken);
+  }
+
+  @Post('auth/login')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async login(@Body() body: unknown, @Req() request: Request) {
+    const req = loginRequest.parse(body);
+    const clientKey = request.socket.remoteAddress ?? 'unknown';
+    const result = await this.auth.login(req.tenant, req.login, req.password, clientKey);
+    return { tokenType: 'Bearer', accessToken: result.token, expiresAt: result.expiresAt };
+  }
+
+  @Post('auth/logout')
+  @HttpCode(200)
+  async logout(@CallerParam() caller: Caller) {
+    await this.auth.logout(await this.tokenCaller(caller));
+    return { ok: true };
+  }
+
+  @Post('auth/api-keys')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async createApiKey(@CallerParam() caller: Caller, @Body() body: unknown, @Req() request: Request) {
+    const req = apiKeyRequest.parse(body);
+    const token = await this.tokenCaller(caller);
+    if (token.kind !== 'session') throw new UnauthorizedException('A login session is required');
+    this.auth.validateApiKeyRequest(req.name, req.expiresInDays);
+    const result = await this.auth.createApiKey(
+      token, req.password, req.name, request.socket.remoteAddress ?? 'unknown', req.expiresInDays,
+    );
+    return { id: result.id, name: result.name, token: result.token, expiresAt: result.expiresAt };
+  }
+
+  @Post('auth/api-keys/:id/revoke')
+  @HttpCode(200)
+  async revokeApiKey(@CallerParam() caller: Caller, @Param('id') rawId: string) {
+    const id = revokeKeyRequest.parse({ id: Number(rawId) }).id;
+    const token = await this.tokenCaller(caller);
+    await this.auth.revokeApiKey(token, id);
+    return { ok: true };
   }
 
   private async model(caller: Caller, model: string, context?: ModelRequestContext) {
@@ -92,7 +165,8 @@ export class EngineController {
     if (!env.su && !(await userSecurity(env as Parameters<typeof userSecurity>[0])).groups.has('base.group_system')) {
       throw new AccessError('Only Settings administrators can use the Studio');
     }
-    return { env, handle: await this.engine.tenant(caller.tenant) };
+    const identity = await this.resolveCaller(caller);
+    return { env, handle: await this.engine.tenant(identity.tenant) };
   }
 
   @Post('studio/model')

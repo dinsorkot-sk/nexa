@@ -21,16 +21,28 @@ pnpm dev
 ข้อมูลอยู่ใน `NEXA_DATA_DIR` (ค่าเริ่มต้น `apps/api/data/<tenant>`) และเปิดได้เฉพาะ tenant ใน `NEXA_TENANTS`
 ดูตัวแปรทั้งหมดใน `apps/api/.env.example`
 
-### Engine API (ช่วงพัฒนา)
+### Engine API
 
-ทุกคำขอระบุผู้ใช้ด้วย header `X-Nexa-Tenant` และ `X-Nexa-Uid` ซึ่งใช้ได้เมื่อ `NEXA_DEV_AUTH=1` เท่านั้น
-(ห้ามเปิดใน production; uid 1 คือ superuser ภายในและเรียกผ่าน API ไม่ได้) ผู้ดูแลเริ่มต้นคือ user `admin`
+ตั้งรหัสผ่านครั้งแรกให้ผู้ดูแล `admin` ของแต่ละ tenant ด้วยคำสั่งด้านล่างหลัง build โดยใช้ config เดียวกับ API และหยุด API ก่อนเปิดฐาน PGlite จาก CLI คำสั่งจะแจ้งให้กรอกรหัสผ่าน การตั้งรหัสผ่านใหม่จะเพิกถอน session และ API key เดิมของผู้ใช้นั้น
+
+```sh
+pnpm build
+pnpm --filter @nexa/api auth:provision dev admin
+```
+
+เข้าสู่ระบบด้วย `POST /api/auth/login` ส่ง `{tenant, login, password}` และใช้ `accessToken` ที่ได้รับใน header `Authorization: Bearer <token>` ระบบระบุผู้ใช้และ tenant จาก credential ที่ตรวจแล้ว ให้ใช้ HTTPS เมื่อเรียก API ผ่านเครือข่าย
 
 ```sh
 curl -s -X POST localhost:3001/api/model/res.users/search_read \
-  -H 'content-type: application/json' -H 'x-nexa-tenant: dev' -H 'x-nexa-uid: 2' \
+  -H 'content-type: application/json' -H "Authorization: Bearer ${NEXA_TOKEN}" \
   -d '{"fields":["login"],"limit":10}'
 ```
+
+ออกจากระบบด้วย `POST /api/auth/logout` ใช้ session พร้อมรหัสผ่านกับ `POST /api/auth/api-keys` เพื่อสร้าง API key สำหรับงานอัตโนมัติ เก็บค่า `token` จากผลตอบกลับไว้เมื่อสร้าง และเพิกถอนด้วย `POST /api/auth/api-keys/:id/revoke`
+
+สำหรับการทดสอบในเครื่อง สามารถตั้ง `NEXA_DEV_AUTH=1` เพื่อใช้ `X-Nexa-Tenant` กับ `X-Nexa-Uid` ได้เมื่อคำขอไม่มี bearer credential โหมด production ใช้ bearer เท่านั้น และ uid 1 สงวนไว้ให้ engine ภายใน
+
+เมื่อ tenant มีผู้ดูแลที่ active และมีสิทธิ์ทั้ง Settings และ ERP Manager ระบบจะปฏิเสธการเปลี่ยนแปลงที่ทำให้ผู้ดูแลกลุ่มนี้เหลือศูนย์ การ archive บัญชีจะเพิกถอน session และ API key ของบัญชีนั้น การเปิดบัญชีใหม่ต้องเข้าสู่ระบบอีกครั้ง
 
 | Endpoint | หน้าที่ |
 |---|---|

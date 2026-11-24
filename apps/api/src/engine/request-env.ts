@@ -3,16 +3,19 @@ import { TENANT_HEADER, UID_HEADER } from '@nexa/shared';
 import type { Request } from 'express';
 
 export interface Caller {
-  tenant: string;
-  uid: number;
+  tenant?: string;
+  uid?: number;
+  bearerToken?: string;
 }
 
-/**
- * DEVELOPMENT AUTHENTICATION: the caller is taken from the X-Nexa-Tenant / X-Nexa-Uid headers.
- * It is only accepted when NEXA_DEV_AUTH=1 (checked by the controllers via EngineService.config).
- * Real sessions/tokens replace this before any deployment.
- */
+/** Bearer credentials take precedence. Development identity headers are parsed only as a fallback. */
 export function callerFrom(req: Request): Caller {
+  const authorization = req.header('authorization');
+  if (authorization !== undefined) {
+    const match = /^Bearer (nx1\.[a-z0-9][a-z0-9_-]{0,62}\.[A-Za-z0-9_-]{43})$/i.exec(authorization);
+    if (!match) throw new UnauthorizedException('Invalid bearer token');
+    return { bearerToken: match[1] };
+  }
   const tenant = req.header(TENANT_HEADER);
   const rawUid = req.header(UID_HEADER);
   if (!tenant || !rawUid || !/^[1-9][0-9]{0,9}$/.test(rawUid)) {

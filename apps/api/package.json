@@ -6,6 +6,7 @@
     "dev": "nest start --watch",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
+    "auth:provision": "node dist/engine/auth-provision.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

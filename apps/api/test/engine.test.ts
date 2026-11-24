@@ -49,6 +49,15 @@ describe('authentication (development headers)', () => {
     expect(other.status).toBe(403);
     expect(errorType(other.body)).toBe('access');
   });
+
+  it('requires a valid bearer credential when Authorization is present', async () => {
+    const response = await fetch(new URL('/api/model/res.company/search_read', base), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', [TENANT_HEADER]: 't1', [UID_HEADER]: String(admin), authorization: 'Bearer invalid' },
+      body: '{}',
+    });
+    expect(response.status).toBe(401);
+  });
 });
 
 describe('model RPC', () => {

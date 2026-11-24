@@ -5,6 +5,7 @@ import {
 import { EnvImpl } from '../orm/env.js';
 import { isColumn, type ModelRegistry } from '../orm/registry.js';
 import { applyMigration, assertCompatibleMigration, planMigration, quoteIdent, type MigrationOp } from '../schema/sync.js';
+import { assertSecurityTablesMayBeDropped } from '../security/last-admin.js';
 import { removeModuleSecurity, writeModuleSecurity } from '../security/tables.js';
 import { removeModuleUi, writeModuleUi } from '../ui-meta/tables.js';
 import { validateViews } from '../ui-meta/views.js';
@@ -340,6 +341,7 @@ export class ModuleService {
           await removeModuleUi(tx, n);
         }
         ({ dropTables, drops } = removedSchema(oldModels, models));
+        await assertSecurityTablesMayBeDropped(tx, dropTables, [...drops]);
         await dropForeignKeys(tx, dropTables);
       }
       const mig = await planMigration(models, tx, { dropTables });

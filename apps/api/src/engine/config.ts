@@ -18,6 +18,6 @@ export function loadEngineConfig(env: NodeJS.ProcessEnv = process.env): EngineCo
     dataDir: dir === ':memory:' ? null : resolve(dir),
     tenants: new Set(list(env.NEXA_TENANTS, 'dev')),
     modules: list(env.NEXA_MODULES, 'base'),
-    devAuth: env.NEXA_DEV_AUTH === '1',
+    devAuth: env.NEXA_DEV_AUTH === '1' && env.NODE_ENV !== 'production',
   };
 }
