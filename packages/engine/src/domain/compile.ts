@@ -1,7 +1,7 @@
 import {
   EngineError, type CompiledSql, type Domain, type DomainLeaf, type DomainTerm, type Registry, type ResolvedModel,
 } from '../contracts/index.js';
-import { isColumn, type ResolvedField } from '../orm/registry.js';
+import { isColumn, translationLanguage, type ResolvedField } from '../orm/registry.js';
 
 /**
  * Domain → SQL compiler (ADR 0001 §6).
@@ -14,7 +14,7 @@ import { isColumn, type ResolvedField } from '../orm/registry.js';
  * - Odoo NULL semantics: NULL counts as false/unset; negative operators include NULL rows.
  * - Values are always parameters; identifiers come from the registry only.
  */
-/** Read record rules per model (null = none); applied inside every subquery on a traversed comodel. */export type RuleResolver = (model: string) => Domain | null;export function compileDomain(  registry: Registry, model: ResolvedModel, domain: Domain, params: unknown[], alias = 't', rules?: RuleResolver,): string {  return new Compiler(registry, params, rules).domain(model, domain, alias);}
+/** Read record rules per model (null = none); applied inside every subquery on a traversed comodel. */export type RuleResolver = (model: string) => Domain | null;export function compileDomain(  registry: Registry, model: ResolvedModel, domain: Domain, params: unknown[], alias = 't', rules?: RuleResolver, lang?: string,): string {  return new Compiler(registry, params, rules, translationLanguage(lang)).domain(model, domain, alias);}
 
 /** Field used for hierarchy operators (Odoo `_parent_name` default). */
 const PARENT_FIELD = 'parent_id';
@@ -29,6 +29,7 @@ class Compiler {
 
   constructor(
     private readonly registry: Registry, private readonly params: unknown[], private readonly rules?: RuleResolver,
+    private lang = 'en_US',
   ) {}
 
   domain(model: ResolvedModel, domain: Domain, alias: string): string {
@@ -85,6 +86,7 @@ class Compiler {
       // a.b.c op v  ==>  a any [(b.c op v)]
       const head = path.slice(0, dot);
       const f = this.field(model, head);
+      if (f.delegated) return this.leaf(model, [`${f.delegated.via}.${f.delegated.field}${path.slice(dot)}`, op, value], alias);
       if (f.related && !f.store) return this.leaf(model, [`${f.related}${path.slice(dot)}`, op, value], alias);
       if (f.type !== 'many2one' && f.type !== 'one2many' && f.type !== 'many2many') {
         throw new EngineError(`Field '${model.name}.${head}' is not relational; cannot traverse '${path}'`);
@@ -93,6 +95,7 @@ class Compiler {
     }
 
     const f = this.field(model, path);
+    if (f.delegated) return this.leaf(model, [`${f.delegated.via}.${f.delegated.field}`, op, value], alias);
     // non-stored related field: search through its path instead
     if (f.related && !f.store) return this.leaf(model, [f.related, op, value], alias);
     switch (op) {
@@ -106,7 +109,9 @@ class Compiler {
     }
     if (f.type === 'one2many' || f.type === 'many2many') return this.x2manyLeaf(model, f, op, value, alias);
     if (!isColumn(f)) throw new EngineError(`Field '${model.name}.${path}' is not stored; cannot search on it yet`);
-    return this.scalar(f, `${alias}."${f.name}"`, op, value);
+    const column = `${alias}."${f.name}"`;
+    const translated = f.translate ? `COALESCE(${column}->>${this.p(this.lang)}::text, ${column}->>'en_US')` : column;
+    return this.scalar(f, translated, op, value);
   }
 
   /** `field any [subdomain]` on a relational field. */
@@ -118,9 +123,12 @@ class Compiler {
     const rule = this.rules && !this.inRule ? this.rules(co.name) : null;
     if (rule && rule.length) {
       this.inRule++;
+      const previousLanguage = this.lang;
+      this.lang = 'en_US';
       try {
         where = `(${where} AND ${this.domain(co, rule, a)})`;
       } finally {
+        this.lang = previousLanguage;
         this.inRule--;
       }
     }
@@ -238,7 +246,8 @@ function escapeLike(s: string): string {
 }
 
 /** Validate and compile an order spec like "name asc, id desc". */
-export function compileOrder(model: ResolvedModel, order: string | undefined, alias = 't'): string {
+export function compileOrder(model: ResolvedModel, order: string | undefined, alias = 't', lang?: string): string {
+  const locale = translationLanguage(lang);
   const spec = order ?? model.def.order ?? 'id';
   return spec
     .split(',')
@@ -248,7 +257,8 @@ export function compileOrder(model: ResolvedModel, order: string | undefined, al
       if (!f || !isColumn(f) || rest.length || !/^(asc|desc)$/i.test(dir)) {
         throw new EngineError(`Invalid order '${part.trim()}' for '${model.name}'`);
       }
-      return `${alias}."${fname}" ${dir.toUpperCase()}`;
+      const col = `${alias}."${fname}"`;
+      return `${f.translate ? `COALESCE(${col}->>'${locale}', ${col}->>'en_US')` : col} ${dir.toUpperCase()}`;
     })
     .join(', ');
 }

@@ -1,4 +1,5 @@
 export * from './contracts/index.js';
+export * from './expr/index.js';
 export { PgliteDriver } from './driver/pglite.js';
 export { ModelRegistry, resolveModels, isColumn, tableName } from './orm/registry.js';
 export { EnvImpl, RecordCache } from './orm/env.js';

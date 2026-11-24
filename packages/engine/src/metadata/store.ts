@@ -11,7 +11,7 @@ import { withDriverLock } from '../modules/lock.js';
 const CUSTOM_MODEL_RE = /^x_[a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/;
 const CUSTOM_FIELD_RE = /^x_[a-z0-9_]+$/;
 const FIELD_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
-  'char', 'text', 'html', 'integer', 'float', 'monetary', 'boolean', 'date', 'datetime', 'selection', 'json', 'binary',
+  'char', 'text', 'html', 'integer', 'float', 'monetary', 'boolean', 'date', 'datetime', 'selection', 'reference', 'json', 'binary',
   'many2one', 'one2many', 'many2many',
 ]);
 const ON_DELETES: ReadonlySet<OnDelete> = new Set<OnDelete>(['cascade', 'set null', 'restrict']);
@@ -32,6 +32,8 @@ export async function ensureMetadataTables(db: SqlDriver): Promise<void> {
         default_value JSONB, selection JSONB, comodel TEXT, inverse_name TEXT, relation_table TEXT, ondelete TEXT,
         create_date TIMESTAMP NOT NULL DEFAULT now(), UNIQUE (model, name))`, params: [],
     });
+    // Existing tenant metadata is upgraded additively; older rows keep an empty options object.
+    await tx.query({ text: `ALTER TABLE nx_field ADD COLUMN IF NOT EXISTS field_options JSONB NOT NULL DEFAULT '{}'::jsonb`, params: [] });
   });
 }
 
@@ -41,10 +43,16 @@ interface FieldRow {
   required: boolean; readonly: boolean; index: boolean; unique: boolean;
   default_value: unknown; selection: [string, string][] | null; comodel: string | null;
   inverse_name: string | null; relation_table: string | null; ondelete: OnDelete | null;
+  field_options: Pick<FieldDef, 'digits' | 'translate' | 'copy' | 'aggregator' | 'currencyField'>;
 }
 
 function rowToField(r: FieldRow): FieldDef {
   const f: FieldDef = { type: r.ttype };
+  if (r.field_options?.currencyField !== undefined) f.currencyField = r.field_options.currencyField;
+  if (r.field_options?.digits !== undefined) f.digits = r.field_options.digits;
+  if (r.field_options?.translate !== undefined) f.translate = r.field_options.translate;
+  if (r.field_options?.copy !== undefined) f.copy = r.field_options.copy;
+  if (r.field_options?.aggregator !== undefined) f.aggregator = r.field_options.aggregator;
   if (r.string !== null) f.string = r.string;
   if (r.help !== null) f.help = r.help;
   if (r.required) f.required = true;
@@ -68,7 +76,7 @@ export async function loadCustomDefs(db: SqlDriver): Promise<ModelDef[]> {
   const models = await db.query<ModelRow>({ text: `SELECT name, description, "order" FROM nx_model ORDER BY id`, params: [] });
   const fields = await db.query<FieldRow>({
     text: `SELECT model, name, ttype, string, help, required, readonly, "index", "unique", default_value, selection,
-      comodel, inverse_name, relation_table, ondelete FROM nx_field ORDER BY id`, params: [],
+      comodel, inverse_name, relation_table, ondelete, field_options FROM nx_field ORDER BY id`, params: [],
   });
   const byModel = new Map<string, Record<string, FieldDef>>();
   for (const r of fields) {
@@ -140,6 +148,11 @@ function validateField(model: string, name: string, f: FieldDef): void {
   if (typeof f.default === 'function' || f.compute || f.related || f.depends) {
     throw new ValidationError(`Custom field '${model}.${name}' cannot use code (default function, compute, related)`);
   }
+  if (f.selectionAdd) throw new ValidationError(`Custom field '${model}.${name}' cannot extend a selection`);
+  if (f.translate !== undefined && (typeof f.translate !== 'boolean' || (f.translate && !['char', 'text', 'html'].includes(f.type)))) throw new ValidationError('Invalid translate flag');
+  if (f.translate && f.unique) throw new ValidationError('Translated fields cannot be unique');
+  if (f.copy !== undefined && typeof f.copy !== 'boolean') throw new ValidationError('Invalid copy flag');
+  if (f.aggregator !== undefined && !['sum', 'avg', 'min', 'max', 'count', 'count_distinct'].includes(f.aggregator)) throw new ValidationError('Invalid aggregator');
   if (f.ondelete !== undefined && !ON_DELETES.has(f.ondelete)) throw new ValidationError(`Invalid ondelete '${String(f.ondelete)}'`);
   if (f.selection && !f.selection.every((p) => Array.isArray(p) && p.length === 2 && p.every((s) => typeof s === 'string'))) {
     throw new ValidationError(`Invalid selection for '${model}.${name}'`);
@@ -226,13 +239,14 @@ export class MetadataStore {
     }
     await tx.query({
       text: `INSERT INTO nx_field (model, name, ttype, string, help, required, readonly, "index", "unique",
-        default_value, selection, comodel, inverse_name, relation_table, ondelete)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15)`,
+        default_value, selection, comodel, inverse_name, relation_table, ondelete, field_options)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16::jsonb)`,
       params: [
         model, name, f.type, f.string ?? null, f.help ?? null, !!f.required, !!f.readonly, !!f.index, !!f.unique,
         f.default === undefined ? null : JSON.stringify(f.default),
         f.selection ? JSON.stringify(f.selection) : null,
         f.comodel ?? null, f.inverseName ?? null, f.relationTable ?? null, f.ondelete ?? null,
+        JSON.stringify({ digits: f.digits, translate: f.translate, copy: f.copy, aggregator: f.aggregator, currencyField: f.currencyField }),
       ],
     });
   }

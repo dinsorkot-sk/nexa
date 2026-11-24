@@ -4,7 +4,7 @@ import {
 } from '../contracts/index.js';
 import { EnvImpl } from '../orm/env.js';
 import { isColumn, type ModelRegistry } from '../orm/registry.js';
-import { applyMigration, planMigration, quoteIdent, type MigrationOp } from '../schema/sync.js';
+import { applyMigration, assertCompatibleMigration, planMigration, quoteIdent, type MigrationOp } from '../schema/sync.js';
 import { removeModuleSecurity, writeModuleSecurity } from '../security/tables.js';
 import { removeModuleUi, writeModuleUi } from '../ui-meta/tables.js';
 import { validateViews } from '../ui-meta/views.js';
@@ -343,6 +343,7 @@ export class ModuleService {
         await dropForeignKeys(tx, dropTables);
       }
       const mig = await planMigration(models, tx, { dropTables });
+      assertCompatibleMigration(mig);
       const ops = mig.ops.filter((o) => !o.destructive || isTargeted(o, drops, dropTables));
       await applyMigration({ ...mig, ops }, tx, { allowDestructive: !!oldModels });
 

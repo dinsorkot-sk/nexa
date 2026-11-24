@@ -133,15 +133,22 @@ export async function ruleDomain(env: EnvImpl, model: string, op: AccessOperatio
 export async function readRuleResolver(env: EnvImpl): Promise<((model: string) => Domain | null) | undefined> {
   if (env.su) return undefined;
   const sec = await userSecurity(env);
-  return (model) => ruleDomainFor(sec, model, 'read');
+  return (model) => {
+    const rule = ruleDomainFor(sec, model, 'read');
+    return env.registry.get(model).def.transient ? combine('&', [rule ?? [], [['create_uid', '=', env.uid]]]) : rule;
+  };
 }
 
 /** Throw AccessError unless every record in `ids` passes the record rules for `op`. */
 export async function checkRecordRules(env: EnvImpl, model: string, ids: readonly number[], op: AccessOperation): Promise<void> {
   if (env.su || ids.length === 0) return;
+  if (env.registry.get(model).def.transient) {
+    const own = await env.sudo().model(model).searchCount([['id', 'in', [...ids]], ['create_uid', '=', env.uid]]);
+    if (own !== new Set(ids).size) throw new AccessError(`Transient records of '${model}' belong to another user`);
+  }
   const rule = await ruleDomain(env, model, op);
   if (!rule) return;
-  const ok = await env.sudo().model(model).searchCount(combine('&', [[['id', 'in', [...ids]]], rule]));
+  const ok = await env.sudo().withContext({ lang: 'en_US' }).model(model).searchCount(combine('&', [[['id', 'in', [...ids]]], rule]));
   if (ok !== new Set(ids).size) {
     throw new AccessError(`Record rules forbid ${op} on some '${model}' records (user ${env.uid})`);
   }

@@ -3,7 +3,7 @@
 // ---------- Fields ----------
 export type ScalarFieldType =
   | 'char' | 'text' | 'html' | 'integer' | 'float' | 'monetary' | 'boolean'
-  | 'date' | 'datetime' | 'selection' | 'json' | 'binary';
+  | 'date' | 'datetime' | 'selection' | 'reference' | 'json' | 'binary';
 export type RelationalFieldType = 'many2one' | 'one2many' | 'many2many';
 export type FieldType = ScalarFieldType | RelationalFieldType;
 
@@ -11,6 +11,8 @@ export type OnDelete = 'cascade' | 'set null' | 'restrict';
 
 export interface FieldDef {
   type: FieldType;
+  /** Registry-generated delegation route; module definitions must not set this. */
+  delegated?: { model: string; via: string; field: string };
   string?: string;
   help?: string;
   required?: boolean;
@@ -20,6 +22,14 @@ export interface FieldDef {
   default?: unknown | ((env: Env) => unknown);
   /** selection options */
   selection?: ReadonlyArray<readonly [value: string, label: string]>;
+  /** Options appended to an inherited selection; existing keys update their label. */
+  selectionAdd?: ReadonlyArray<readonly [value: string, label: string]>;
+  /** Total precision and decimal scale for float columns. */
+  digits?: readonly [precision: number, scale: number];
+  /** Store language-specific values for a textual field. */
+  translate?: boolean;
+  copy?: boolean;
+  aggregator?: 'sum' | 'avg' | 'min' | 'max' | 'count' | 'count_distinct';
   /** relational */
   comodel?: string;
   inverseName?: string;       // one2many
@@ -54,7 +64,7 @@ export interface ModelDef {
   description?: string;
   table?: string;             // default derived from name
   abstract?: boolean;         // no table (mixin)
-  transient?: boolean;        // wizard, auto vacuum
+  transient?: boolean;        // wizard; privileged explicit vacuum (no automatic scheduler)
   extends?: string[];         // Odoo _inherit (mixin / extension)
   delegates?: Record<string, string>; // Odoo _inherits: comodel -> m2o field
   order?: string;
@@ -160,6 +170,8 @@ export interface Recordset {
   create(vals: Record<string, unknown> | Record<string, unknown>[]): Promise<Recordset>;
   write(vals: Record<string, unknown>): Promise<void>;
   unlink(): Promise<void>;
+  /** Remove transient records last updated before the cutoff; superuser only. */
+  vacuum(before: Date): Promise<number>;
   call(method: string, ...args: unknown[]): Promise<unknown>;
   checkAccess(op: AccessOperation): Promise<void>;
   /** Run onchange handlers for `field` on unsaved values; returns the resulting values patch. */

@@ -34,6 +34,8 @@ Odoo เป็น LGPL-3 จึงนำมาใช้เฉพาะแนว�
 
 ## Consequences
 
+- A delegated model uses a required many-to-one link to each parent. Local fields take precedence. Creating a child can create its parent or link an existing parent under the caller's access rules. Unlinking a child preserves every linked parent, including parents created with that child. Parent cleanup is an explicit operation subject to normal access checks and foreign-key restrictions.
+
 - API layer (NestJS) บาง: แปลง HTTP → `env.model(name).method(...)`
 - UI (Nuxt) generic: render จาก view metadata
 - ต้องมี test suite ของ engine ที่เข้มแข็ง เพราะทุก module พึ่ง engine

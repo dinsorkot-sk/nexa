@@ -5,7 +5,8 @@ import {
 import { compileDomain, compileOrder } from '../domain/compile.js';
 import { affected, cascadeAffected, computeValues, isComputed, isStoredComputed, mergeTodo, recompute, type Todo } from './compute.js';
 import type { EnvImpl } from './env.js';
-import { isColumn, type ResolvedField } from './registry.js';
+import { roundMonetary } from './decimal.js';
+import { isColumn, translationLanguage, type ResolvedField } from './registry.js';
 import { checkModelAccess, checkRecordRules, hiddenFields, readRuleResolver, ruleDomain, userSecurity } from '../security/access.js';
 
 const MAGIC = new Set(['id', 'create_date', 'write_date', 'create_uid', 'write_uid']);
@@ -50,7 +51,7 @@ export class RecordsetImpl implements Recordset {
     await this.checkAccess('read');
     const params: unknown[] = [];
     const where = await this.whereClause(domain, params);
-    let text = `SELECT t.id FROM "${this.table}" t WHERE ${where} ORDER BY ${compileOrder(this.meta, opts.order)}`;
+    let text = `SELECT t.id FROM "${this.table}" t WHERE ${where} ORDER BY ${compileOrder(this.meta, opts.order, 't', this.env.context.lang)}`;
     if (opts.limit !== undefined) text += ` LIMIT ${nonNegInt(opts.limit, 'limit')}`;
     if (opts.offset) text += ` OFFSET ${nonNegInt(opts.offset, 'offset')}`;
     const rows = await this.env.db.query<{ id: number }>({ text, params });
@@ -76,7 +77,7 @@ export class RecordsetImpl implements Recordset {
     await this.checkAccess('read');
     if (this.ids.length === 0) return [];
     const wanted = fields ?? [...this.meta.fields.values()]
-      .filter((f) => isColumn(f) || ((f.type === 'one2many' || f.type === 'many2many') && !isComputed(f as ResolvedField)))
+      .filter((f) => f.delegated || isColumn(f) || ((f.type === 'one2many' || f.type === 'many2many') && !isComputed(f as ResolvedField)))
       .map((f) => f.name);
     const hidden = await hiddenFields(this.env, this.model);
     const visible = fields ? wanted : wanted.filter((n) => !hidden.has(n));
@@ -88,11 +89,19 @@ export class RecordsetImpl implements Recordset {
     const out = this.ids.map((id) => {
       const c = this.env.cache.get(this.model, id)!;
       const r: Vals = { id };
-      for (const f of defs) if (isColumn(f)) r[f.name] = normalize(f, c[f.name]);
+      for (const f of defs) if (isColumn(f)) r[f.name] = normalize(f, c[f.name], this.env.context.lang);
       return r;
     });
     for (const f of defs) {
       if (isColumn(f)) continue;
+      if (f.delegated) {
+        const links = await this.read([f.delegated.via]);
+        const ids = [...new Set(links.map(r => r[f.delegated!.via]).filter((id): id is number => typeof id === 'number'))];
+        const rows = ids.length ? await this.env.model(f.delegated.model).browse(ids).read([f.delegated.field]) : [];
+        const values = new Map(rows.map(r => [r.id as number, r[f.delegated!.field]]));
+        out.forEach((r, i) => { r[f.name] = values.get(links[i][f.delegated!.via] as number) ?? null; });
+        continue;
+      }
       const values = isComputed(f) ? await computeValues(this, f) : await this.readX2manyVisible(f);
       out.forEach((r) => (r[f.name] = values.get(r.id as number) ?? (f.type === 'one2many' || f.type === 'many2many' ? [] : null)));
     }
@@ -134,7 +143,7 @@ export class RecordsetImpl implements Recordset {
     let rows: { owner: number; id: number }[];
     if (f.type === 'one2many') {
       rows = await this.env.db.query({
-        text: `SELECT t."${f.inverseName}" AS owner, t.id FROM "${co.table}" t WHERE t."${f.inverseName}" = ANY($1) ORDER BY ${compileOrder(co, undefined)}`,
+        text: `SELECT t."${f.inverseName}" AS owner, t.id FROM "${co.table}" t WHERE t."${f.inverseName}" = ANY($1) ORDER BY ${compileOrder(co, undefined, 't', this.env.context.lang)}`,
         params: [[...this.ids]],
       });
     } else {
@@ -154,10 +163,18 @@ export class RecordsetImpl implements Recordset {
       const ids: number[] = [];
       for (const v of list) {
         await this.checkFieldWrite(Object.keys(v));
-        const { columns, x2many } = this.split(this.withDefaults(v), true);
+        const values = await this.roundMonetaryValues(await this.delegateValues(this.withDefaults(v), true));
+        await this.checkFieldWrite(Object.keys(values));
+        await this.validateReferences(values);
+        const { columns, x2many } = this.split(values, true);
         columns.create_uid = columns.write_uid = this.env.uid;
         const keys = Object.keys(columns);
-        const params = keys.map((k) => columns[k]);
+        const params = keys.map((k) => {
+          const value = columns[k];
+          if (!this.field(k).translate || value === null) return value;
+          const lang = translationLanguage(this.env.context.lang);
+          return JSON.stringify({ en_US: value, [lang]: value });
+        });
         const text = `INSERT INTO "${this.table}" (${keys.map((k) => `"${k}"`).join(', ')}${keys.length ? ', ' : ''}create_date, write_date) `
           + `VALUES (${keys.map((_, i) => `$${i + 1}`).join(', ')}${keys.length ? ', ' : ''}now(), now()) RETURNING id`;
         const [r] = await sqlCall(() => this.env.db.query<{ id: number }>({ text, params }));
@@ -183,16 +200,30 @@ export class RecordsetImpl implements Recordset {
     if (this.ids.length === 0) return;
     await this.checkFieldWrite(Object.keys(vals));
     await checkRecordRules(this.env, this.model, this.ids, 'write');
-    const { columns, x2many } = this.split(vals, false);
-    const changed = new Set(Object.keys(vals));
+    const monetary = [...this.meta.fields.values()].some(f => !f.delegated && f.currencyField && (f.name in vals || f.currencyField in vals));
+    const delegation = Object.keys(vals).some(n => this.meta.fields.get(n)?.delegated || Object.values(this.meta.def.delegates ?? {}).includes(n));
+    if ((monetary || delegation) && this.ids.length > 1) {
+      await this.env.transaction(async () => { for (const id of this.ids) await this.browse(id).write(vals); });
+      return;
+    }
     await this.env.transaction(async () => {
+      const delegated = delegation ? await this.delegateValues(vals, false) : vals;
+      const values = monetary ? await this.roundMonetaryValues(delegated, this.ids[0]) : delegated;
+      await this.checkFieldWrite(Object.keys(values));
+      const { columns, x2many } = this.split(values, false);
+      const changed = new Set([...Object.keys(values), ...Object.keys(vals)]);
+      await this.validateReferences(values);
       const todo = await this.affectedWithInverse(changed, x2many);
       if (Object.keys(columns).length || changed.size) {
         columns.write_uid = this.env.uid;
         const keys = Object.keys(columns);
         const params: unknown[] = keys.map((k) => columns[k]);
+        const sets = keys.map((k, i) => {
+          if (!this.field(k).translate) return `"${k}" = $${i + 1}`;
+          params.push(translationLanguage(this.env.context.lang));
+          return `"${k}" = CASE WHEN $${i + 1}::text IS NULL THEN NULLIF(COALESCE("${k}", '{}'::jsonb) - $${params.length}::text, '{}'::jsonb) ELSE jsonb_set(COALESCE("${k}", '{}'::jsonb), ARRAY[$${params.length}::text], to_jsonb($${i + 1}::text), true) END`;
+        }).join(', ');
         params.push([...this.ids]);
-        const sets = keys.map((k, i) => `"${k}" = $${i + 1}`).join(', ');
         const rows = await sqlCall(() => this.env.db.query<{ id: number }>({
           text: `UPDATE "${this.table}" SET ${sets}, write_date = now() WHERE id = ANY($${params.length}) RETURNING id`,
           params,
@@ -223,6 +254,17 @@ export class RecordsetImpl implements Recordset {
     });
   }
 
+  async vacuum(before: Date): Promise<number> {
+    if (!this.env.su) throw new AccessError('Only the superuser can vacuum transient records');
+    if (!this.meta.def.transient) throw new EngineError(`Model '${this.model}' is not transient`);
+    if (!(before instanceof Date) || !Number.isFinite(before.getTime())) throw new ValidationError('Vacuum requires a valid cutoff');
+    return this.env.transaction(async () => {
+      const expired = await this.search([['write_date', '<', before.toISOString()]]);
+      await expired.unlink();
+      return expired.ids.length;
+    });
+  }
+
   async call(method: string, ...args: unknown[]): Promise<unknown> {
     const methods = this.meta.def.methods;
     const fn = methods && Object.hasOwn(methods, method) ? methods[method] : undefined;
@@ -242,9 +284,35 @@ export class RecordsetImpl implements Recordset {
    */
   private async whereClause(domain: Domain, params: unknown[]): Promise<string> {
     const reg = this.env.registry;
-    const user = compileDomain(reg, this.meta, domain, params, 't', await readRuleResolver(this.env));
+    await this.checkDelegatedDomainAccess(this.meta, domain);
+    const user = compileDomain(reg, this.meta, domain, params, 't', await readRuleResolver(this.env), this.env.context.lang);
     const rule = await ruleDomain(this.env, this.model, 'read');
-    return rule ? `(${compileDomain(reg, this.meta, rule, params)}) AND (${user})` : user;
+    if (rule) await this.checkDelegatedDomainAccess(this.meta, rule);
+    const secured = rule ? `(${compileDomain(reg, this.meta, rule, params, 't', undefined, 'en_US')}) AND (${user})` : user;
+    if (!this.meta.def.transient || this.env.su) return secured;
+    params.push(this.env.uid);
+    return `(${secured}) AND t.create_uid = $${params.length}`;
+  }
+
+  /** Delegated domain paths must not reveal a model the caller cannot read. */
+  private async checkDelegatedDomainAccess(model: ResolvedModel, domain: Domain): Promise<void> {
+    for (const term of domain) {
+      if (!Array.isArray(term)) continue;
+      const [path, op, value] = term;
+      if (typeof path !== 'string') continue;
+      let current = model;
+      for (const part of path.split('.')) {
+        let field = current.fields.get(part);
+        while (field?.delegated) {
+          await checkModelAccess(this.env, field.delegated.model, 'read');
+          current = this.env.registry.get(field.delegated.model);
+          field = current.fields.get(field.delegated.field);
+        }
+        if (!field) break;
+        if (field.comodel) current = this.env.registry.get(field.comodel);
+      }
+      if ((op === 'any' || op === 'not any') && Array.isArray(value)) await this.checkDelegatedDomainAccess(current, value as Domain);
+    }
   }
 
   private async checkFieldWrite(names: string[]): Promise<void> {
@@ -428,6 +496,78 @@ export class RecordsetImpl implements Recordset {
     return out;
   }
 
+  /** Create or update delegated parents under the caller's access checks. */
+  private async delegateValues(vals: Vals, creating: boolean): Promise<Vals> {
+    const own = { ...vals };
+    for (const [model, via] of Object.entries(this.meta.def.delegates ?? {})) {
+      const parentValues: Vals = {};
+      for (const [name, value] of Object.entries(vals)) {
+        const route = this.meta.fields.get(name)?.delegated;
+        if (route?.via === via) { parentValues[route.field] = value; delete own[name]; }
+      }
+      let parentId = own[via];
+      if (!creating && !(via in own) && Object.keys(parentValues).length) parentId = (await this.read([via]))[0][via];
+      if (!creating && !(via in own) && !Object.keys(parentValues).length) continue;
+      const parent = this.env.model(model);
+      if (creating && !(via in own)) {
+        parentId = (await parent.create(parentValues)).ids[0];
+        own[via] = parentId;
+      } else {
+        if (!Number.isSafeInteger(parentId) || (parentId as number) <= 0) throw new ValidationError(`Delegation link '${via}' is required`);
+        const target = parent.browse(parentId as number);
+        await target.read(['id']);
+        if (Object.keys(parentValues).length) await target.write(parentValues);
+      }
+    }
+    return own;
+  }
+
+  /** Round configured monetary fields using the caller-visible currency's increment. */
+  private async roundMonetaryValues(vals: Vals, id?: number): Promise<Vals> {
+    const out = { ...vals };
+    for (const f of this.meta.fields.values()) {
+      if (f.delegated || !f.currencyField || (!(f.name in vals) && !(f.currencyField in vals))) continue;
+      let amount = vals[f.name];
+      let currency = vals[f.currencyField];
+      if (id && (!(f.name in vals) || !(f.currencyField in vals))) {
+        const fields = [f.name, f.currencyField].filter(n => !(n in vals));
+        const current = (await this.browse(id).read(fields))[0];
+        if (!(f.name in vals)) amount = current[f.name];
+        if (!(f.currencyField in vals)) currency = current[f.currencyField];
+      }
+      if (amount === null || amount === undefined || amount === false) continue;
+      if (typeof amount !== 'number' || !Number.isFinite(amount) || !Number.isSafeInteger(currency) || (currency as number) <= 0) {
+        throw new ValidationError(`Field '${f.name}' requires a valid value and currency`);
+      }
+      const currencyField = this.field(f.currencyField);
+      const rows = await this.env.model(currencyField.comodel!).browse(currency as number).read(['rounding']);
+      const increment = rows[0]?.rounding;
+      if (typeof increment !== 'number') throw new ValidationError(`Invalid currency rounding for '${f.name}'`);
+      out[f.name] = roundMonetary(amount, increment);
+    }
+    return out;
+  }
+
+  /** Reference targets must exist and be readable to the caller. */
+  private async validateReferences(vals: Vals): Promise<void> {
+    for (const [name, value] of Object.entries(vals)) {
+      const field = this.meta.fields.get(name);
+      if (field?.type !== 'reference' || value === null || value === undefined || value === false) continue;
+      const match = typeof value === 'string' ? /^([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*),([1-9][0-9]*)$/.exec(value) : null;
+      if (!match || !Number.isSafeInteger(Number(match[2])) || !this.env.registry.models.get(match[1])?.table ||
+          (field.selection && !field.selection.some(([model]) => model === match[1]))) {
+        throw new ValidationError(`Invalid reference for '${name}'`);
+      }
+      try {
+        const target = this.env.model(match[1]);
+        if (!(await target.search([['id', '=', Number(match[2])]])).ids.length) throw new ValidationError(`Invalid reference for '${name}'`);
+      } catch (err) {
+        if (err instanceof AccessError || err instanceof MissingRecordError) throw new ValidationError(`Invalid reference for '${name}'`);
+        throw err;
+      }
+    }
+  }
+
   /** Validate user values; split into column values and normalized x2many commands. */
   private split(vals: Vals, creating: boolean): { columns: Vals; x2many: Map<string, X2ManyCommand[]> } {
     const columns: Vals = {};
@@ -441,7 +581,7 @@ export class RecordsetImpl implements Recordset {
       else columns[k] = coerce(f, v);
     }
     for (const f of this.meta.fields.values()) {
-      if (!f.required || MAGIC.has(f.name) || isComputed(f as ResolvedField)) continue;
+      if (f.delegated || !f.required || MAGIC.has(f.name) || isComputed(f as ResolvedField)) continue;
       if (f.type === 'one2many' || f.type === 'many2many') continue;
       const v = columns[f.name];
       if ((creating || f.name in columns) && (v === null || v === undefined || v === '')) {
@@ -504,6 +644,7 @@ function nonNegInt(n: number, what: string): number {
 
 function coerce(f: ResolvedField, v: unknown): unknown {
   if (v === null || v === undefined || (v === false && f.type !== 'boolean')) return null;
+  if (f.translate && typeof v !== 'string') throw new ValidationError(`Field '${f.name}' expects text`);
   switch (f.type) {
     case 'boolean':
       return Boolean(v);
@@ -514,6 +655,9 @@ function coerce(f: ResolvedField, v: unknown): unknown {
     case 'float':
     case 'monetary':
       if (typeof v !== 'number' || !Number.isFinite(v)) throw new ValidationError(`Field '${f.name}' expects a number`);
+      return v;
+    case 'reference':
+      if (typeof v !== 'string' || !/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*,[1-9][0-9]*$/.test(v)) throw new ValidationError(`Invalid reference for '${f.name}'`);
       return v;
     case 'selection':
       if (f.selection && !f.selection.some(([key]) => key === v)) {
@@ -527,8 +671,12 @@ function coerce(f: ResolvedField, v: unknown): unknown {
   }
 }
 
-function normalize(f: ResolvedField, v: unknown): unknown {
-  if (v === undefined) return null;
-  if (f.type === 'monetary' && typeof v === 'string') return Number(v);
+function normalize(f: ResolvedField, v: unknown, lang?: string): unknown {
+  if (v === undefined || v === null) return null;
+  if (f.translate) {
+    const translations = v as Record<string, unknown>;
+    return translations[translationLanguage(lang)] ?? translations.en_US ?? null;
+  }
+  if ((f.type === 'monetary' || (f.type === 'float' && f.digits)) && typeof v === 'string') return Number(v);
   return v;
 }

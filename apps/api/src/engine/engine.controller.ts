@@ -19,9 +19,14 @@ const studioModel = z.object({
 const studioField = z.object({
   model: modelName,
   name: z.string().regex(/^x_[a-z0-9_]+$/).max(63),
-  type: z.enum(['char', 'text', 'integer', 'float', 'boolean', 'date', 'datetime', 'selection', 'json', 'many2one', 'many2many']),
+  type: z.enum(['char', 'text', 'integer', 'float', 'monetary', 'boolean', 'date', 'datetime', 'selection', 'json', 'many2one', 'many2many', 'reference']),
   label: z.string().max(120).optional(),
   required: z.boolean().optional(),
+  translate: z.boolean().optional(),
+  digits: z.tuple([z.number().int().min(1).max(1000), z.number().int().min(0).max(1000)]).optional(),
+  copy: z.boolean().optional(),
+  aggregator: z.enum(['sum', 'avg', 'min', 'max', 'count', 'count_distinct']).optional(),
+  currencyField: z.string().regex(/^[a-z][a-z0-9_]*$/).max(63).optional(),
   comodel: modelName.optional(),
   inverseName: z.string().regex(/^x_[a-z0-9_]+$/).max(63).optional(),
   selection: z.array(z.tuple([z.string().min(1).max(40), z.string().min(1).max(80)])).min(1).max(50).optional(),
@@ -31,6 +36,15 @@ const studioField = z.object({
   }
   if (field.type === 'selection' && !field.selection) {
     ctx.addIssue({ code: 'custom', path: ['selection'], message: 'Selection fields require at least one choice.' });
+  }
+  if (field.digits && (field.type !== 'float' || field.digits[1] > field.digits[0])) {
+    ctx.addIssue({ code: 'custom', path: ['digits'], message: 'Digits require a float field and scale at most precision.' });
+  }
+  if (field.translate && field.type !== 'char' && field.type !== 'text') {
+    ctx.addIssue({ code: 'custom', path: ['translate'], message: 'Translation requires a text field.' });
+  }
+  if (field.currencyField && field.type !== 'monetary') {
+    ctx.addIssue({ code: 'custom', path: ['currencyField'], message: 'Currency field requires a monetary field.' });
   }
 });
 const viewNodeSchema: z.ZodType<ViewNode> = z.lazy(() => z.object({
@@ -110,6 +124,7 @@ export class EngineController {
     return { models: (await MetadataStore.for(handle).list()).map(({ name, description, fields }) => ({
       name, description, fields: Object.entries(fields).map(([field, def]) => ({
         name: field, type: def.type, string: def.string ?? field, comodel: def.comodel,
+        translate: def.translate, digits: def.digits, copy: def.copy, aggregator: def.aggregator, currencyField: def.currencyField,
       })),
     })) };
   }
@@ -123,6 +138,11 @@ export class EngineController {
       type: req.type,
       ...(req.label ? { string: req.label } : {}),
       ...(req.required ? { required: true } : {}),
+      ...(req.translate !== undefined ? { translate: req.translate } : {}),
+      ...(req.digits ? { digits: req.digits } : {}),
+      ...(req.copy !== undefined ? { copy: req.copy } : {}),
+      ...(req.aggregator ? { aggregator: req.aggregator } : {}),
+      ...(req.currencyField ? { currencyField: req.currencyField } : {}),
       ...(req.comodel ? { comodel: req.comodel } : {}),
       ...(req.inverseName ? { inverseName: req.inverseName } : {}),
       ...(req.selection ? { selection: req.selection } : {}),

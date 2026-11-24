@@ -142,6 +142,18 @@ describe('no-code Studio', () => {
     expect(await post('/api/studio/field', admin, {
       model: 'x_studio_task', name: 'x_title', type: 'char', label: 'Title',
     })).toMatchObject({ status: 200, body: { field: 'x_title' } });
+    expect(await post('/api/studio/field', admin, {
+      model: 'x_studio_task', name: 'x_cost', type: 'float', digits: [9, 2], copy: false, aggregator: 'sum',
+    })).toMatchObject({ status: 200 });
+    const studioModels = await call('GET', '/api/studio/models', admin);
+    expect(studioModels.body.models).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: 'x_studio_task',
+        fields: expect.arrayContaining([
+          expect.objectContaining({ name: 'x_cost', digits: [9, 2], copy: false, aggregator: 'sum' }),
+        ]),
+      }),
+    ]));
     const view = await post('/api/studio/view', admin, {
       model: 'x_studio_task', name: 'x_task_list', type: 'list',
       arch: { tag: 'list', children: [{ tag: 'field', attrs: { name: 'x_title' } }] },

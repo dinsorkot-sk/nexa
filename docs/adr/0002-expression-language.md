@@ -53,3 +53,7 @@ by data. They are not pure expressions.
   keep working.
 - QuickJS adds a dependency: choose a version, check the license (MIT), and measure the
   memory per tenant.
+- The sandbox runner accepts a trusted bridge. The server-action adapter must bind it to
+  the caller's Env and transaction, enforce ACLs and record rules, bound affected rows,
+  and settle pending calls when the abort signal fires. Action execution must roll the
+  transaction back when the runner rejects.
