@@ -7,8 +7,7 @@
     "dev": "nuxt dev --port 3000",
     "build": "nuxt build",
     "lint": "eslint .",
-    "typecheck": "nuxt typecheck",
-    "test": "vitest run"
+    "typecheck": "nuxt typecheck"
   },
   "dependencies": {
     "@nexa/shared": "workspace:*",
