@@ -4,7 +4,7 @@ import {
 } from '../contracts/index.js';
 import { compileDomain, compileOrder } from '../domain/compile.js';
 import { affected, cascadeAffected, computeValues, isComputed, isStoredComputed, mergeTodo, recompute, type Todo } from './compute.js';
-import { recordHooks, type EnvImpl } from './env.js';
+import { defaultsProvider, recordHooks, type EnvImpl } from './env.js';
 import { roundMonetary } from './decimal.js';
 import { isColumn, translationLanguage, type ResolvedField } from './registry.js';
 import { checkModelAccess, checkRecordRules, combine, hiddenFields, readRuleResolver, ruleDomain, userSecurity } from '../security/access.js';
@@ -191,12 +191,14 @@ export class RecordsetImpl implements Recordset {
     await this.checkAccess('read');
     const hidden = await hiddenFields(this.env, this.model);
     const out: Vals = {};
+    const stored = await this.permittedDefaults(await defaultsProvider()?.(this.env, this.model));
     for (const name of fields) {
       const field = this.field(name);
       if (hidden.has(name)) throw new AccessError(`Field '${this.model}.${name}' is restricted`);
       if (field.compute || field.computeExpr || field.related || MAGIC.has(name) || name === 'parent_path') continue;
       const contextValue = this.env.context['default_' + name];
       if (contextValue !== undefined) out[name] = contextValue;
+      else if (stored?.has(name)) out[name] = stored.get(name);
       else if (field.defaultExpr !== undefined) out[name] = evaluateExpression(field.defaultExpr, await expressionContext(this.env)) as unknown;
       else if (field.default !== undefined) out[name] = typeof field.default === 'function'
         ? await (field.default as (env: unknown) => unknown)(this.env)
@@ -535,6 +537,21 @@ export class RecordsetImpl implements Recordset {
     }
   }
 
+  /** Stored (ir.default) values limited to fields this user may write; others are silently ignored. */
+  private async permittedDefaults(stored: ReadonlyMap<string, unknown> | undefined): Promise<ReadonlyMap<string, unknown> | undefined> {
+    if (!stored?.size) return stored;
+    const hidden = await hiddenFields(this.env, this.model);
+    const sec = this.env.su ? undefined : await userSecurity(this.env);
+    const out = new Map<string, unknown>();
+    for (const [name, value] of stored) {
+      const f = this.meta.fields.get(name);
+      if (!f || hidden.has(name)) continue;
+      if (sec && f.writeGroups?.length && !f.writeGroups.some((g) => sec.groups.has(g))) continue;
+      out.set(name, value);
+    }
+    return out;
+  }
+
   private async checkFieldWrite(names: string[]): Promise<void> {
     const hidden = await hiddenFields(this.env, this.model);
     for (const n of names) if (hidden.has(n)) throw new AccessError(`Field '${this.model}.${n}' is restricted`);
@@ -728,11 +745,14 @@ export class RecordsetImpl implements Recordset {
 
   private async withDefaults(vals: Vals): Promise<Vals> {
     const out = { ...vals };
+    const stored = await this.permittedDefaults(await defaultsProvider()?.(this.env, this.model));
     for (const f of this.meta.fields.values()) {
       if (f.name in out || MAGIC.has(f.name) || f.name === 'parent_path' || isComputed(f as ResolvedField)) continue;
       const contextKey = 'default_' + f.name;
       if (Object.hasOwn(this.env.context, contextKey)) {
         out[f.name] = this.env.context[contextKey];
+      } else if (stored?.has(f.name)) {
+        out[f.name] = stored.get(f.name);
       } else if (f.defaultExpr !== undefined) {
         out[f.name] = evaluateExpression(f.defaultExpr, await expressionContext(this.env)) as unknown;
       } else if (f.default !== undefined) {

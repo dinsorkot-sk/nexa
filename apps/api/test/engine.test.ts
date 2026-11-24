@@ -195,7 +195,7 @@ describe('UI metadata', () => {
     const adminMenus = await call('GET', '/api/ui/menus', admin);
     expect(adminMenus.status).toBe(200);
     const tree = (adminMenus.body.menus as { name: string; children: { name: string }[] }[]).map((m) => [m.name, m.children.map((c) => c.name)]);
-    expect(tree).toEqual([['Settings', ['Users', 'Groups', 'Companies']]]);
+    expect(tree).toEqual([['Settings', ['Users', 'Groups', 'Companies', 'Technical']]]);
     expect((await call('GET', '/api/ui/menus', bob)).body.menus).toEqual([]); // Settings is for base.group_system
     const view = await call('GET', '/api/ui/view/res.users/form', bob);
     expect(view.status).toBe(200);

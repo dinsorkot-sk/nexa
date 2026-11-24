@@ -12,35 +12,13 @@ export {
   ServerActionService, ButtonService, postMessage,
   type ServerActionDef, type ServerActionType, type ServerActionRunOptions, type ServerActionLimits, type ButtonDef, type ButtonCall,
 } from './actions.js';
+export { SequenceService, interpolateSequence, SEQUENCE_PLACEHOLDERS, type SequenceOptions } from './sequence.js';
+export {
+  ConfigParameterService, DefaultService, importServiceConfigRecords, storedDefaults, type DefaultScope, type DefaultScopeOptions,
+} from './config.js';
 export { AutomationRuleService, MAX_AUTOMATION_DEPTH, type AutomationRuleDef, type AutomationTrigger } from './automation.js';
 
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
-
-export interface SequenceOptions { prefix?: string; padding?: number; step?: number }
-
-/** Database-backed counter. Row locking keeps increments atomic across callers. */
-export class SequenceService {
-  constructor(private readonly env: Env) {}
-
-  async next(code: string, options: SequenceOptions = {}): Promise<string> {
-    requireKey(code, 'sequence code');
-    const step = positiveInt(options.step ?? 1, 'sequence step');
-    const padding = nonNegativeInt(options.padding ?? 5, 'sequence padding');
-    const prefix = options.prefix ?? '';
-    return this.env.transaction(async (env) => {
-      await ensureServiceTables(env);
-      await tenantDriver(env).query({
-        text: `INSERT INTO nx_sequence(code, step, padding, prefix) VALUES ($1,$2,$3,$4) ON CONFLICT (code) DO NOTHING`,
-        params: [code, step, padding, prefix],
-      });
-      const [row] = await tenantDriver(env).query<{ issued: number; step: number; padding: number; prefix: string }>({
-        text: `UPDATE nx_sequence SET next_number = next_number + step WHERE code = $1 RETURNING next_number - step AS issued, step, padding, prefix`,
-        params: [code],
-      });
-      return `${row.prefix}${String(row.issued).padStart(row.padding, '0')}`;
-    });
-  }
-}
 
 /** Built-in job bodies that need no application handler. */
 export type ScheduledBuiltin = 'automation.on_time';

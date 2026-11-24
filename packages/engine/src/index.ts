@@ -26,4 +26,13 @@ export {
   ServerActionService, ButtonService, AutomationRuleService, postMessage, MAX_AUTOMATION_DEPTH,
   type ServerActionDef, type ServerActionType, type ServerActionRunOptions, type ServerActionLimits,
   type ButtonDef, type ButtonCall, type AutomationRuleDef, type AutomationTrigger,
+  ConfigParameterService, DefaultService, importServiceConfigRecords, storedDefaults,
+  interpolateSequence, SEQUENCE_PLACEHOLDERS, type DefaultScope, type DefaultScopeOptions,
 } from './services/index.js';
+export { configModels, configAccess, configRules } from './base/config-models.js';
+export { setDefaultsProvider, type DefaultsProvider } from './orm/env.js';
+export {
+  DataExportService, DataImportService, ExportTemplateService, DATA_TRANSFER_LIMITS, ensureDataTransferTables, toCsv, parseCsv, convertScalar,
+  type Cell, type ExportOptions, type ExportResult, type ImportError, type ImportOptions, type ImportResult, type ExportTemplate,
+} from './services/data-transfer.js';
+export { SavedFilterService, type SavedFilterInput, type SavedFilter } from './services/filters.js';

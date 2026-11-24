@@ -1,6 +1,8 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { configureBodyParsers } from './engine/body-limits';
 
 async function bootstrap(): Promise<void> {
   const port = Number(process.env.PORT ?? 3001);
@@ -8,7 +10,8 @@ async function bootstrap(): Promise<void> {
     throw new Error('PORT must be an integer between 1 and 65535');
   }
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
+  configureBodyParsers(app);
   app.enableShutdownHooks();
 
   try {

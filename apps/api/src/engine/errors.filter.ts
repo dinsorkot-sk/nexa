@@ -23,6 +23,10 @@ export class EngineErrorFilter implements ExceptionFilter {
     if (err instanceof ZodError) {
       return [HttpStatus.BAD_REQUEST, 'bad_request', err.issues.map((i) => `${i.path.join('.') || 'body'}: ${i.message}`).join('; ')];
     }
+    // body-parser failures (raised before routing)
+    const parserType = (err as { type?: unknown } | null)?.type;
+    if (parserType === 'entity.too.large') return [HttpStatus.PAYLOAD_TOO_LARGE, 'bad_request', 'Request body is too large'];
+    if (parserType === 'entity.parse.failed') return [HttpStatus.BAD_REQUEST, 'bad_request', 'Invalid JSON body'];
     if (err instanceof AccessError) return [HttpStatus.FORBIDDEN, 'access', err.message];
     if (err instanceof MissingRecordError) return [HttpStatus.NOT_FOUND, 'missing', err.message];
     if (err instanceof ValidationError) return [HttpStatus.UNPROCESSABLE_ENTITY, 'validation', err.message];

@@ -61,6 +61,15 @@ export function setRecordHooks(hooks: RecordHooks | undefined): void { installed
 export function recordHooks(): RecordHooks | undefined { return installedHooks; }
 
 /**
+ * Stored default values (ir.default-like) for a model, already resolved by scope precedence.
+ * Consulted after context `default_*` keys and before field defaults. Installed by the config service.
+ */
+export type DefaultsProvider = (env: EnvImpl, model: string) => Promise<ReadonlyMap<string, unknown> | undefined>;
+let installedDefaults: DefaultsProvider | undefined;
+export function setDefaultsProvider(provider: DefaultsProvider | undefined): void { installedDefaults = provider; }
+export function defaultsProvider(): DefaultsProvider | undefined { return installedDefaults; }
+
+/**
  * Execution environment. Envs are meant to be short-lived (one per request/job): the cache
  * only sees writes made through this env and its derivatives (sudo/withContext/transaction).
  * Writes from other envs or raw SQL are not visible to an already-populated cache.
