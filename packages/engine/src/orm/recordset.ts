@@ -84,8 +84,10 @@ export class RecordsetImpl implements Recordset {
     if (hidden.has(recName) && name) return [];
     if (recName === 'id' && name && (!/^[1-9][0-9]*$/.test(name) || Number(name) > 2_147_483_647)) return [];
     const field = recName;
+    const extra = (this.meta.def.nameSearchFields ?? []).filter((f) => f !== field && this.meta.fields.has(f) && !hidden.has(f));
+    const nameTerms: Domain = [...extra.map(() => '|' as const), [field, 'ilike', name] as const, ...extra.map((f) => [f, 'ilike', name] as const)];
     const searchDomain: Domain = name && field !== 'id'
-      ? [...domain, [field, 'ilike', name] as const]
+      ? [...domain, ...nameTerms]
       : name ? [...domain, ['id', '=', Number(name)]] : [...domain];
     const rows = await this.searchRead(searchDomain, ['display_name'], opts);
     return rows.map((row) => ({ id: row.id as number, display_name: String(row.display_name ?? row.id) }));
@@ -390,7 +392,7 @@ export class RecordsetImpl implements Recordset {
         for (const [fname, cmds] of x2many) await this.applyCommands(r.id, this.field(fname), cmds);
       }
       this.env.cache.invalidate();
-      if (this.hasParentPath()) await this.updateParentPaths();
+      if (this.hasParentPath()) for (const id of ids) await this.repathSubtree(id);
       await checkRecordRules(this.env, this.model, ids, 'create');
       const created = new RecordsetImpl(this.env, this.model, ids);
       // initial values of stored computed fields on the new records + anything depending on them
@@ -446,7 +448,7 @@ export class RecordsetImpl implements Recordset {
         if (rows.length !== this.ids.length) throw new MissingRecordError(`Some ${this.model} records no longer exist`);
       }
       for (const id of this.ids) for (const [fname, cmds] of x2many) await this.applyCommands(id, this.field(fname), cmds);
-      if (this.hasParentPath() && 'parent_id' in vals) await this.updateParentPaths();
+      if (this.hasParentPath() && 'parent_id' in vals) for (const id of this.ids) await this.repathSubtree(id);
       // the new values must keep the records inside the user's rules (e.g. no moving to another company)
       await checkRecordRules(this.env, this.model, this.ids, 'write');
       this.env.cache.invalidate();
@@ -467,10 +469,13 @@ export class RecordsetImpl implements Recordset {
       await checkRecordRules(this.env, this.model, this.ids, 'unlink');
       await recordHooks()?.beforeUnlink(this.env, this.model, this.ids);
       const { todo } = await cascadeAffected(this.env, this.model, this.ids);
+      const oldPaths = this.hasParentPath() ? (await this.env.db.query<{ parent_path: string | null }>({
+        text: `SELECT parent_path FROM "${this.table}" WHERE id = ANY($1)`, params: [[...this.ids]],
+      })).map((row) => row.parent_path) : [];
       await sqlCall(() => this.env.db.query({ text: `DELETE FROM "${this.table}" WHERE id = ANY($1)`, params: [[...this.ids]] }));
       // ON DELETE CASCADE / SET NULL may change rows of other models: drop the whole cache.
       this.env.cache.invalidate();
-      if (this.hasParentPath()) await this.updateParentPaths();
+      if (this.hasParentPath()) await this.repathOrphans(oldPaths);
       await validateRecomputed(this.env, await recompute(this.env, todo));
       await assertAdminRemains(this.env.db, adminCount);
     });
@@ -809,6 +814,48 @@ export class RecordsetImpl implements Recordset {
     return this.meta.fields.get('parent_id')?.type === 'many2one' &&
       this.meta.fields.get('parent_id')?.comodel === this.model &&
       ['char', 'text'].includes(this.meta.fields.get('parent_path')?.type ?? '');
+  }
+
+  /**
+   * Recompute parent_path of one record from its parent's stored path and rewrite its descendants'
+   * prefixes in one statement (only the affected subtree). Falls back to a full rebuild when paths
+   * are missing (legacy rows).
+   */
+  private async repathSubtree(id: number): Promise<void> {
+    const [row] = await this.env.db.query<{ parent_id: number | null; parent_path: string | null; parent_parent_path: string | null }>({
+      text: `SELECT t.parent_id, t.parent_path, p.parent_path AS parent_parent_path FROM "${this.table}" t LEFT JOIN "${this.table}" p ON p.id = t.parent_id WHERE t.id = $1`,
+      params: [id],
+    });
+    if (!row) return;
+    if (row.parent_id !== null && row.parent_parent_path === null) return this.updateParentPaths();
+    const parentPath = row.parent_id === null ? '' : row.parent_parent_path!;
+    if (row.parent_id === id || parentPath.split('/').includes(String(id))) throw new ValidationError('Parent hierarchy cannot contain a cycle');
+    const path = `${parentPath}${id}/`;
+    if (row.parent_path === path) return;
+    if (row.parent_path === null) {
+      await this.env.db.query({ text: `UPDATE "${this.table}" SET parent_path = $1 WHERE id = $2`, params: [path, id] });
+      const [child] = await this.env.db.query({ text: `SELECT 1 FROM "${this.table}" WHERE parent_id = $1 LIMIT 1`, params: [id] });
+      if (child) await this.updateParentPaths();
+    } else {
+      // paths contain only digits and '/', so LIKE needs no escaping
+      await this.env.db.query({
+        text: `UPDATE "${this.table}" SET parent_path = $1 || substr(parent_path, length($2::text) + 1) WHERE parent_path LIKE $2::text || '%'`,
+        params: [path, row.parent_path],
+      });
+    }
+    this.env.cache.invalidate(this.model);
+  }
+
+  /** After deletion: re-root surviving descendants of the deleted records (e.g. ondelete set null). */
+  private async repathOrphans(oldPaths: (string | null)[]): Promise<void> {
+    if (oldPaths.some((p) => p === null)) return this.updateParentPaths();
+    if (!oldPaths.length) return;
+    const survivors = await this.env.db.query<{ id: number; parent_id: number | null; parent_path: string }>({
+      text: `SELECT id, parent_id, parent_path FROM "${this.table}" WHERE parent_path LIKE ANY($1::text[])`,
+      params: [oldPaths.map((p) => `${p}%`)],
+    });
+    const ids = new Set(survivors.map((r) => r.id));
+    for (const r of survivors) if (r.parent_id === null || !ids.has(r.parent_id)) await this.repathSubtree(r.id);
   }
 
   private async updateParentPaths(): Promise<void> {

@@ -30,6 +30,13 @@ export {
   interpolateSequence, SEQUENCE_PLACEHOLDERS, type DefaultScope, type DefaultScopeOptions,
 } from './services/index.js';
 export { configModels, configAccess, configRules } from './base/config-models.js';
+export {
+  currencyRound, currencyIsZero, currencyCompareAmounts, currencyRate, currencyConvert,
+  precisionGet, roundDigits, roundPrecision, currencyModels, contextToday, type CurrencyRef,
+} from './base/currency.js';
+export { activateLang, activeLangCodes, withUserContext, langModels } from './base/lang.js';
+export { partnerModels } from './base/partner.js';
+export { countryModels } from './base/country.js';
 export { setDefaultsProvider, type DefaultsProvider } from './orm/env.js';
 export {
   DataExportService, DataImportService, ExportTemplateService, DATA_TRANSFER_LIMITS, ensureDataTransferTables, toCsv, parseCsv, convertScalar,

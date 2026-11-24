@@ -75,6 +75,8 @@ export interface ModelDef {
   delegates?: Record<string, string>; // Odoo _inherits: comodel -> m2o field
   order?: string;
   recName?: string;
+  /** Extra fields matched (OR) by nameSearch besides recName, e.g. ['email', 'vat']. */
+  nameSearchFields?: string[];
   fields: Record<string, FieldDef>;
   constraints?: ConstraintDef[];
   onchange?: Record<string, OnchangeFn | string>;

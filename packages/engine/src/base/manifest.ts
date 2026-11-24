@@ -1,6 +1,11 @@
 import type { ModuleManifest } from '../contracts/index.js';
 import { ACCESS_MANAGER, securityModels } from '../security/models.js';
 import { configAccess, configModels, configRules } from './config-models.js';
+import { countryData, countryModels } from './country.js';
+import { currencyData, currencyModels } from './currency.js';
+import { langData, langModels } from './lang.js';
+import { migrateBase110 } from './migrate.js';
+import { partnerAccess, partnerModels, partnerRules } from './partner.js';
 
 const all = { read: true, write: true, create: true, unlink: true };
 const readOnly = { read: true, write: false, create: false, unlink: false };
@@ -11,12 +16,18 @@ const readOnly = { read: true, write: false, create: false, unlink: false };
  */
 export const baseModule: ModuleManifest = {
   name: 'base',
-  version: '1.0.0',
-  summary: 'Companies, users, groups and access control',
+  version: '1.1.0',
+  summary: 'Companies, users, groups, access control, partners, currencies, countries and languages',
   depends: [],
-  models: [...securityModels, ...configModels],
+  models: [...securityModels, ...configModels, ...currencyModels, ...countryModels, ...langModels, ...partnerModels],
+  // Reference data is noUpdate: upgrades keep administrators' edits. Groups stay updatable because
+  // implied_ids drives security: an upgrade resets admin edits to base group names / implied groups
+  // (selective per-field noUpdate is a possible future refinement).
   data: [
-    { xmlId: 'main_company', model: 'res.company', values: { name: 'My Company' }, noUpdate: true },
+    ...currencyData,
+    ...countryData,
+    ...langData,
+    { xmlId: 'main_company', model: 'res.company', values: { name: 'My Company', currency_id: { ref: 'USD' } }, noUpdate: true },
     { xmlId: 'group_user', model: 'res.groups', values: { name: 'Internal User', code: 'base.group_user' } },
     {
       xmlId: 'group_erp_manager', model: 'res.groups',
@@ -34,6 +45,7 @@ export const baseModule: ModuleManifest = {
       },
     },
   ],
+  hooks: { migrate: { '1.1.0': migrateBase110 } },
   access: [
     { model: 'res.company', group: 'base.group_user', perms: readOnly },
     { model: 'res.company', group: 'base.group_system', perms: all },
@@ -42,6 +54,9 @@ export const baseModule: ModuleManifest = {
     { model: 'res.users', group: 'base.group_user', perms: { read: true, write: true, create: false, unlink: false } },
     { model: 'res.users', group: ACCESS_MANAGER, perms: all },
     ...configAccess,
+    ...partnerAccess,
+    ...['res.currency', 'res.currency.rate', 'decimal.precision', 'res.country', 'res.country.state', 'res.country.group', 'res.lang']
+      .flatMap((model) => [{ model, group: 'base.group_user', perms: readOnly }, { model, group: 'base.group_system', perms: all }]),
   ],
   rules: [
     // users may edit only their own record (privilege fields are additionally restricted by field groups)
@@ -54,6 +69,12 @@ export const baseModule: ModuleManifest = {
       perms: { read: false, write: true, create: true, unlink: true }, domain: [],
     },
     ...configRules,
+    ...partnerRules,
+    // company-specific currency rates are visible to (and editable within) the active companies only
+    {
+      name: 'res_currency_rate_company', model: 'res.currency.rate', groups: [], perms: all,
+      domain: ['|', ['company_id', '=', false], ['company_id', 'in', { $ctx: 'company_ids' } as never]],
+    },
   ],
   actions: [
     { xmlId: 'action_users', type: 'window', name: 'Users', model: 'res.users', viewTypes: ['list', 'form'] },
@@ -64,6 +85,10 @@ export const baseModule: ModuleManifest = {
     { xmlId: 'action_defaults', type: 'window', name: 'Default Values', model: 'ir.default', viewTypes: ['list', 'form'] },
     { xmlId: 'action_crons', type: 'window', name: 'Scheduled Actions', model: 'ir.cron', viewTypes: ['list', 'form'] },
     { xmlId: 'action_automations', type: 'window', name: 'Automation Rules', model: 'ir.automation', viewTypes: ['list', 'form'] },
+    { xmlId: 'action_currencies', type: 'window', name: 'Currencies', model: 'res.currency', viewTypes: ['list', 'form'] },
+    { xmlId: 'action_countries', type: 'window', name: 'Countries', model: 'res.country', viewTypes: ['list', 'form'] },
+    { xmlId: 'action_langs', type: 'window', name: 'Languages', model: 'res.lang', viewTypes: ['list', 'form'] },
+    { xmlId: 'action_decimal_precision', type: 'window', name: 'Decimal Accuracy', model: 'decimal.precision', viewTypes: ['list', 'form'] },
   ],
   menus: [
     { xmlId: 'menu_settings', name: 'Settings', sequence: 100, groups: ['base.group_system'] },
@@ -76,6 +101,10 @@ export const baseModule: ModuleManifest = {
     { xmlId: 'menu_defaults', name: 'Default Values', parent: 'menu_technical', action: 'action_defaults', sequence: 3 },
     { xmlId: 'menu_crons', name: 'Scheduled Actions', parent: 'menu_technical', action: 'action_crons', sequence: 4 },
     { xmlId: 'menu_automations', name: 'Automation Rules', parent: 'menu_technical', action: 'action_automations', sequence: 5 },
+    { xmlId: 'menu_currencies', name: 'Currencies', parent: 'menu_technical', action: 'action_currencies', sequence: 10 },
+    { xmlId: 'menu_countries', name: 'Countries', parent: 'menu_technical', action: 'action_countries', sequence: 11 },
+    { xmlId: 'menu_langs', name: 'Languages', parent: 'menu_technical', action: 'action_langs', sequence: 12 },
+    { xmlId: 'menu_decimal_precision', name: 'Decimal Accuracy', parent: 'menu_technical', action: 'action_decimal_precision', sequence: 13 },
   ],
   views: [
     {
