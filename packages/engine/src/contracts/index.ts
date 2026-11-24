@@ -44,6 +44,8 @@ export interface FieldDef {
   related?: string;           // dotted path e.g. 'partner_id.country_id'
   /** money */
   currencyField?: string;
+  /** Enforce company consistency for this many2one relation during create and write. */
+  checkCompany?: boolean;
   /** groups allowed to read the field */
   groups?: string[];
   /** groups allowed to WRITE the field (others may still read it); e.g. res.users.login */
@@ -158,6 +160,8 @@ export interface SearchOptions {
   order?: string;
 }
 
+export type GroupAggregate = { field: string; op: 'sum' | 'avg' | 'min' | 'max' | 'count' | 'count_distinct' };
+
 export interface Recordset {
   readonly env: Env;
   readonly model: string;
@@ -166,10 +170,15 @@ export interface Recordset {
   search(domain: Domain, opts?: SearchOptions): Promise<Recordset>;
   searchCount(domain: Domain): Promise<number>;
   searchRead(domain: Domain, fields?: string[], opts?: SearchOptions): Promise<Record<string, unknown>[]>;
+  nameSearch(name: string, domain?: Domain, opts?: SearchOptions): Promise<{ id: number; display_name: string }[]>;
+  readGroup(domain: Domain, groupBy: string[], aggregates: GroupAggregate[], opts?: SearchOptions): Promise<Record<string, unknown>[]>;
+  fieldsGet(fields?: string[]): Promise<Record<string, Record<string, unknown>>>;
+  defaultGet(fields: string[]): Promise<Record<string, unknown>>;
   read(fields?: string[]): Promise<Record<string, unknown>[]>;
   create(vals: Record<string, unknown> | Record<string, unknown>[]): Promise<Recordset>;
   write(vals: Record<string, unknown>): Promise<void>;
   unlink(): Promise<void>;
+  copy(defaults?: Record<string, unknown>): Promise<Recordset>;
   /** Remove transient records last updated before the cutoff; superuser only. */
   vacuum(before: Date): Promise<number>;
   call(method: string, ...args: unknown[]): Promise<unknown>;

@@ -185,13 +185,14 @@ describe('recordset CRUD on PGlite', () => {
     ]);
     // boolean false matches NULL
     await env.model('res.partner').create({ name: 'n-flag', active: false });
-    const names = async (d: Domain) =>
-      (await env.model('res.partner').searchRead(d, ['name'])).map((r) => r.name).filter((n) => String(n).startsWith('n-'));
+    const names = async (d: Domain, activeTest = false) =>
+      (await env.withContext({ activeTest }).model('res.partner').searchRead(d, ['name']))
+        .map((r) => r.name).filter((n) => String(n).startsWith('n-'));
     expect(await names([['vat', 'not in', ['X1']]])).toEqual(['n-null', 'n-flag']);
     expect(await names([['vat', 'not ilike', 'x']])).toEqual(['n-null', 'n-flag']);
     expect(await names([['vat', 'in', ['X1', false]]])).toEqual(['n-null', 'n-vat', 'n-flag']);
-    expect(await names([['active', '=', false]])).toEqual(['n-flag']);
-    expect(await names([['active', '!=', false]])).toEqual(['n-null', 'n-vat']);
+    expect(await names([['active', '=', false]], true)).toEqual(['n-flag']);
+    expect(await names([['active', '!=', false]], true)).toEqual(['n-null', 'n-vat']);
     await expect(env.model('res.partner').search([['credit_limit', '>', false]])).rejects.toThrow(/needs a value/);
   });
 

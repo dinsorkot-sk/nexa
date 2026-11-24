@@ -1,8 +1,9 @@
 import { Body, Controller, Get, HttpCode, Inject, Param, Post, UnauthorizedException } from '@nestjs/common';
 import { AccessError, getAction, getMenus, getView, MetadataStore, userSecurity, ValidationError, type Domain, type Env, type FieldDef, type ViewNode, type ViewType } from '@nexa/engine';
 import {
-  callRequestSchema, createRequestSchema, onchangeRequestSchema, readRequestSchema, searchCountRequestSchema,
-  searchReadRequestSchema, unlinkRequestSchema, writeRequestSchema,
+  callRequestSchema, copyRequestSchema, createRequestSchema, defaultGetRequestSchema, fieldsGetRequestSchema,
+  nameSearchRequestSchema, onchangeRequestSchema, readGroupRequestSchema, readRequestSchema, searchCountRequestSchema,
+  searchReadRequestSchema, unlinkRequestSchema, writeRequestSchema, type ModelRequestContext,
 } from '@nexa/shared';
 import { z } from 'zod';
 import { EngineService } from './engine.service';
@@ -73,8 +74,17 @@ export class EngineController {
     return this.engine.env(caller.tenant, caller.uid);
   }
 
-  private async model(caller: Caller, model: string) {
-    return (await this.env(caller)).model(modelName.parse(model));
+  private async model(caller: Caller, model: string, context?: ModelRequestContext) {
+    const env = await this.env(caller);
+    const name = modelName.parse(model);
+    if (!context) return env.model(name);
+    const { lang, activeTest, defaults } = context;
+    const fieldDefaults = Object.fromEntries(Object.entries(defaults ?? {}).map(([field, value]) => [`default_${field}`, value]));
+    return env.withContext({
+      ...(lang !== undefined ? { lang } : {}),
+      ...(activeTest !== undefined ? { activeTest } : {}),
+      ...fieldDefaults,
+    }).model(name);
   }
 
   private async studio(caller: Caller) {
@@ -203,7 +213,7 @@ export class EngineController {
   @HttpCode(200)
   async searchRead(@CallerParam() c: Caller, @Param('model') model: string, @Body() body: unknown) {
     const req = searchReadRequestSchema.parse(body ?? {});
-    const m = await this.model(c, model);
+    const m = await this.model(c, model, req.context);
     const opts = { offset: req.offset, limit: req.limit, ...(req.order ? { order: req.order } : {}) };
     const [records, length] = await Promise.all([
       m.searchRead(req.domain as Domain, req.fields, opts),
@@ -216,28 +226,67 @@ export class EngineController {
   @HttpCode(200)
   async searchCount(@CallerParam() c: Caller, @Param('model') model: string, @Body() body: unknown) {
     const req = searchCountRequestSchema.parse(body ?? {});
-    return { count: await (await this.model(c, model)).searchCount(req.domain as Domain) };
+    return { count: await (await this.model(c, model, req.context)).searchCount(req.domain as Domain) };
   }
 
   @Post('model/:model/read')
   @HttpCode(200)
   async read(@CallerParam() c: Caller, @Param('model') model: string, @Body() body: unknown) {
     const req = readRequestSchema.parse(body);
-    return { records: await (await this.model(c, model)).browse(req.ids).read(req.fields) };
+    return { records: await (await this.model(c, model, req.context)).browse(req.ids).read(req.fields) };
   }
 
   @Post('model/:model/create')
   @HttpCode(200)
   async create(@CallerParam() c: Caller, @Param('model') model: string, @Body() body: unknown) {
     const req = createRequestSchema.parse(body);
-    return { ids: (await (await this.model(c, model)).create(req.values)).ids };
+    return { ids: (await (await this.model(c, model, req.context)).create(req.values)).ids };
+  }
+
+  @Post('model/:model/name_search')
+  @HttpCode(200)
+  async nameSearch(@CallerParam() c: Caller, @Param('model') model: string, @Body() body: unknown) {
+    const req = nameSearchRequestSchema.parse(body ?? {});
+    const records = await (await this.model(c, model, req.context)).nameSearch(req.name, req.domain as Domain, { limit: req.limit });
+    return { records };
+  }
+
+  @Post('model/:model/read_group')
+  @HttpCode(200)
+  async readGroup(@CallerParam() c: Caller, @Param('model') model: string, @Body() body: unknown) {
+    const req = readGroupRequestSchema.parse(body ?? {});
+    const groups = await (await this.model(c, model, req.context)).readGroup(req.domain as Domain, req.groupBy, req.aggregates, {
+      limit: req.limit, offset: req.offset,
+    });
+    return { groups };
+  }
+
+  @Post('model/:model/fields_get')
+  @HttpCode(200)
+  async fieldsGet(@CallerParam() c: Caller, @Param('model') model: string, @Body() body: unknown) {
+    const req = fieldsGetRequestSchema.parse(body ?? {});
+    return { fields: await (await this.model(c, model, req.context)).fieldsGet(req.fields) };
+  }
+
+  @Post('model/:model/default_get')
+  @HttpCode(200)
+  async defaultGet(@CallerParam() c: Caller, @Param('model') model: string, @Body() body: unknown) {
+    const req = defaultGetRequestSchema.parse(body);
+    return { values: await (await this.model(c, model, req.context)).defaultGet(req.fields) };
+  }
+
+  @Post('model/:model/copy')
+  @HttpCode(200)
+  async copy(@CallerParam() c: Caller, @Param('model') model: string, @Body() body: unknown) {
+    const req = copyRequestSchema.parse(body);
+    return { ids: (await (await this.model(c, model, req.context)).browse(req.id).copy(req.defaults)).ids };
   }
 
   @Post('model/:model/write')
   @HttpCode(200)
   async write(@CallerParam() c: Caller, @Param('model') model: string, @Body() body: unknown) {
     const req = writeRequestSchema.parse(body);
-    await (await this.model(c, model)).browse(req.ids).write(req.values);
+    await (await this.model(c, model, req.context)).browse(req.ids).write(req.values);
     return { ok: true };
   }
 
@@ -253,7 +302,7 @@ export class EngineController {
   @HttpCode(200)
   async onchange(@CallerParam() c: Caller, @Param('model') model: string, @Body() body: unknown) {
     const req = onchangeRequestSchema.parse(body);
-    return { value: await (await this.model(c, model)).onchange(req.values, req.field) };
+    return { value: await (await this.model(c, model, req.context)).onchange(req.values, req.field) };
   }
 
   /**

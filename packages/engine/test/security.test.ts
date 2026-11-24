@@ -13,9 +13,12 @@ const models: ModelDef[] = [
     name: 'note', origin: 'module',
     fields: {
       name: { type: 'char' },
+      active: { type: 'boolean', default: true },
       owner_id: { type: 'many2one', comodel: 'res.users' },
       company_id: { type: 'many2one', comodel: 'res.company' },
       secret: { type: 'char', groups: ['base.group_manager'] },
+      trusted_default: { type: 'char', default: 'system-value', writeGroups: ['base.group_manager'] },
+      restricted_default: { type: 'char', writeGroups: ['base.group_manager'] },
       line_ids: { type: 'one2many', comodel: 'note.line', inverseName: 'note_id' },
       tag_ids: { type: 'many2many', comodel: 'note.tag' },
       secret_alias: { type: 'char', related: 'owner_id.login' },
@@ -77,6 +80,7 @@ describe('ACL', () => {
   it('denies models without access rows and users without groups', async () => {
     await expect(as(id.alice).model('unprotected').search([])).rejects.toThrow(AccessError);
     await expect(as(id.nobody).model('note').search([])).rejects.toThrow(AccessError);
+    await expect(as(id.nobody).model('note').defaultGet([])).rejects.toThrow(AccessError);
   });
   it('grants per operation and through implied groups', async () => {
     const alice = as(id.alice).model('note');
@@ -88,6 +92,18 @@ describe('ACL', () => {
   it('rejects archived and unknown users', async () => {
     await expect(as(id.ghost).model('note').search([])).rejects.toThrow(/archived/);
     await expect(as(9999).model('note').search([])).rejects.toThrow(/does not exist/);
+  });
+
+  it('reads and unarchives an explicitly addressed archived record under record rules', async () => {
+    const note = as(id.alice).model('note');
+    const [recordId] = (await note.search([['name', '=', 'alice-c1']])).ids;
+    await note.browse(recordId).write({ active: false });
+    await expect(note.search([['name', '=', 'alice-c1']])).resolves.toMatchObject({ ids: [] });
+    await expect(note.browse(recordId).read(['name', 'active'])).resolves.toEqual([
+      expect.objectContaining({ name: 'alice-c1', active: false }),
+    ]);
+    await note.browse(recordId).write({ active: true });
+    await expect(note.browse(recordId).read(['active'])).resolves.toEqual([expect.objectContaining({ active: true })]);
   });
 });
 
@@ -132,6 +148,13 @@ describe('field groups', () => {
     await expect(alice.create({ name: 'n', owner_id: id.alice, secret: 'x' })).rejects.toThrow(/restricted/);
     const bob = await as(id.bob, [id.c1]).model('note').searchRead([['name', '=', 'alice-c1']], ['secret']);
     expect(bob[0].secret).toBe('s1');
+  });
+  it('allows trusted field defaults while rejecting restricted context default injection', async () => {
+    const trusted = await as(id.alice).model('note').create({ name: 'trusted-default', owner_id: id.alice });
+    expect((await root.model('note').browse(trusted.ids[0]).read(['trusted_default']))[0].trusted_default).toBe('system-value');
+    await expect(as(id.alice).withContext({ default_restricted_default: 'injected' }).model('note')
+      .create({ name: 'injected-default', owner_id: id.alice })).rejects.toThrow(AccessError);
+    expect(await root.model('note').searchCount([['name', '=', 'injected-default']])).toBe(0);
   });
 });
 

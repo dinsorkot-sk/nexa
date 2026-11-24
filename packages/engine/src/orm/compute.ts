@@ -86,7 +86,7 @@ export async function affected(env: EnvImpl, model: string, fields: ReadonlySet<
   const su = env.sudo() as EnvImpl;
   for (const t of triggers) {
     if (fields !== 'all' && !fields.has(t.field)) continue;
-    const targetIds = t.prefix === '' ? ids : (await su.model(t.target).search([[t.prefix, 'in', [...ids]]])).ids;
+    const targetIds = t.prefix === '' ? ids : (await su.withContext({ activeTest: false }).model(t.target).search([[t.prefix, 'in', [...ids]]])).ids;
     if (targetIds.length) mergeTodo(todo, new Map([[t.target, new Map([[t.computed, new Set(targetIds)]])]]));
   }
   return todo;
@@ -111,7 +111,7 @@ export async function recompute(env: EnvImpl, todo: Todo, done: Todo = new Map()
     const meta = env.registry.get(model);
     const allIds = [...new Set([...fields.values()].flatMap((s) => [...s]))];
     // skip records deleted in the meantime
-    const alive = new Set((await su.model(model).search([['id', 'in', allIds]])).ids);
+    const alive = new Set((await su.withContext({ activeTest: false }).model(model).search([['id', 'in', allIds]])).ids);
     for (const [fname, idSet] of fields) {
       const ids = [...idSet].filter((id) => alive.has(id));
       if (!ids.length) continue;
@@ -149,7 +149,7 @@ export async function cascadeAffected(
       if (!child.table) continue;
       for (const f of child.fields.values() as Iterable<ResolvedField>) {
         if (f.type !== 'many2one' || f.comodel !== m || !isColumnField(f)) continue;
-        const rows = (await su.model(child.name).search([[f.name, 'in', fresh]])).ids;
+        const rows = (await su.withContext({ activeTest: false }).model(child.name).search([[f.name, 'in', fresh]])).ids;
         if (!rows.length) continue;
         if ((f.ondelete ?? 'set null') === 'cascade') queue.push([child.name, [...rows]]);
         else if (f.ondelete !== 'restrict') mergeTodo(todo, await affected(su, child.name, new Set([f.name]), rows));

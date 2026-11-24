@@ -162,12 +162,20 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
     for (const f of m.fields.values() as Iterable<ResolvedField>) {
       if (f.delegated) continue;
       resolveRelational(out, m, f);
+      if (f.checkCompany && f.type !== 'many2one') throw new EngineError(`checkCompany on '${m.name}.${f.name}' requires a many2one field`);
       if (f.currencyField) {
         const currency = m.fields.get(f.currencyField);
         const rounding = currency?.comodel ? out.get(currency.comodel)?.fields.get('rounding') : undefined;
         if (f.type !== 'monetary' || !!f.compute || !!f.related || !!currency?.delegated || currency?.type !== 'many2one' || !rounding || !['float', 'monetary'].includes(rounding.type)) {
           throw new EngineError(`Monetary field '${m.name}.${f.name}' needs a currency many2one with a numeric rounding field`);
         }
+      }
+    }
+    if (m.fields.has('parent_path')) {
+      const path = m.fields.get('parent_path')!;
+      const parent = m.fields.get('parent_id');
+      if (!['char', 'text'].includes(path.type) || !parent || parent.type !== 'many2one' || parent.comodel !== m.name) {
+        throw new EngineError(`Model '${m.name}' parent_path requires a char/text field and a self many2one parent_id`);
       }
     }
   }

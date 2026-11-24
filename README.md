@@ -36,10 +36,18 @@ curl -s -X POST localhost:3001/api/model/res.users/search_read \
 |---|---|
 | `POST /api/model/:model/search_read` | `{domain, fields, offset, limit, order}` → `{records, length}` |
 | `POST /api/model/:model/search_count` · `read` · `create` · `write` · `unlink` · `onchange` | CRUD ตาม contract ใน `@nexa/shared` |
+| `POST /api/model/:model/name_search` | `{name, domain, limit, context}` → `{records: [{id, display_name}]}` |
+| `POST /api/model/:model/read_group` | `{domain, groupBy, aggregates, offset, limit, context}` → `{groups}` แต่ละกลุ่มมี `__count` และผล aggregate ชื่อ `<field>_<op>` |
+| `POST /api/model/:model/fields_get` · `default_get` | รับ `fields` และคืน metadata ที่ผู้ใช้เห็นได้หรือค่าเริ่มต้นของฟิลด์ที่ขอ |
+| `POST /api/model/:model/copy` | `{id, defaults, context}` → `{ids}` โดยสร้าง record ใหม่ผ่าน ORM |
 | `POST /api/model/:model/call/:method` | เรียก method ที่ประกาศใน model เท่านั้น |
 | `GET /api/ui/view/:model/:type` · `/api/ui/action/:xmlId` · `/api/ui/menus` | metadata สำหรับ UI ตามสิทธิ์ผู้ใช้ |
 
 ข้อผิดพลาดตอบเป็น `{error: {type, message}}`: 400 คำขอผิดรูป, 401 ไม่ได้ยืนยันตัวตน, 403 ไม่มีสิทธิ์, 404 ไม่พบ record, 422 ข้อมูลไม่ผ่านการตรวจ
+
+ส่ง `context: {activeTest: false}` ในคำขอค้นหาเพื่อนับและอ่าน record ที่ archive แล้ว ส่ง `context: {defaults: {field: value}}` ใน `default_get` หรือ `create` เพื่อกำหนดค่าเริ่มต้น โดยค่าที่ส่งใน `create.values` มีลำดับสูงกว่า
+
+`read_group` รองรับช่วงเวลา `day`, `week`, `month`, `quarter` และ `year` เช่น `groupBy: ["create_date:month"]` สำหรับการจัดกลุ่มตามเดือน การจัดกลุ่ม datetime ใช้ UTC
 
 ### ทดลอง Contacts และ Sales
 

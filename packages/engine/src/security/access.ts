@@ -37,7 +37,7 @@ async function load(env: EnvImpl): Promise<UserSecurity> {
     throw new AccessError('Security models are not installed; only superuser environments can run');
   }
   const su = env.sudo();
-  const rows = await su.model('res.users').search([['id', '=', env.uid]]);
+  const rows = await su.withContext({ activeTest: false }).model('res.users').search([['id', '=', env.uid]]);
   if (!rows.ids.length) throw new AccessError(`User ${env.uid} does not exist`);
   const [u] = await rows.read(['active', 'company_id', 'company_ids', 'group_ids']);
   if (!u.active) throw new AccessError(`User ${env.uid} is archived`);
@@ -143,12 +143,12 @@ export async function readRuleResolver(env: EnvImpl): Promise<((model: string) =
 export async function checkRecordRules(env: EnvImpl, model: string, ids: readonly number[], op: AccessOperation): Promise<void> {
   if (env.su || ids.length === 0) return;
   if (env.registry.get(model).def.transient) {
-    const own = await env.sudo().model(model).searchCount([['id', 'in', [...ids]], ['create_uid', '=', env.uid]]);
+    const own = await env.sudo().withContext({ activeTest: false }).model(model).searchCount([['id', 'in', [...ids]], ['create_uid', '=', env.uid]]);
     if (own !== new Set(ids).size) throw new AccessError(`Transient records of '${model}' belong to another user`);
   }
   const rule = await ruleDomain(env, model, op);
   if (!rule) return;
-  const ok = await env.sudo().withContext({ lang: 'en_US' }).model(model).searchCount(combine('&', [[['id', 'in', [...ids]]], rule]));
+  const ok = await env.sudo().withContext({ lang: 'en_US', activeTest: false }).model(model).searchCount(combine('&', [[['id', 'in', [...ids]]], rule]));
   if (ok !== new Set(ids).size) {
     throw new AccessError(`Record rules forbid ${op} on some '${model}' records (user ${env.uid})`);
   }

@@ -116,6 +116,69 @@ describe('model RPC', () => {
     expect((await post('/api/model/res.company/unlink', admin, { ids: [cid] })).status).toBe(200);
     expect((await post('/api/model/res.company/search_count', admin, { domain: [['id', '=', cid]] })).body).toEqual({ count: 0 });
   });
+
+  it('serves ORM metadata, context defaults, display names, grouped reads and copies', async () => {
+    const defaults = await post('/api/model/res.company/default_get', admin, {
+      fields: ['name'], context: { defaults: { name: 'Team T16' } },
+    });
+    expect(defaults).toEqual({ status: 200, body: { values: { name: 'Team T16' } } });
+    const created = await post('/api/model/res.company/create', admin, {
+      values: {}, context: { defaults: { name: 'Team T16' } },
+    });
+    expect(created.status).toBe(200);
+    const [id] = created.body.ids as number[];
+    const copied = await post('/api/model/res.company/copy', admin, { id, defaults: { name: 'Team T16 Copy' } });
+    expect(copied.status).toBe(200);
+    const [copyId] = copied.body.ids as number[];
+    expect(copyId).not.toBe(id);
+    expect(await post('/api/model/res.company/name_search', admin, { name: 'Team T16' })).toMatchObject({
+      status: 200, body: { records: expect.arrayContaining([
+        { id, display_name: 'Team T16' }, { id: copyId, display_name: 'Team T16 Copy' },
+      ]) },
+    });
+    expect(await post('/api/model/res.company/read_group', admin, {
+      groupBy: ['name'], domain: [['id', 'in', [id, copyId]]], aggregates: [{ field: 'id', op: 'count' }],
+    })).toMatchObject({
+      status: 200, body: { groups: expect.arrayContaining([
+        { name: 'Team T16', __count: 1, id_count: 1 }, { name: 'Team T16 Copy', __count: 1, id_count: 1 },
+      ]) },
+    });
+    expect(await post('/api/model/res.company/read_group', admin, {
+      domain: [['id', 'in', [id, copyId]]],
+    })).toEqual({ status: 200, body: { groups: [{ __count: 2 }] } });
+    const metadata = await post('/api/model/res.users/fields_get', bob, { fields: ['name', 'group_ids'] });
+    expect(metadata).toMatchObject({ status: 200, body: { fields: { name: { type: 'char' } } } });
+    expect(metadata.body.fields).not.toHaveProperty('group_ids');
+    expect((await post('/api/model/res.company/read_group', admin, {
+      aggregates: [{ field: 'id', op: 'median' }],
+    })).status).toBe(400);
+    expect((await post('/api/model/res.company/default_get', admin, {
+      fields: ['name'], context: { uid: 1 },
+    })).status).toBe(400);
+    expect((await post('/api/model/res.company/copy', bob, { id })).status).toBe(403);
+    expect((await post('/api/model/res.users/read_group', bob, {
+      aggregates: [{ field: 'group_ids', op: 'count' }],
+    })).status).toBe(403);
+  });
+
+  it('keeps archived rows out of search and count unless requested', async () => {
+    expect((await post('/api/model/res.users/write', admin, { ids: [bob], values: { active: false } })).status).toBe(200);
+    try {
+      const query = { domain: [['id', '=', bob]], fields: ['display_name'] };
+      expect(await post('/api/model/res.users/search_read', admin, query)).toEqual({
+        status: 200, body: { records: [], length: 0 },
+      });
+      expect(await post('/api/model/res.users/search_read', admin, { ...query, context: { activeTest: false } })).toEqual({
+        status: 200, body: { records: [{ id: bob, display_name: 'Bobby' }], length: 1 },
+      });
+      expect(await post('/api/model/res.users/read', admin, { ids: [bob], fields: ['active'] })).toEqual({
+        status: 200, body: { records: [{ id: bob, active: false }] },
+      });
+      expect((await post('/api/model/res.users/search_count', admin, { domain: [['id', '=', bob], '!'] })).status).toBe(400);
+    } finally {
+      expect((await post('/api/model/res.users/write', admin, { ids: [bob], values: { active: true } })).status).toBe(200);
+    }
+  });
 });
 
 describe('UI metadata', () => {
@@ -140,7 +203,7 @@ describe('no-code Studio', () => {
     const created = await post('/api/studio/model', admin, { name: 'x_studio_task', description: 'Tasks' });
     expect(created.status).toBe(200);
     expect(await post('/api/studio/field', admin, {
-      model: 'x_studio_task', name: 'x_title', type: 'char', label: 'Title',
+      model: 'x_studio_task', name: 'x_title', type: 'char', label: 'Title', translate: true,
     })).toMatchObject({ status: 200, body: { field: 'x_title' } });
     expect(await post('/api/studio/field', admin, {
       model: 'x_studio_task', name: 'x_cost', type: 'float', digits: [9, 2], copy: false, aggregator: 'sum',
@@ -167,8 +230,17 @@ describe('no-code Studio', () => {
     const generated = await call('GET', '/api/ui/view/x_studio_task/list', admin);
     expect(generated.body).toMatchObject({ xmlId: 'studio.x_task_list' });
     const [id] = (await post('/api/model/x_studio_task/create', admin, { values: { x_title: 'Draft' } })).body.ids as number[];
+    expect(await post('/api/model/x_studio_task/write', admin, {
+      ids: [id], values: { x_title: 'ร่าง' }, context: { lang: 'th_TH' },
+    })).toEqual({ status: 200, body: { ok: true } });
+    expect(await post('/api/model/x_studio_task/read', admin, {
+      ids: [id], fields: ['x_title'], context: { lang: 'th_TH' },
+    })).toEqual({ status: 200, body: { records: [{ id, x_title: 'ร่าง' }] } });
     expect((await post('/api/model/x_studio_task/read', admin, { ids: [id], fields: ['x_title'] })).body.records)
       .toEqual([{ id, x_title: 'Draft' }]);
+    expect((await post('/api/model/x_studio_task/read', admin, {
+      ids: [id], fields: ['x_title'], context: { lang: 'a'.repeat(33) },
+    })).status).toBe(400);
   });
 
   it('rejects malformed Studio views without storing them and checks tenant access', async () => {

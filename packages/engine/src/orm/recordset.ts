@@ -1,13 +1,13 @@
 import {
   AccessError, EngineError, MissingRecordError, ValidationError,
-  type AccessOperation, type Domain, type Recordset, type ResolvedModel, type SearchOptions, type X2ManyCommand,
+  type AccessOperation, type Domain, type GroupAggregate, type Recordset, type ResolvedModel, type SearchOptions, type X2ManyCommand,
 } from '../contracts/index.js';
 import { compileDomain, compileOrder } from '../domain/compile.js';
 import { affected, cascadeAffected, computeValues, isComputed, isStoredComputed, mergeTodo, recompute, type Todo } from './compute.js';
 import type { EnvImpl } from './env.js';
 import { roundMonetary } from './decimal.js';
 import { isColumn, translationLanguage, type ResolvedField } from './registry.js';
-import { checkModelAccess, checkRecordRules, hiddenFields, readRuleResolver, ruleDomain, userSecurity } from '../security/access.js';
+import { checkModelAccess, checkRecordRules, combine, hiddenFields, readRuleResolver, ruleDomain, userSecurity } from '../security/access.js';
 
 const MAGIC = new Set(['id', 'create_date', 'write_date', 'create_uid', 'write_uid']);
 const MAX_ONCHANGE_ROUNDS = 10;
@@ -50,7 +50,7 @@ export class RecordsetImpl implements Recordset {
   async search(domain: Domain, opts: SearchOptions = {}): Promise<Recordset> {
     await this.checkAccess('read');
     const params: unknown[] = [];
-    const where = await this.whereClause(domain, params);
+    const where = await this.whereClause(this.activeDomain(domain), params);
     let text = `SELECT t.id FROM "${this.table}" t WHERE ${where} ORDER BY ${compileOrder(this.meta, opts.order, 't', this.env.context.lang)}`;
     if (opts.limit !== undefined) text += ` LIMIT ${nonNegInt(opts.limit, 'limit')}`;
     if (opts.offset) text += ` OFFSET ${nonNegInt(opts.offset, 'offset')}`;
@@ -61,7 +61,7 @@ export class RecordsetImpl implements Recordset {
   async searchCount(domain: Domain): Promise<number> {
     await this.checkAccess('read');
     const params: unknown[] = [];
-    const where = await this.whereClause(domain, params);
+    const where = await this.whereClause(this.activeDomain(domain), params);
     const [row] = await this.env.db.query<{ n: number }>({
       text: `SELECT COUNT(*)::int AS n FROM "${this.table}" t WHERE ${where}`, params,
     });
@@ -70,6 +70,195 @@ export class RecordsetImpl implements Recordset {
 
   async searchRead(domain: Domain, fields?: string[], opts?: SearchOptions): Promise<Vals[]> {
     return (await this.search(domain, opts)).read(fields);
+  }
+
+  async nameSearch(name: string, domain: Domain = [], opts: SearchOptions = {}): Promise<{ id: number; display_name: string }[]> {
+    await this.checkAccess('read');
+    compileDomain(this.env.registry, this.meta, domain, [], 't', undefined, this.env.context.lang);
+    if (typeof name !== 'string') throw new ValidationError('Name search expects text');
+    const recName = this.meta.def.recName ?? (this.meta.fields.has('name') ? 'name' : 'id');
+    const hidden = await hiddenFields(this.env, this.model);
+    if (hidden.has(recName) && name) return [];
+    if (recName === 'id' && name && (!/^[1-9][0-9]*$/.test(name) || Number(name) > 2_147_483_647)) return [];
+    const field = recName;
+    const searchDomain: Domain = name && field !== 'id'
+      ? [...domain, [field, 'ilike', name] as const]
+      : name ? [...domain, ['id', '=', Number(name)]] : [...domain];
+    const rows = await this.searchRead(searchDomain, ['display_name'], opts);
+    return rows.map((row) => ({ id: row.id as number, display_name: String(row.display_name ?? row.id) }));
+  }
+
+  async readGroup(domain: Domain, groupBy: string[], aggregates: GroupAggregate[], opts: SearchOptions = {}): Promise<Vals[]> {
+    await this.checkAccess('read');
+    if (groupBy.length > 8) throw new ValidationError('readGroup supports at most eight grouping fields');
+    const hidden = await hiddenFields(this.env, this.model);
+    const groups = groupBy.map((spec) => {
+      const [name, granularity] = spec.split(':');
+      const field = this.field(name);
+      if (hidden.has(name)) throw new AccessError(`Field '${this.model}.${name}' is restricted`);
+      if (field.delegated || (field.related && !field.store) || (field.compute && !field.store) || !isColumn(field)) {
+        throw new ValidationError(`Field '${name}' cannot be grouped`);
+      }
+      if (granularity && (!['date', 'datetime'].includes(field.type) || !['day', 'week', 'month', 'quarter', 'year'].includes(granularity))) {
+        throw new ValidationError(`Invalid date group '${spec}'`);
+      }
+      return { field, name, granularity };
+    });
+    for (const aggregate of aggregates) {
+      if (!['sum', 'avg', 'min', 'max', 'count', 'count_distinct'].includes(aggregate.op)) throw new ValidationError('Unsupported group aggregate');
+      const field = this.field(aggregate.field);
+      if (hidden.has(aggregate.field)) throw new AccessError(`Field '${this.model}.${aggregate.field}' is restricted`);
+      if (!isColumn(field) || field.delegated || field.type === 'one2many' || field.type === 'many2many') {
+        throw new ValidationError(`Field '${aggregate.field}' cannot be aggregated`);
+      }
+      if (aggregate.op !== 'count' && !['integer', 'float', 'monetary'].includes(field.type)) throw new ValidationError(`Aggregate '${aggregate.op}' requires a numeric field`);
+    }
+    const params: unknown[] = [];
+    const where = await this.whereClause(this.activeDomain(domain), params);
+    const expressions = groups.map((group) => {
+      let expression = `t."${group.name}"`;
+      if (group.field.translate) {
+        const language = params.push(this.env.context.lang ?? 'en_US');
+        expression = `COALESCE(t."${group.name}"->>$${language}::text, t."${group.name}"->>'en_US')`;
+      }
+      if (group.granularity) {
+        const value = group.field.type === 'datetime' ? `timezone('UTC', ${expression})` : `${expression}::timestamp`;
+        expression = `date_trunc('${group.granularity}', ${value})`;
+      }
+      return expression;
+    });
+    const select = expressions.map((expression, index) => expression + ' AS "group_' + index + '"').join(', ');
+    const values = aggregates.map((aggregate) => {
+      const column = `t."${aggregate.field}"`;
+      const fn = aggregate.op === 'count_distinct' ? 'COUNT(DISTINCT' : aggregate.op === 'count' ? 'COUNT' : aggregate.op.toUpperCase();
+      const close = aggregate.op === 'count_distinct' ? ')' : '';
+      return `${fn}(${column})${close} AS "__agg_${aggregates.indexOf(aggregate)}"`;
+    });
+    params.push(nonNegInt(opts.limit ?? 100, 'limit'));
+    const limit = params.length;
+    params.push(nonNegInt(opts.offset ?? 0, 'offset'));
+    const projections = [select, 'COUNT(*)::int AS "__count"', ...values].filter(Boolean).join(', ');
+    const rows = await this.env.db.query<Vals>({
+      text: 'SELECT ' + projections +
+        ' FROM "' + this.table + '" t WHERE ' + where + (expressions.length ? ' GROUP BY ' + expressions.join(', ') : '') +
+        (select || values.length ? ' ORDER BY ' + (groups.length
+          ? groups.map((_, index) => '"group_' + index + '"').join(', ')
+          : values.map((_, index) => '"__agg_' + index + '"').join(', ')) : '') +
+        ' LIMIT $' + limit + ' OFFSET $' + params.length,
+      params,
+    });
+    return rows.map((row) => Object.fromEntries([
+      ...groups.map((group, index) => [group.granularity ? group.name + ':' + group.granularity : group.name, row['group_' + index]]),
+      ['__count', row.__count],
+      ...aggregates.map((aggregate, index) => {
+        const value = row['__agg_' + index];
+        const numeric = typeof value === 'string' && ['count', 'count_distinct'].includes(aggregate.op) ? Number(value) : value;
+        return [aggregate.field + '_' + aggregate.op, typeof numeric === 'number' && !Number.isSafeInteger(numeric) ? value : numeric];
+      }),
+    ]));
+  }
+
+  async fieldsGet(fields?: string[]): Promise<Record<string, Record<string, unknown>>> {
+    await this.checkAccess('read');
+    const hidden = await hiddenFields(this.env, this.model);
+    const selected = fields ?? [...this.meta.fields.keys()];
+    const result: Record<string, Record<string, unknown>> = {};
+    for (const name of selected) {
+      if (name === 'display_name' && !this.meta.fields.has(name)) continue;
+      const field = this.field(name);
+      if (hidden.has(name)) continue;
+      result[name] = {
+        type: field.type,
+        string: field.string ?? name,
+        required: !!field.required,
+        readonly: !!field.readonly || !!field.compute || !!field.related,
+        ...(field.comodel ? { relation: field.comodel } : {}),
+        ...(field.selection ? { selection: field.selection } : {}),
+        ...(field.translate ? { translate: true } : {}),
+        ...(field.digits ? { digits: field.digits } : {}),
+      };
+    }
+    if ((!fields || fields.includes('display_name')) && !this.meta.fields.has('display_name')) {
+      result.display_name = { type: 'char', string: 'Display Name', readonly: true };
+    }
+    return result;
+  }
+
+  async defaultGet(fields: string[]): Promise<Vals> {
+    await this.checkAccess('read');
+    const hidden = await hiddenFields(this.env, this.model);
+    const out: Vals = {};
+    for (const name of fields) {
+      const field = this.field(name);
+      if (hidden.has(name)) throw new AccessError(`Field '${this.model}.${name}' is restricted`);
+      if (field.compute || field.related || MAGIC.has(name) || name === 'parent_path') continue;
+      const contextValue = this.env.context['default_' + name];
+      if (contextValue !== undefined) out[name] = contextValue;
+      else if (field.default !== undefined) out[name] = typeof field.default === 'function'
+        ? await (field.default as (env: unknown) => unknown)(this.env)
+        : field.default;
+    }
+    return out;
+  }
+
+  async copy(defaults: Vals = {}): Promise<Recordset> {
+    if (this.ids.length !== 1) throw new ValidationError('Copy requires exactly one source record');
+    return this.env.transaction(async () => {
+      const source = new RecordsetImpl(this.env.withContext({ activeTest: false }) as EnvImpl, this.model, this.ids);
+      const values = await source.copyValues(defaults, new Set());
+      return this.env.model(this.model).create(values);
+    });
+  }
+
+  private async copyValues(defaults: Vals, ancestors: Set<string>, inverse?: string): Promise<Vals> {
+    await this.checkAccess('read');
+    await this.checkAccess('create');
+    const key = `${this.model}:${this.ids[0]}`;
+    if (ancestors.has(key)) throw new ValidationError('Cannot copy a cyclic one2many hierarchy');
+    const delegates = new Set(Object.values(this.meta.def.delegates ?? {}));
+    const linkedParents = new Set([...delegates].filter((link) => link === inverse || (defaults[link] != null && defaults[link] !== false)));
+    for (const name of Object.keys(defaults)) {
+      const route = this.meta.fields.get(name)?.delegated;
+      if (route && linkedParents.has(route.via)) {
+        throw new ValidationError(`Cannot override delegated field '${name}' when linking an existing parent`);
+      }
+    }
+    const hidden = await hiddenFields(this.env, this.model);
+    const fields = [...this.meta.fields.values()]
+      .filter((field) => !hidden.has(field.name) && !MAGIC.has(field.name) && field.name !== 'parent_path' &&
+        field.name !== inverse && !Object.hasOwn(defaults, field.name) && !delegates.has(field.name) &&
+        !linkedParents.has(field.delegated?.via ?? '') &&
+        !isComputed(field as ResolvedField) && field.copy !== false)
+      .map((field) => field.name);
+    const [source] = await this.read(fields);
+    const values: Vals = { ...defaults };
+    for (const link of delegates) {
+      if (link !== inverse && !Object.hasOwn(defaults, link)) values[link] = null;
+    }
+    const path = new Set(ancestors).add(key);
+    for (const name of fields) {
+      const field = this.meta.fields.get(name)!;
+      const value = source[name];
+      if (value === undefined) continue;
+      if (field.type === 'one2many' && field.inverseName) {
+        const commands: X2ManyCommand[] = [];
+        for (const id of value as number[]) {
+          const child = new RecordsetImpl(this.env, field.comodel!, [id]);
+          commands.push({ op: 'create', values: await child.copyValues({}, path, field.inverseName) });
+        }
+        values[name] = commands;
+      } else {
+        values[name] = value;
+      }
+    }
+    return values;
+  }
+
+  private activeDomain(domain: Domain): Domain {
+    const active = this.meta.fields.get('active');
+    if (this.env.context.activeTest === false || active?.type !== 'boolean' || !isColumn(active)) return domain;
+    if (domain.some((term) => Array.isArray(term) && term[0] === 'active')) return domain;
+    return combine('&', [domain, [['active', '=', true]]]);
   }
 
   /** Default field set: stored columns + x2many; non-stored computed fields only on request. */
@@ -81,9 +270,10 @@ export class RecordsetImpl implements Recordset {
       .map((f) => f.name);
     const hidden = await hiddenFields(this.env, this.model);
     const visible = fields ? wanted : wanted.filter((n) => !hidden.has(n));
-    for (const n of visible) if (hidden.has(n)) throw new AccessError(`Field '${this.model}.${n}' is restricted`);
+    const requestedDisplayName = visible.includes('display_name') && !this.meta.fields.has('display_name');
+    for (const n of visible) if ((n !== 'display_name' || this.meta.fields.has(n)) && hidden.has(n)) throw new AccessError(`Field '${this.model}.${n}' is restricted`);
     await checkRecordRules(this.env, this.model, this.ids, 'read');
-    const defs = visible.map((n) => this.field(n));
+    const defs = visible.filter((name) => name !== 'display_name' || this.meta.fields.has(name)).map((n) => this.field(n));
 
     await this.loadColumns();
     const out = this.ids.map((id) => {
@@ -104,6 +294,15 @@ export class RecordsetImpl implements Recordset {
       }
       const values = isComputed(f) ? await computeValues(this, f) : await this.readX2manyVisible(f);
       out.forEach((r) => (r[f.name] = values.get(r.id as number) ?? (f.type === 'one2many' || f.type === 'many2many' ? [] : null)));
+    }
+    if (requestedDisplayName) {
+      const displayField = this.meta.def.recName ?? (this.meta.fields.has('name') ? 'name' : null);
+      if (displayField) {
+        const labels = await this.read([displayField]);
+        labels.forEach((row, index) => { out[index].display_name = row[displayField] ?? String(row.id); });
+      } else {
+        out.forEach((row) => { row.display_name = String(row.id); });
+      }
     }
     return out;
   }
@@ -163,9 +362,12 @@ export class RecordsetImpl implements Recordset {
       const ids: number[] = [];
       for (const v of list) {
         await this.checkFieldWrite(Object.keys(v));
-        const values = await this.roundMonetaryValues(await this.delegateValues(this.withDefaults(v), true));
-        await this.checkFieldWrite(Object.keys(values));
+        await this.checkFieldWrite([...this.meta.fields.keys()].filter((name) =>
+          !(name in v) && Object.hasOwn(this.env.context, 'default_' + name)));
+        const values = await this.roundMonetaryValues(await this.delegateValues(await this.withDefaults(v), true));
         await this.validateReferences(values);
+        await this.validateCompanyLinks(values);
+        await this.validateParentLink(values);
         const { columns, x2many } = this.split(values, true);
         columns.create_uid = columns.write_uid = this.env.uid;
         const keys = Object.keys(columns);
@@ -182,6 +384,7 @@ export class RecordsetImpl implements Recordset {
         for (const [fname, cmds] of x2many) await this.applyCommands(r.id, this.field(fname), cmds);
       }
       this.env.cache.invalidate();
+      if (this.hasParentPath()) await this.updateParentPaths();
       await checkRecordRules(this.env, this.model, ids, 'create');
       const created = new RecordsetImpl(this.env, this.model, ids);
       // initial values of stored computed fields on the new records + anything depending on them
@@ -207,6 +410,8 @@ export class RecordsetImpl implements Recordset {
       return;
     }
     await this.env.transaction(async () => {
+      for (const id of this.ids) await this.validateCompanyLinks(vals, id);
+      if ('parent_id' in vals) await this.validateParentLink(vals);
       const delegated = delegation ? await this.delegateValues(vals, false) : vals;
       const values = monetary ? await this.roundMonetaryValues(delegated, this.ids[0]) : delegated;
       await this.checkFieldWrite(Object.keys(values));
@@ -231,6 +436,7 @@ export class RecordsetImpl implements Recordset {
         if (rows.length !== this.ids.length) throw new MissingRecordError(`Some ${this.model} records no longer exist`);
       }
       for (const id of this.ids) for (const [fname, cmds] of x2many) await this.applyCommands(id, this.field(fname), cmds);
+      if (this.hasParentPath() && 'parent_id' in vals) await this.updateParentPaths();
       // the new values must keep the records inside the user's rules (e.g. no moving to another company)
       await checkRecordRules(this.env, this.model, this.ids, 'write');
       this.env.cache.invalidate();
@@ -250,6 +456,7 @@ export class RecordsetImpl implements Recordset {
       await sqlCall(() => this.env.db.query({ text: `DELETE FROM "${this.table}" WHERE id = ANY($1)`, params: [[...this.ids]] }));
       // ON DELETE CASCADE / SET NULL may change rows of other models: drop the whole cache.
       this.env.cache.invalidate();
+      if (this.hasParentPath()) await this.updateParentPaths();
       await validateRecomputed(this.env, await recompute(this.env, todo));
     });
   }
@@ -487,13 +694,103 @@ export class RecordsetImpl implements Recordset {
     if (!n) throw new ValidationError(`${co.model}(${lineId}) is not a line of ${this.model}(${owner})`);
   }
 
-  private withDefaults(vals: Vals): Vals {
+  private async withDefaults(vals: Vals): Promise<Vals> {
     const out = { ...vals };
     for (const f of this.meta.fields.values()) {
-      if (f.name in out || f.default === undefined || MAGIC.has(f.name)) continue;
-      out[f.name] = typeof f.default === 'function' ? (f.default as (e: unknown) => unknown)(this.env) : f.default;
+      if (f.name in out || MAGIC.has(f.name) || f.name === 'parent_path' || isComputed(f as ResolvedField)) continue;
+      const contextKey = 'default_' + f.name;
+      if (Object.hasOwn(this.env.context, contextKey)) {
+        out[f.name] = this.env.context[contextKey];
+      } else if (f.default !== undefined) {
+        out[f.name] = typeof f.default === 'function' ? await (f.default as (e: unknown) => unknown)(this.env) : f.default;
+      }
     }
     return out;
+  }
+
+  private async validateCompanyLinks(vals: Vals, id?: number): Promise<void> {
+    const companyField = this.meta.fields.get('company_id');
+    if (companyField && companyField.type !== 'many2one') return;
+    const names = [...this.meta.fields.entries()]
+      .filter(([, field]) => field.checkCompany && field.type === 'many2one')
+      .filter(([name]) => name in vals || 'company_id' in vals || id === undefined)
+      .map(([name]) => name);
+    if (!names.length) return;
+    let companyId = vals.company_id;
+    let current: Vals | undefined;
+    if (id && (!('company_id' in vals) || names.some((name) => !(name in vals)))) {
+      const requested = ['company_id', ...names].filter((name) => this.meta.fields.has(name));
+      current = (await this.browse(id).read(requested))[0];
+      if (!('company_id' in vals)) companyId = current?.company_id;
+    }
+    if (companyId === false) companyId = null;
+    const security = this.env.su ? undefined : await userSecurity(this.env);
+    const activeCompanies = security?.companyIds ?? this.env.companyIds;
+    const allowed = companyId == null ? activeCompanies : [companyId as number];
+    if (!this.env.su && companyId != null && !security?.allowedCompanyIds.includes(companyId as number)) {
+      throw new ValidationError('Record belongs to a company the caller cannot access');
+    }
+    for (const name of names) {
+      const targetId = Object.hasOwn(vals, name) ? vals[name] : current?.[name];
+      if (targetId === null || targetId === undefined || targetId === false) continue;
+      const field = this.field(name);
+      const targetModel = this.env.registry.get(field.comodel!);
+      if (!targetModel.fields.has('company_id')) continue;
+      const target = await this.env.model(field.comodel!).browse(targetId as number).read(['company_id']);
+      const targetCompany = target[0]?.company_id;
+      if (targetCompany !== null && targetCompany !== undefined &&
+          (!this.env.su && !allowed.length || allowed.length > 0 && !allowed.includes(targetCompany as number))) {
+        throw new ValidationError(`Field '${name}' belongs to another company`);
+      }
+    }
+  }
+
+  private async validateParentLink(vals: Vals): Promise<void> {
+    if (!this.hasParentPath() || vals.parent_id === null || vals.parent_id === undefined || vals.parent_id === false) return;
+    if (!Number.isSafeInteger(vals.parent_id) || (vals.parent_id as number) <= 0) throw new ValidationError('Invalid parent_id');
+    await this.env.model(this.model).browse(vals.parent_id as number).read(['id']);
+  }
+
+  private hasParentPath(): boolean {
+    return this.meta.fields.get('parent_id')?.type === 'many2one' &&
+      this.meta.fields.get('parent_id')?.comodel === this.model &&
+      ['char', 'text'].includes(this.meta.fields.get('parent_path')?.type ?? '');
+  }
+
+  private async updateParentPaths(): Promise<void> {
+    const rows = await this.env.db.query<{ id: number; parent_id: number | null; parent_path: string | null }>({
+      text: `SELECT id, parent_id, parent_path FROM "${this.table}"`, params: [],
+    });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const resolved = new Map<number, string>();
+    const pathFor = (id: number): string => {
+      const chain: number[] = [];
+      const active = new Set<number>();
+      let cursor: number | null = id;
+      while (cursor !== null && !resolved.has(cursor)) {
+        if (active.has(cursor)) throw new ValidationError('Parent hierarchy cannot contain a cycle');
+        const row = byId.get(cursor);
+        if (!row) throw new ValidationError('Parent record does not exist');
+        active.add(cursor);
+        chain.push(cursor);
+        cursor = row.parent_id;
+      }
+      let path = cursor === null ? '' : resolved.get(cursor)!;
+      while (chain.length) {
+        const current = chain.pop()!;
+        path += String(current) + '/';
+        resolved.set(current, path);
+      }
+      return resolved.get(id)!;
+    };
+    for (const row of rows) {
+      const path = pathFor(row.id);
+      if (row.parent_path !== path) await this.env.db.query({
+        text: `UPDATE "${this.table}" SET parent_path = $1 WHERE id = $2`,
+        params: [path, row.id],
+      });
+    }
+    this.env.cache.invalidate(this.model);
   }
 
   /** Create or update delegated parents under the caller's access checks. */
@@ -509,7 +806,7 @@ export class RecordsetImpl implements Recordset {
       if (!creating && !(via in own) && Object.keys(parentValues).length) parentId = (await this.read([via]))[0][via];
       if (!creating && !(via in own) && !Object.keys(parentValues).length) continue;
       const parent = this.env.model(model);
-      if (creating && !(via in own)) {
+      if (creating && (!(via in own) || own[via] === null || own[via] === false)) {
         parentId = (await parent.create(parentValues)).ids[0];
         own[via] = parentId;
       } else {
@@ -559,8 +856,7 @@ export class RecordsetImpl implements Recordset {
         throw new ValidationError(`Invalid reference for '${name}'`);
       }
       try {
-        const target = this.env.model(match[1]);
-        if (!(await target.search([['id', '=', Number(match[2])]])).ids.length) throw new ValidationError(`Invalid reference for '${name}'`);
+        if (!(await this.env.withContext({ activeTest: false }).model(match[1]).search([['id', '=', Number(match[2])]])).ids.length) throw new ValidationError(`Invalid reference for '${name}'`);
       } catch (err) {
         if (err instanceof AccessError || err instanceof MissingRecordError) throw new ValidationError(`Invalid reference for '${name}'`);
         throw err;
@@ -576,6 +872,7 @@ export class RecordsetImpl implements Recordset {
       const f = this.meta.fields.get(k) as ResolvedField | undefined;
       if (!f) throw new ValidationError(`Unknown field '${this.model}.${k}'`);
       if (MAGIC.has(k)) throw new ValidationError(`Field '${this.model}.${k}' is managed by the engine`);
+      if (k === 'parent_path' && this.hasParentPath()) throw new ValidationError(`Field '${this.model}.parent_path' is managed by the engine`);
       if (isComputed(f)) throw new ValidationError(`Field '${this.model}.${k}' is computed and cannot be written`);
       if (f.type === 'one2many' || f.type === 'many2many') x2many.set(k, toCommands(f, v));
       else columns[k] = coerce(f, v);
@@ -596,7 +893,7 @@ export class RecordsetImpl implements Recordset {
 async function validateRecomputed(env: EnvImpl, done: Todo): Promise<void> {
   for (const [model, fields] of done) {
     const ids = [...new Set([...fields.values()].flatMap((s) => [...s]))];
-    const alive = (await env.sudo().model(model).search([['id', 'in', ids]])).ids;
+    const alive = (await env.sudo().withContext({ activeTest: false }).model(model).search([['id', 'in', ids]])).ids;
     if (alive.length) await (env.model(model).browse([...alive]) as RecordsetImpl).checkConstraints(new Set(fields.keys()));
   }
 }
