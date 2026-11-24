@@ -4,6 +4,8 @@ import {
 } from '../expr/index.js';
 import { expressionContext } from '../orm/compute.js';
 import type { EnvImpl } from '../orm/env.js';
+import { addFollowers, createMessage, mailInstalled, resolveSubtype, userPartner } from '../mail/message.js';
+import { textToHtml } from '../mail/sanitize.js';
 import {
   assertSystem, assertWritable, ensureServiceTables, positiveInt, requireKey, requireModel, tenantDriver,
 } from './common.js';
@@ -251,13 +253,25 @@ async function evaluateValues(env: Env, values: Record<string, string>, record: 
   return out;
 }
 
-/** Post a chatter message as the current user: the record must be writable (ACL + record rules). */
+/**
+ * Post a chatter message as the current user: the record must be writable (ACL + record rules).
+ * Returns the mail.message id when the mail module is installed, else the nx_audit_log id.
+ */
 export async function postMessage(env: Env, model: string, recordId: number, message: string): Promise<number> {
   if (typeof message !== 'string' || !message.trim()) throw new ValidationError('Chatter message cannot be empty');
   if (message.length > 100_000) throw new ValidationError('Chatter message is too long');
   requireModel(model);
   positiveInt(recordId, 'record id');
   await assertWritable(env, model, recordId);
+  if (mailInstalled(env)) {
+    // mail module installed: a real chatter message (plain text, escaped) instead of the audit log, with
+    // the same semantics as MailThreadService.post (the author follows the document). The returned id is
+    // a mail.message id and the post no longer appears in AuditService.history().
+    const id = await createMessage(env, { model, resId: recordId, body: textToHtml(message), subtypeId: await resolveSubtype(env, 'mail.mt_comment') });
+    const author = await userPartner(env);
+    if (author !== null) await addFollowers(env, model, recordId, [author]);
+    return id;
+  }
   await ensureServiceTables(env);
   const [row] = await tenantDriver(env).query<{ id: number }>({
     text: `INSERT INTO nx_audit_log(model,record_id,event,uid,payload) VALUES($1,$2,'message',$3,$4::jsonb) RETURNING id`,

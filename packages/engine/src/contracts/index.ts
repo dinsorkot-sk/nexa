@@ -54,6 +54,11 @@ export interface FieldDef {
   groups?: string[];
   /** groups allowed to WRITE the field (others may still read it); e.g. res.users.login */
   writeGroups?: string[];
+  /**
+   * Track value changes in the chatter (mail module): only on models inheriting `mail.thread`,
+   * for scalar and many2one fields written directly. Ignored elsewhere.
+   */
+  tracking?: boolean;
 }
 
 /**

@@ -4,7 +4,7 @@ import { EnvImpl, SUPERUSER_ID } from '../orm/env.js';
 import {
   assertReadable, assertSystem, assertWritable, ensureServiceTables, nonNegativeInt, positiveInt, requireKey, requireModel, tenantDriver,
 } from './common.js';
-import { ServerActionService } from './actions.js';
+import { ServerActionService, postMessage } from './actions.js';
 import { runTimeAutomations } from './automation.js';
 
 export { ensureServiceTables } from './common.js';
@@ -203,12 +203,12 @@ export class AuditService {
     });
   }
 
+  /**
+   * Chatter post (record must be writable). With the mail module installed it returns a mail.message id
+   * and the post is read through MailThreadService.messages(), not history(); otherwise an audit entry id.
+   */
   async post(model: string, recordId: number, message: string): Promise<number> {
-    if (!message.trim()) throw new ValidationError('Chatter message cannot be empty');
-    requireModel(model);
-    positiveInt(recordId, 'record id');
-    await assertWritable(this.env, model, recordId);
-    return this.log(model, recordId, 'message', { message });
+    return postMessage(this.env, model, recordId, message);
   }
 }
 

@@ -43,3 +43,4 @@ export {
   type Cell, type ExportOptions, type ExportResult, type ImportError, type ImportOptions, type ImportResult, type ExportTemplate,
 } from './services/data-transfer.js';
 export { SavedFilterService, type SavedFilterInput, type SavedFilter } from './services/filters.js';
+export * from './mail/index.js';
