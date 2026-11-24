@@ -14,7 +14,7 @@ For user-facing changes, read and apply `team/UX-STANDARD.md`.
 Classify the goal, inspect existing code and tests, and ask only questions that block safe
 or correct work. Keep simple tasks direct. For multi-step tasks, maintain
 `team/STATE.md` using `team/STATE.template.md`, with bounded tasks, dependencies, file
-scopes, and verification. Delegate only when Codex exposes a useful subagent capability;
+scopes, and verification. Delegate only when the host (Codex or Antigravity) exposes a useful subagent capability;
 map tasks to the closest available role and do not claim unavailable agents ran.
 
 Do not exceed three concurrent agents, overlap parallel write scopes, or bypass required

@@ -1,6 +1,6 @@
 # Cross-agent team workflow
 
-This workflow is shared by Claude Code, Codex, GitHub Copilot agents, and OpenCode.
+This workflow is shared by Claude Code, Codex, GitHub Copilot agents, OpenCode, and Antigravity.
 Use it only when the user invokes the team workflow or asks for multi-agent work.
 Handle small, clear tasks directly.
 
@@ -92,5 +92,7 @@ changes with no user-facing impact.
 - Codex: invoke the `team-workflow` skill (for example, `$team-workflow`)
 - GitHub Copilot: run the `team`, `team-resume`, or `team-status` prompt
 - OpenCode: `/team`, `/team-resume`, `/team-status`
+- Antigravity: workflows `/team`, `/team-resume`, `/team-status` in `.agents/workflows/`;
+  roles in `.agents/rules/team-roles.md`; it also reads `AGENTS.md` and the `team-workflow` skill
 
 Each entry point loads this agreement and the matching instructions in `team/`.
