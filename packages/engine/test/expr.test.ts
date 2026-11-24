@@ -12,6 +12,12 @@ describe('NX-Expr', () => {
     expect(evaluateExpression('record.state == "open" ? 1 : 0', { record: { state: 'open' } })).toBe(1);
   });
 
+  it('treats quoted punctuation as literal values in lists and concatenation', () => {
+    expect(evaluateExpression(`[['label', record.name + '!'], ['punctuation', '['], [',', ']']]`, {
+      record: { name: 'Ready' },
+    })).toEqual([['label', 'Ready!'], ['punctuation', '['], [',', ']']]);
+  });
+
   it('keeps decimal operations exact through chained calculations', () => {
     expect(evaluateExpression('0.1 + 0.2 + 0.3', {})).toBe(0.6);
     expect(evaluateExpression('0.10000000000001 + 0.00000000000002', {})).toBe(0.10000000000003);

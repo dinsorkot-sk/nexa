@@ -72,7 +72,12 @@ class Parser {
   constructor(private readonly tokens: Token[], private readonly maxDepth: number) {}
   private peek(): Token { return this.tokens[this.cursor]!; }
   private take(): Token { return this.tokens[this.cursor++]!; }
-  private accept(value: string): boolean { if (this.peek().value === value) { this.take(); return true; } return false; }
+  private accept(value: string): boolean {
+    const token = this.peek();
+    if (token.type !== 'op' || token.value !== value) return false;
+    this.take();
+    return true;
+  }
   private expect(value: string): void { if (!this.accept(value)) throw new SyntaxError(`Expected '${value}' at ${this.peek().at}`); }
   parse(): ExprNode {
     const node = this.expression(0);
@@ -135,13 +140,13 @@ class Parser {
   }
   private prefix(): ExprNode {
     const t = this.take();
+    if (t.type === 'number') return { kind: 'literal', value: Number(t.value), raw: t.value };
+    if (t.type === 'string') return { kind: 'literal', value: t.value };
     if (t.value === '!' || t.value === 'not' || t.value === '-' || t.value === '+') {
       return { kind: 'unary', op: t.value === '!' ? 'not' : t.value as 'not' | '-' | '+', value: this.expression(8) };
     }
     if (t.value === '(') { const value = this.expression(0); this.expect(')'); return value; }
     if (t.value === '[') { const values: ExprNode[] = []; if (!this.accept(']')) { do { values.push(this.expression(0)); } while (this.accept(',')); this.expect(']'); } return { kind: 'array', values }; }
-    if (t.type === 'number') return { kind: 'literal', value: Number(t.value), raw: t.value };
-    if (t.type === 'string') return { kind: 'literal', value: t.value };
     if (t.type === 'name') {
       if (t.value === 'true') return { kind: 'literal', value: true };
       if (t.value === 'false') return { kind: 'literal', value: false };

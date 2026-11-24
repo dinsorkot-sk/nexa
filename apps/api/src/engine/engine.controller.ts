@@ -31,6 +31,18 @@ const studioModel = z.object({
   name: z.string().regex(/^x_[a-z0-9_]+$/).max(63),
   description: z.string().max(200).optional(),
 });
+const studioExpression = z.string().trim().min(1).max(10_000);
+const studioFieldName = z.string().regex(/^[a-z][a-z0-9_]*$/).max(63);
+const studioExpressions = z.strictObject({
+  model: modelName,
+  onchange: z.record(studioFieldName, studioExpression).optional(),
+  constraints: z.array(z.strictObject({
+    name: studioFieldName,
+    expression: studioExpression,
+    fields: z.array(studioFieldName).max(100).optional(),
+    message: z.string().max(200).optional(),
+  })).max(100).optional(),
+});
 const studioField = z.object({
   model: modelName,
   name: z.string().regex(/^x_[a-z0-9_]+$/).max(63),
@@ -42,6 +54,10 @@ const studioField = z.object({
   copy: z.boolean().optional(),
   aggregator: z.enum(['sum', 'avg', 'min', 'max', 'count', 'count_distinct']).optional(),
   currencyField: z.string().regex(/^[a-z][a-z0-9_]*$/).max(63).optional(),
+  computeExpr: studioExpression.optional(),
+  defaultExpr: studioExpression.optional(),
+  store: z.boolean().optional(),
+  depends: z.array(z.string().regex(/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/).max(200)).max(100).optional(),
   comodel: modelName.optional(),
   inverseName: z.string().regex(/^x_[a-z0-9_]+$/).max(63).optional(),
   selection: z.array(z.tuple([z.string().min(1).max(40), z.string().min(1).max(80)])).min(1).max(50).optional(),
@@ -205,10 +221,11 @@ export class EngineController {
   @Get('studio/models')
   async studioModels(@CallerParam() c: Caller) {
     const { handle } = await this.studio(c);
-    return { models: (await MetadataStore.for(handle).list()).map(({ name, description, fields }) => ({
-      name, description, fields: Object.entries(fields).map(([field, def]) => ({
+    return { models: (await MetadataStore.for(handle).list()).map(({ name, description, fields, onchange, constraints }) => ({
+      name, description, onchange, constraints, fields: Object.entries(fields).map(([field, def]) => ({
         name: field, type: def.type, string: def.string ?? field, comodel: def.comodel,
         translate: def.translate, digits: def.digits, copy: def.copy, aggregator: def.aggregator, currencyField: def.currencyField,
+        computeExpr: def.computeExpr, defaultExpr: def.defaultExpr, store: def.store, depends: def.depends,
       })),
     })) };
   }
@@ -227,12 +244,25 @@ export class EngineController {
       ...(req.copy !== undefined ? { copy: req.copy } : {}),
       ...(req.aggregator ? { aggregator: req.aggregator } : {}),
       ...(req.currencyField ? { currencyField: req.currencyField } : {}),
+      ...(req.computeExpr ? { computeExpr: req.computeExpr } : {}),
+      ...(req.defaultExpr ? { defaultExpr: req.defaultExpr } : {}),
+      ...(req.store !== undefined ? { store: req.store } : {}),
+      ...(req.depends ? { depends: req.depends } : {}),
       ...(req.comodel ? { comodel: req.comodel } : {}),
       ...(req.inverseName ? { inverseName: req.inverseName } : {}),
       ...(req.selection ? { selection: req.selection } : {}),
     };
     await MetadataStore.for(handle).addField(req.model, req.name, field);
     return { model: req.model, field: req.name };
+  }
+
+  @Post('studio/expressions')
+  @HttpCode(200)
+  async setStudioExpressions(@CallerParam() c: Caller, @Body() body: unknown) {
+    const { model, onchange, constraints } = studioExpressions.parse(body);
+    const { handle } = await this.studio(c);
+    await MetadataStore.for(handle).setModelExpressions(model, { onchange, constraints });
+    return { model };
   }
 
   @Post('studio/view')

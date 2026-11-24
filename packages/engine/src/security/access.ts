@@ -1,5 +1,6 @@
 import { AccessError, EngineError, type AccessOperation, type Domain, type DomainTerm } from '../contracts/index.js';
 import type { EnvImpl } from '../orm/env.js';
+import { evaluateRuleExpression } from './rule-expression.js';
 
 /**
  * Access control (ADR 0001 §8), evaluated in the engine for every non-superuser env:
@@ -20,7 +21,7 @@ export interface UserSecurity {
   allowedCompanyIds: number[];
   acl: Map<string, Promise<Record<AccessOperation, boolean>>>;
   /** all record rules of the tenant, loaded once per env family */
-  ruleRows: { model: string; groups: string[]; domain: Domain; perms: Record<AccessOperation, boolean> }[];
+  ruleRows: { model: string; groups: string[]; domain: Domain | string; perms: Record<AccessOperation, boolean> }[];
   rules: Map<string, Domain | null>;
 }
 
@@ -95,7 +96,7 @@ export async function checkModelAccess(env: EnvImpl, model: string, op: AccessOp
 }
 
 async function loadRules(env: EnvImpl): Promise<UserSecurity['ruleRows']> {
-  const rows = await env.db.query<{ model: string; groups: string[]; domain: Domain } & Record<string, boolean>>({
+  const rows = await env.db.query<{ model: string; groups: string[]; domain: Domain | string } & Record<string, boolean>>({
     text: `SELECT model, groups, domain, perm_read, perm_write, perm_create, perm_unlink FROM nx_rule ORDER BY id`, params: [],
   });
   return rows.map((r) => ({
@@ -112,9 +113,12 @@ export function ruleDomainFor(sec: UserSecurity, model: string, op: AccessOperat
   const grouped: Domain[] = [];
   for (const r of sec.ruleRows) {
     if (r.model !== model || !r.perms[op]) continue;
-    const d = substitute(r.domain, sec);
+    if (r.groups.length && !r.groups.some((g) => sec.groups.has(g))) continue;
+    const d = typeof r.domain === 'string'
+      ? evaluateRuleExpression(r.domain, sec)
+      : substitute(r.domain, sec);
     if (!r.groups.length) globals.push(d);
-    else if (r.groups.some((g) => sec.groups.has(g))) grouped.push(d);
+    else grouped.push(d);
   }
   const parts = [...globals];
   if (grouped.length) parts.push(combine('|', grouped));

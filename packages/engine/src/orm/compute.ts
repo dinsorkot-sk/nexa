@@ -1,7 +1,9 @@
-import { EngineError, type ComputeFn, type ResolvedModel } from '../contracts/index.js';
+import { EngineError, ValidationError, type ComputeFn, type ResolvedModel } from '../contracts/index.js';
 import type { EnvImpl } from './env.js';
 import type { RecordsetImpl } from './recordset.js';
 import type { ResolvedField } from './registry.js';
+import { createExpressionHelpers, evaluateExpression, extractDependencies, type ExprValue } from '../expr/index.js';
+import { userSecurity } from '../security/access.js';
 
 /**
  * Stored-compute dependency tracking (Odoo `@api.depends` triggers).
@@ -55,11 +57,11 @@ function triggerIndex(models: ReadonlyMap<string, ResolvedModel>): Map<string, T
 }
 
 export function isStoredComputed(f: ResolvedField): boolean {
-  return !!(f.compute || f.related) && !!f.store;
+  return !!(f.compute || f.computeExpr || f.related) && !!f.store;
 }
 
 export function isComputed(f: ResolvedField): boolean {
-  return !!(f.compute || f.related);
+  return !!(f.compute || f.computeExpr || f.related);
 }
 
 /** target model -> computed field -> ids to recompute */
@@ -161,12 +163,23 @@ export async function cascadeAffected(
 }
 
 function isColumnField(f: ResolvedField): boolean {
-  return !f.compute && !f.related;
+  return !f.compute && !f.computeExpr && !f.related;
 }
 
 /** Evaluate a computed or related field for a batch of records. */
 export async function computeValues(records: RecordsetImpl, f: ResolvedField): Promise<Map<number, unknown>> {
   if (f.related) return followPath(records, f.related);
+  if (f.computeExpr) {
+    const paths = f.depends ?? extractDependencies(f.computeExpr);
+    const out = new Map<number, unknown>();
+    for (const id of records.ids) {
+      const record = await expressionRecord(records, id, paths);
+      const value = evaluateExpression(f.computeExpr, { ...(record as Record<string, ExprValue>), record: record as ExprValue, ...await expressionContext(records.env) });
+      if (!validExpressionValue(f, value)) throw new ValidationError(`Expression result has the wrong type for '${records.model}.${f.name}'`);
+      out.set(id, value);
+    }
+    return out;
+  }
   const meta = records.env.registry.get(records.model);
   const methods = meta.def.methods;
   const fn = (typeof f.compute === 'string'
@@ -178,6 +191,93 @@ export async function computeValues(records: RecordsetImpl, f: ResolvedField): P
   const out = new Map<number, unknown>();
   for (const id of records.ids) out.set(id, map.has(id) ? map.get(id) : null);
   return out;
+}
+
+function validExpressionValue(field: ResolvedField, value: ExprValue): boolean {
+  if (value === null) return true;
+  switch (field.type) {
+    case 'boolean': return typeof value === 'boolean';
+    case 'integer': return typeof value === 'number' && Number.isSafeInteger(value);
+    case 'float': case 'monetary': return typeof value === 'number' && Number.isFinite(value);
+    case 'many2one': return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+    case 'one2many': case 'many2many': return Array.isArray(value) && value.every((item) => typeof item === 'number' && Number.isSafeInteger(item) && item > 0);
+    case 'json': return true;
+    default: return typeof value === 'string';
+  }
+}
+
+/** Build only caller-readable dependency data; expression evaluation has no ORM or sudo bridge. */
+export async function expressionRecord(records: RecordsetImpl, id: number, paths: readonly string[]): Promise<Record<string, unknown>> {
+  type PathNode = { terminal: boolean; children: Map<string, PathNode> };
+  if (paths.length > 64 || paths.some((path) => path.split('.').length > 16)) throw new EngineError('Expression dependency quota exceeded');
+  const rootNode: PathNode = { terminal: false, children: new Map() };
+  let nodeCount = 1;
+  for (const path of paths) {
+    let node = rootNode;
+    for (const part of path.split('.')) {
+      if (!node.children.has(part)) {
+        if (++nodeCount > 256) throw new EngineError('Expression dependency quota exceeded');
+        node.children.set(part, { terminal: false, children: new Map() });
+      }
+      node = node.children.get(part)!;
+    }
+    node.terminal = true;
+  }
+  const hydrate = async (model: string, ids: number[], tree: PathNode): Promise<Map<number, Record<string, unknown>>> => {
+    if (ids.length > 1000) throw new EngineError('Expression relation row quota exceeded');
+    const out = new Map(ids.map((recordId) => [recordId, {} as Record<string, unknown>]));
+    if (!ids.length) return out;
+    for (const [name, child] of tree.children) {
+      const field = records.env.registry.get(model).fields.get(name);
+      if (!field) throw new EngineError(`Unknown expression dependency '${model}.${name}'`);
+      const rows = await records.env.model(model).browse(ids).read([name]);
+      const values = new Map(rows.map((row) => [row.id as number, row[name]]));
+      if (!child.children.size) {
+        for (const recordId of ids) out.get(recordId)![name] = values.get(recordId) ?? null;
+        continue;
+      }
+      if (!field.comodel) throw new EngineError(`Expression dependency '${model}.${name}' is not relational`);
+      const relationIds = new Map<number, number[]>();
+      const allTargets = new Set<number>();
+      for (const recordId of ids) {
+        const value = values.get(recordId);
+        const targets = field.type === 'many2one'
+          ? typeof value === 'number' ? [value] : []
+          : Array.isArray(value) ? value.filter((x): x is number => typeof x === 'number') : [];
+        relationIds.set(recordId, targets);
+        targets.forEach((target) => allTargets.add(target));
+      }
+      const nested = await hydrate(field.comodel, [...allTargets], child);
+      for (const recordId of ids) {
+        const targets = relationIds.get(recordId)!;
+        const value = field.type === 'many2one'
+          ? targets.length ? nested.get(targets[0]!) ?? null : null
+          : targets.map((target) => nested.get(target) ?? {});
+        out.get(recordId)![name] = value;
+      }
+    }
+    return out;
+  };
+  return (await hydrate(records.model, [id], rootNode)).get(id)!;
+}
+
+export async function expressionContext(env: EnvImpl): Promise<Record<string, unknown>> {
+  const security = env.su ? undefined : await userSecurity(env);
+  const companies = security?.companyIds ?? env.companyIds;
+  let context: unknown;
+  try {
+    const json = JSON.stringify(env.context);
+    if (json && json.length <= 16_384) context = JSON.parse(json);
+  } catch { /* omit values that cannot be safely represented as expression data */ }
+  return {
+    ...createExpressionHelpers(),
+    user: { id: env.uid, company_id: security?.companyId ?? companies[0] ?? null },
+    company: { id: security?.companyId ?? companies[0] ?? false },
+    companies: companies.map((id) => ({ id })),
+    context: context && typeof context === 'object' ? context : {},
+    today: new Date().toISOString().slice(0, 10),
+    now: new Date().toISOString(),
+  };
 }
 
 /** Follow a many2one chain and read the final field (Odoo `related`). */

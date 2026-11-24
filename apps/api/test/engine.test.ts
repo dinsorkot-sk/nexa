@@ -205,6 +205,51 @@ describe('UI metadata', () => {
 });
 
 describe('no-code Studio', () => {
+  it('persists NX-Expr hooks and uses them through model RPC', async () => {
+    const model = 'x_expr_task';
+    expect((await post('/api/studio/model', admin, { name: model })).status).toBe(200);
+    expect((await post('/api/studio/field', admin, {
+      model, name: 'x_qty', type: 'integer', defaultExpr: '2 + 1',
+    })).status).toBe(200);
+    expect((await post('/api/studio/field', admin, { model, name: 'x_note', type: 'char' })).status).toBe(200);
+    expect(await post(`/api/model/${model}/default_get`, admin, { fields: ['x_qty'] })).toEqual({
+      status: 200, body: { values: { x_qty: 3 } },
+    });
+    const created = await post(`/api/model/${model}/create`, admin, { values: {} });
+    expect(created.status).toBe(200);
+    const [id] = created.body.ids as number[];
+
+    expect((await post('/api/studio/field', admin, {
+      model, name: 'x_double', type: 'integer', computeExpr: 'record.x_qty * 2', store: true,
+    })).status).toBe(200);
+    const read = () => post(`/api/model/${model}/read`, admin, { ids: [id], fields: ['x_qty', 'x_double'] });
+    expect(await read()).toEqual({ status: 200, body: { records: [{ id, x_qty: 3, x_double: 6 }] } });
+
+    const expressions = {
+      model,
+      onchange: { x_qty: '[["x_note", "qty=" + record.x_qty]]' },
+      constraints: [{ name: 'positive_qty', expression: 'record.x_qty > 0', message: 'Quantity must be positive' }],
+    };
+    expect((await post('/api/studio/expressions', bob, expressions)).status).toBe(403);
+    expect((await post('/api/studio/expressions', admin, expressions)).status).toBe(200);
+    expect(await post(`/api/model/${model}/onchange`, admin, { field: 'x_qty', values: { x_qty: 4 } })).toEqual({
+      status: 200, body: { value: { x_note: 'qty=4' } },
+    });
+    expect((await post(`/api/model/${model}/write`, admin, { ids: [id], values: { x_qty: 4 } })).status).toBe(200);
+    expect(await post(`/api/model/${model}/write`, admin, { ids: [id], values: { x_qty: 0 } })).toMatchObject({
+      status: 422, body: { error: { message: 'Quantity must be positive' } },
+    });
+    expect(await read()).toEqual({ status: 200, body: { records: [{ id, x_qty: 4, x_double: 8 }] } });
+    expect((await post('/api/studio/field', admin, {
+      model, name: 'x_invalid', type: 'integer', defaultExpr: '2 +',
+    })).status).toBe(422);
+    expect((await post('/api/studio/field', admin, {
+      model, name: 'x_bad_value', type: 'integer', computeExpr: '"not an integer"', store: true,
+    })).status).toBe(422);
+    const fields = await post(`/api/model/${model}/fields_get`, admin);
+    expect(fields.body.fields).not.toHaveProperty('x_bad_value');
+  });
+
   it('limits Studio to Settings admins and creates a model, field, and view usable by the generic API', async () => {
     const denied = await call('GET', '/api/studio/models', bob);
     expect([denied.status, errorType(denied.body)]).toEqual([403, 'access']);

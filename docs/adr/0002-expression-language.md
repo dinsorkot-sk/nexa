@@ -49,8 +49,15 @@ by data. They are not pure expressions.
 ## Consequences
 
 - T14 builds NX-Expr plus the sandbox. It needs a security review.
-- Hooks in contracts accept `string` (an NX-Expr) as well as a JS function, so code modules
-  keep working.
+- `computeExpr` and `defaultExpr` hold NX-Expr without changing the meaning of
+  existing compute method names and literal defaults. Onchange accepts a function
+  or an expression returning field-value pairs. A constraint expression must return
+  `true`. A record-rule expression must return a domain and sees only trusted
+  user and company scope with a fixed rule locale.
+- Stored expression computes use deterministic, unrestricted scalar dependencies on
+  the same record. Non-stored expressions read dependencies with the caller's access.
+  Expression constraints use local stored scalar fields so every relevant change
+  runs the constraint in the same transaction.
 - QuickJS adds a dependency: choose a version, check the license (MIT), and measure the
   memory per tenant.
 - The sandbox runner accepts a trusted bridge. The server-action adapter must bind it to

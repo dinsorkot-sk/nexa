@@ -8,7 +8,7 @@ export { compileDomain, compileOrder } from './domain/compile.js';
 export { syncSchema, columnType } from './schema/sync.js';
 export { PgliteTenantManager, type TenantManagerOptions } from './tenant/manager.js';
 export { planMigration, applyMigration, indexName, quoteIdent, type MigrationOp, type MigrationPlan, type PlanOptions } from './schema/sync.js';
-export { MetadataStore, ensureMetadataTables, loadCustomDefs, combinedSource, type CustomModelInput, type DestructiveOptions } from './metadata/store.js';
+export { MetadataStore, ensureMetadataTables, loadCustomDefs, combinedSource, type CustomModelInput, type CustomModelExpressions, type DestructiveOptions } from './metadata/store.js';
 export { ensureSecurityTables, writeModuleSecurity, removeModuleSecurity } from './security/tables.js';
 export { securityModels, ACCESS_MANAGER } from './security/models.js';
 export { checkModelAccess, checkRecordRules, ruleDomain, combine as combineDomains, userSecurity } from './security/access.js';

@@ -3,6 +3,9 @@ import {
   type SqlDriver, type TenantHandle,
 } from '../contracts/index.js';
 import { compileOrder } from '../domain/compile.js';
+import { parseExpression } from '../expr/index.js';
+import { recompute } from '../orm/compute.js';
+import { EnvImpl, SUPERUSER_ID } from '../orm/env.js';
 import { ModelRegistry, tableName } from '../orm/registry.js';
 import { applyMigration, planMigration, type MigrationOp } from '../schema/sync.js';
 import { withDriverLock } from '../modules/lock.js';
@@ -24,6 +27,7 @@ export async function ensureMetadataTables(db: SqlDriver): Promise<void> {
         id SERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT, "order" TEXT,
         create_date TIMESTAMP NOT NULL DEFAULT now())`, params: [],
     });
+    await tx.query({ text: `ALTER TABLE nx_model ADD COLUMN IF NOT EXISTS expression_hooks JSONB NOT NULL DEFAULT '{}'::jsonb`, params: [] });
     await tx.query({
       text: `CREATE TABLE IF NOT EXISTS nx_field (
         id SERIAL PRIMARY KEY, model TEXT NOT NULL, name TEXT NOT NULL, ttype TEXT NOT NULL, string TEXT, help TEXT,
@@ -37,13 +41,13 @@ export async function ensureMetadataTables(db: SqlDriver): Promise<void> {
   });
 }
 
-interface ModelRow { name: string; description: string | null; order: string | null }
+interface ModelRow { name: string; description: string | null; order: string | null; expression_hooks: CustomModelExpressions }
 interface FieldRow {
   model: string; name: string; ttype: FieldType; string: string | null; help: string | null;
   required: boolean; readonly: boolean; index: boolean; unique: boolean;
   default_value: unknown; selection: [string, string][] | null; comodel: string | null;
   inverse_name: string | null; relation_table: string | null; ondelete: OnDelete | null;
-  field_options: Pick<FieldDef, 'digits' | 'translate' | 'copy' | 'aggregator' | 'currencyField'>;
+  field_options: Pick<FieldDef, 'digits' | 'translate' | 'copy' | 'aggregator' | 'currencyField' | 'computeExpr' | 'defaultExpr' | 'depends' | 'store'>;
 }
 
 function rowToField(r: FieldRow): FieldDef {
@@ -53,6 +57,10 @@ function rowToField(r: FieldRow): FieldDef {
   if (r.field_options?.translate !== undefined) f.translate = r.field_options.translate;
   if (r.field_options?.copy !== undefined) f.copy = r.field_options.copy;
   if (r.field_options?.aggregator !== undefined) f.aggregator = r.field_options.aggregator;
+  if (r.field_options?.computeExpr !== undefined) f.computeExpr = r.field_options.computeExpr;
+  if (r.field_options?.defaultExpr !== undefined) f.defaultExpr = r.field_options.defaultExpr;
+  if (r.field_options?.depends !== undefined) f.depends = r.field_options.depends;
+  if (r.field_options?.store !== undefined) f.store = r.field_options.store;
   if (r.string !== null) f.string = r.string;
   if (r.help !== null) f.help = r.help;
   if (r.required) f.required = true;
@@ -73,7 +81,7 @@ function rowToField(r: FieldRow): FieldDef {
  * models not in nx_model become extensions (`extends: [name]`) appended after module defs.
  */
 export async function loadCustomDefs(db: SqlDriver): Promise<ModelDef[]> {
-  const models = await db.query<ModelRow>({ text: `SELECT name, description, "order" FROM nx_model ORDER BY id`, params: [] });
+  const models = await db.query<ModelRow>({ text: `SELECT name, description, "order", expression_hooks FROM nx_model ORDER BY id`, params: [] });
   const fields = await db.query<FieldRow>({
     text: `SELECT model, name, ttype, string, help, required, readonly, "index", "unique", default_value, selection,
       comodel, inverse_name, relation_table, ondelete, field_options FROM nx_field ORDER BY id`, params: [],
@@ -89,6 +97,7 @@ export async function loadCustomDefs(db: SqlDriver): Promise<ModelDef[]> {
     name: m.name, origin: 'custom', fields: byModel.get(m.name) ?? {},
     ...(m.description !== null ? { description: m.description } : {}),
     ...(m.order !== null ? { order: m.order } : {}),
+    ...modelExpressions(m.expression_hooks ?? {}),
   }));
   for (const [model, fs] of byModel) {
     if (!custom.has(model)) out.push({ name: model, extends: [model], origin: 'custom', fields: fs });
@@ -132,11 +141,55 @@ export interface CustomModelInput {
   description?: string;
   order?: string;
   fields?: Record<string, FieldDef>;
+  expressions?: CustomModelExpressions;
+}
+
+export interface CustomModelExpressions {
+  onchange?: Record<string, string>;
+  constraints?: { name: string; expression: string; fields?: string[]; message?: string }[];
 }
 
 export interface DestructiveOptions {
   /** must be true: removing custom fields/models drops columns/tables and their data */
   allowDestructive: boolean;
+}
+
+interface MetadataChangeOptions {
+  destructive?: DestructiveOptions;
+  target?: (op: MigrationOp) => boolean;
+  dropTables?: string[];
+  initialize?: (tx: SqlDriver, models: Map<string, ResolvedModel>) => Promise<void>;
+}
+
+function checkExpression(expression: string, label: string): void {
+  if (typeof expression !== 'string' || !expression.trim()) throw new ValidationError(`${label} requires an NX-Expr expression`);
+  try {
+    parseExpression(expression);
+  } catch (error) {
+    throw new ValidationError(`${label}: ${error instanceof Error ? error.message : 'Invalid NX-Expr expression'}`);
+  }
+}
+
+function modelExpressions(input: CustomModelExpressions): CustomModelExpressions {
+  const onchange = Object.entries(input.onchange ?? {});
+  const constraints = input.constraints ?? [];
+  if (onchange.length > 100 || constraints.length > 100) throw new ValidationError('Too many model expressions');
+  for (const [name, expression] of onchange) {
+    if (!/^[a-z][a-z0-9_]*$/.test(name)) throw new ValidationError(`Invalid onchange field '${name}'`);
+    checkExpression(expression, `Onchange '${name}'`);
+  }
+  const names = new Set<string>();
+  for (const constraint of constraints) {
+    if (!/^[a-z][a-z0-9_]*$/.test(constraint.name) || names.has(constraint.name)) {
+      throw new ValidationError(`Duplicate or invalid constraint name '${constraint.name}'`);
+    }
+    names.add(constraint.name);
+    checkExpression(constraint.expression, `Constraint '${constraint.name}'`);
+  }
+  return {
+    ...(onchange.length ? { onchange: Object.fromEntries(onchange) } : {}),
+    ...(constraints.length ? { constraints: constraints.map(({ name, expression, fields, message }) => ({ name, expression, fields, message })) } : {}),
+  };
 }
 
 function validateField(model: string, name: string, f: FieldDef): void {
@@ -145,8 +198,19 @@ function validateField(model: string, name: string, f: FieldDef): void {
   if (f.relationTable !== undefined || f.column1 !== undefined || f.column2 !== undefined) {
     throw new ValidationError(`Custom field '${model}.${name}' cannot choose its relation table or columns`);
   }
-  if (typeof f.default === 'function' || f.compute || f.related || f.depends) {
+  if (typeof f.default === 'function' || f.compute || f.related || (f.depends && !f.computeExpr)) {
     throw new ValidationError(`Custom field '${model}.${name}' cannot use code (default function, compute, related)`);
+  }
+  if (f.computeExpr !== undefined) checkExpression(f.computeExpr, `Compute '${model}.${name}'`);
+  if (f.defaultExpr !== undefined) {
+    if (f.default !== undefined || f.computeExpr !== undefined) throw new ValidationError('A default expression cannot coexist with a literal default or compute expression');
+    checkExpression(f.defaultExpr, `Default '${model}.${name}'`);
+  }
+  if (f.store !== undefined && (typeof f.store !== 'boolean' || f.computeExpr === undefined)) {
+    throw new ValidationError('Store requires a compute expression');
+  }
+  if (f.depends && (!Array.isArray(f.depends) || f.depends.length > 100 || f.depends.some((dep) => typeof dep !== 'string'))) {
+    throw new ValidationError('Invalid compute dependencies');
   }
   if (f.selectionAdd) throw new ValidationError(`Custom field '${model}.${name}' cannot extend a selection`);
   if (f.translate !== undefined && (typeof f.translate !== 'boolean' || (f.translate && !['char', 'text', 'html'].includes(f.type)))) throw new ValidationError('Invalid translate flag');
@@ -165,11 +229,11 @@ function validateField(model: string, name: string, f: FieldDef): void {
  * rolls back the rows and DDL and keeps the previous registry.
  */
 export class MetadataStore {
-  constructor(private readonly db: SqlDriver, private readonly registry: ModelRegistry) {}
+  constructor(private readonly db: SqlDriver, private readonly registry: ModelRegistry, private readonly tenant = '') {}
 
   static for(handle: TenantHandle): MetadataStore {
     if (!(handle.registry instanceof ModelRegistry)) throw new EngineError('Tenant registry does not support metadata changes');
-    return new MetadataStore(handle.driver, handle.registry);
+    return new MetadataStore(handle.driver, handle.registry, handle.tenant);
   }
 
   async createModel(input: CustomModelInput, afterInsert?: (tx: SqlDriver) => Promise<void>): Promise<void> {
@@ -181,15 +245,27 @@ export class MetadataStore {
     }
     const fields = input.fields ?? {};
     for (const [n, f] of Object.entries(fields)) validateField(input.name, n, f);
+    const expressions = modelExpressions(input.expressions ?? {});
     await this.change(async (tx) => {
       const dup = await tx.query({ text: `SELECT 1 FROM nx_model WHERE name = $1`, params: [input.name] });
       if (dup.length || this.registry.models.has(input.name)) throw new ValidationError(`Model '${input.name}' already exists`);
       await tx.query({
-        text: `INSERT INTO nx_model (name, description, "order") VALUES ($1, $2, $3)`,
-        params: [input.name, input.description ?? null, input.order ?? null],
+        text: `INSERT INTO nx_model (name, description, "order", expression_hooks) VALUES ($1, $2, $3, $4::jsonb)`,
+        params: [input.name, input.description ?? null, input.order ?? null, JSON.stringify(expressions)],
       });
       for (const [n, f] of Object.entries(fields)) await this.insertField(tx, input.name, n, f);
       await afterInsert?.(tx);
+    });
+  }
+
+  async setModelExpressions(model: string, input: CustomModelExpressions): Promise<void> {
+    const expressions = modelExpressions(input);
+    await this.change(async (tx) => {
+      const rows = await tx.query({
+        text: `UPDATE nx_model SET expression_hooks = $2::jsonb WHERE name = $1 RETURNING id`,
+        params: [model, JSON.stringify(expressions)],
+      });
+      if (!rows.length) throw new ValidationError(`Unknown custom model '${model}'`);
     });
   }
 
@@ -199,6 +275,10 @@ export class MetadataStore {
       if (!this.registry.models.has(model)) throw new ValidationError(`Unknown model '${model}'`);
       if (this.registry.get(model).fields.has(name)) throw new ValidationError(`Field '${model}.${name}' already exists`);
       await this.insertField(tx, model, name, def);
+    }, {
+      initialize: def.computeExpr && def.store
+        ? (tx, models) => this.initializeStoredExpression(tx, models, model, name)
+        : undefined,
     });
   }
 
@@ -210,7 +290,7 @@ export class MetadataStore {
       const del = await tx.query({ text: `DELETE FROM nx_field WHERE model = $1 AND name = $2 RETURNING id`, params: [model, name] });
       if (!del.length) throw new ValidationError(`No custom field '${model}.${name}'`);
       if (!table) throw new ValidationError(`Model '${model}' has no table`);
-    }, opts, (op) => op.kind === 'drop_column' && op.table === table && op.column === name);
+    }, { destructive: opts, target: (op) => op.kind === 'drop_column' && op.table === table && op.column === name });
   }
 
   async removeModel(name: string, opts: DestructiveOptions): Promise<void> {
@@ -225,11 +305,27 @@ export class MetadataStore {
         throw new ValidationError(`Model '${name}' is still referenced by ${refs.map((r) => `${r.model}.${r.name}`).join(', ')}`);
       }
       await tx.query({ text: `DELETE FROM nx_field WHERE model = $1`, params: [name] });
-    }, opts, (op) => op.kind === 'drop_table' && op.table === table, [table]);
+    }, { destructive: opts, target: (op) => op.kind === 'drop_table' && op.table === table, dropTables: [table] });
   }
 
   async list(): Promise<ModelDef[]> {
     return loadCustomDefs(this.db);
+  }
+
+  private async initializeStoredExpression(
+    tx: SqlDriver, models: Map<string, ResolvedModel>, model: string, field: string,
+  ): Promise<void> {
+    const registry = new ModelRegistry(async () => []);
+    registry.swap(models);
+    const env = new EnvImpl({ tenant: this.tenant, uid: SUPERUSER_ID, registry, db: tx, context: { activeTest: false } });
+    let afterId = 0;
+    while (true) {
+      const records = await env.model(model).search([['id', '>', afterId]], { limit: 250, order: 'id asc' });
+      if (!records.ids.length) return;
+      await recompute(env, new Map([[model, new Map([[field, new Set(records.ids)]])]]));
+      afterId = records.ids[records.ids.length - 1]!;
+      env.cache.invalidate();
+    }
   }
 
   private async insertField(tx: SqlDriver, model: string, name: string, f: FieldDef): Promise<void> {
@@ -246,7 +342,10 @@ export class MetadataStore {
         f.default === undefined ? null : JSON.stringify(f.default),
         f.selection ? JSON.stringify(f.selection) : null,
         f.comodel ?? null, f.inverseName ?? null, f.relationTable ?? null, f.ondelete ?? null,
-        JSON.stringify({ digits: f.digits, translate: f.translate, copy: f.copy, aggregator: f.aggregator, currencyField: f.currencyField }),
+        JSON.stringify({
+          digits: f.digits, translate: f.translate, copy: f.copy, aggregator: f.aggregator, currencyField: f.currencyField,
+          computeExpr: f.computeExpr, defaultExpr: f.defaultExpr, depends: f.depends, store: f.store,
+        }),
       ],
     });
   }
@@ -258,22 +357,18 @@ export class MetadataStore {
    */
   private async change(
     mutate: (tx: SqlDriver) => Promise<void>,
-    opts?: DestructiveOptions,
-    target?: (op: MigrationOp) => boolean,
-    dropTables?: string[],
+    opts: MetadataChangeOptions = {},
   ): Promise<void> {
-    if (target && opts?.allowDestructive !== true) {
+    if (opts.target && opts.destructive?.allowDestructive !== true) {
       throw new EngineError('Removing custom metadata drops data; pass { allowDestructive: true }');
     }
     // shared with ModuleService so module and metadata changes never interleave
-    await withDriverLock(this.db, () => this.changeLocked(mutate, opts, target, dropTables));
+    await withDriverLock(this.db, () => this.changeLocked(mutate, opts));
   }
 
   private async changeLocked(
     mutate: (tx: SqlDriver) => Promise<void>,
-    opts?: DestructiveOptions,
-    target?: (op: MigrationOp) => boolean,
-    dropTables?: string[],
+    { destructive, target, dropTables, initialize }: MetadataChangeOptions,
   ): Promise<void> {
     const next = await this.db.transaction(async (tx) => {
       await mutate(tx);
@@ -282,7 +377,8 @@ export class MetadataStore {
       for (const m of models.values()) if (m.def.origin === 'custom' && m.table) compileOrder(m, undefined);
       const plan = await planMigration(models, tx, { dropTables });
       const ops = plan.ops.filter((o) => !o.destructive || (target?.(o) ?? false));
-      await applyMigration({ ...plan, ops }, tx, { allowDestructive: opts?.allowDestructive === true });
+      await applyMigration({ ...plan, ops }, tx, { allowDestructive: destructive?.allowDestructive === true });
+      await initialize?.(tx, models);
       return models;
     });
     this.registry.swap(next);

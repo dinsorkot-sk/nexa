@@ -159,7 +159,7 @@ export async function planMigration(
   const relations = new Set<string>();
   for (const m of tables) {
     for (const f of m.fields.values()) {
-      if (f.delegated || f.type !== 'many2many' || f.compute || f.related || !f.relationTable) continue;
+      if (f.delegated || f.type !== 'many2many' || f.compute || f.computeExpr || f.related || !f.relationTable) continue;
       if (relations.has(f.relationTable)) continue;
       if (existingTables.has(f.relationTable)) {
         // reuse only a table that really is this relation

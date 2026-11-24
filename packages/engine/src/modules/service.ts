@@ -403,14 +403,14 @@ function removedSchema(
   const nextRelations = new Set<string>();
   for (const m of next.values()) {
     if (m.table) nextTables.set(m.table, m);
-    for (const f of m.fields.values()) if (f.type === 'many2many' && f.relationTable && !f.compute && !f.related) nextRelations.add(f.relationTable);
+    for (const f of m.fields.values()) if (f.type === 'many2many' && f.relationTable && !f.compute && !f.computeExpr && !f.related) nextRelations.add(f.relationTable);
   }
   const relations = new Set<string>();
   const modelTables: string[] = [];
   const drops = new Set<string>();
   for (const m of old.values()) {
     for (const f of m.fields.values()) {
-      if (f.type === 'many2many' && f.relationTable && !f.compute && !f.related && !nextRelations.has(f.relationTable)) relations.add(f.relationTable);
+      if (f.type === 'many2many' && f.relationTable && !f.compute && !f.computeExpr && !f.related && !nextRelations.has(f.relationTable)) relations.add(f.relationTable);
     }
     if (!m.table) continue;
     const survivor = nextTables.get(m.table);
@@ -491,7 +491,7 @@ async function checkInbound(
     for (const r of models.values()) {
       if (!r.table) continue;
       for (const f of r.fields.values()) {
-        if (f.comodel !== target || f.compute || f.related) continue;
+        if (f.comodel !== target || f.compute || f.computeExpr || f.related) continue;
         let refs: { id: number }[] = [];
         if (f.type === 'many2one' && isColumn(f)) {
           refs = await tx.query<{ id: number }>({

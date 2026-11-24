@@ -1,4 +1,5 @@
 import { EngineError, type FieldDef, type ModelDef, type Registry, type ResolvedModel } from '../contracts/index.js';
+import { extractDependencies, parseExpression, type ExprNode } from '../expr/index.js';
 
 export type ResolvedField = FieldDef & { name: string; model: string };
 
@@ -97,7 +98,16 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
     const fields = new Map<string, ResolvedField>();
     const all = def.abstract ? def.fields : { ...MAGIC_FIELDS, ...def.fields };
     for (const [fname, f] of Object.entries(all)) {
-      if (f.translate !== undefined && (typeof f.translate !== 'boolean' || (f.translate && (!['char', 'text', 'html'].includes(f.type) || !!f.compute || !!f.related)))) throw new EngineError(`Invalid translate flag on '${name}.${fname}'`);
+      if (f.computeExpr !== undefined && typeof f.computeExpr !== 'string') throw new EngineError(`Invalid compute expression on '${name}.${fname}'`);
+      if (f.defaultExpr !== undefined && typeof f.defaultExpr !== 'string') throw new EngineError(`Invalid default expression on '${name}.${fname}'`);
+      if (f.defaultExpr !== undefined && f.default !== undefined) throw new EngineError(`Field '${name}.${fname}' cannot have both default and defaultExpr`);
+      if (f.defaultExpr !== undefined) try {
+        const ast = parseExpression(f.defaultExpr);
+        if (containsBareRecord(ast) || extractDependencies(f.defaultExpr).length) throw new Error('default expressions cannot depend on record fields');
+      } catch (err) {
+        throw new EngineError(`Invalid default expression on '${name}.${fname}': ${err instanceof Error ? err.message : String(err)}`);
+      }
+      if (f.translate !== undefined && (typeof f.translate !== 'boolean' || (f.translate && (!['char', 'text', 'html'].includes(f.type) || !!f.compute || !!f.computeExpr || !!f.related)))) throw new EngineError(`Invalid translate flag on '${name}.${fname}'`);
       if (f.translate && f.unique) throw new EngineError(`Translated field '${name}.${fname}' cannot be unique`);
       if (f.copy !== undefined && typeof f.copy !== 'boolean') throw new EngineError(`Invalid copy flag on '${name}.${fname}'`);
       if (f.aggregator !== undefined && !['sum', 'avg', 'min', 'max', 'count', 'count_distinct'].includes(f.aggregator)) throw new EngineError(`Invalid aggregator on '${name}.${fname}'`);
@@ -133,6 +143,7 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
         if (MAGIC_FIELDS[name] || fields.has(name)) continue;
         const attrs = { ...source };
         delete attrs.compute;
+        delete attrs.computeExpr;
         delete attrs.related;
         delete attrs.store;
         delete attrs.default;
@@ -166,7 +177,7 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
       if (f.currencyField) {
         const currency = m.fields.get(f.currencyField);
         const rounding = currency?.comodel ? out.get(currency.comodel)?.fields.get('rounding') : undefined;
-        if (f.type !== 'monetary' || !!f.compute || !!f.related || !!currency?.delegated || currency?.type !== 'many2one' || !rounding || !['float', 'monetary'].includes(rounding.type)) {
+        if (f.type !== 'monetary' || !!f.compute || !!f.computeExpr || !!f.related || !!currency?.delegated || currency?.type !== 'many2one' || !rounding || !['float', 'monetary'].includes(rounding.type)) {
           throw new EngineError(`Monetary field '${m.name}.${f.name}' needs a currency many2one with a numeric rounding field`);
         }
       }
@@ -178,12 +189,38 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
         throw new EngineError(`Model '${m.name}' parent_path requires a char/text field and a self many2one parent_id`);
       }
     }
+    for (const [key, handler] of Object.entries(m.def.onchange ?? {})) {
+      if (!m.fields.has(key)) throw new EngineError(`Onchange handler references unknown field '${m.name}.${key}'`);
+      if (typeof handler === 'string') try {
+        parseExpression(handler);
+        for (const dep of extractDependencies(handler)) walkPath(out, m, dep, `${m.name}.${key} onchange`);
+      } catch (err) {
+        throw new EngineError(`Invalid onchange expression on '${m.name}.${key}': ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    for (const constraint of m.def.constraints ?? []) if (constraint.expression) try {
+      const ast = parseExpression(constraint.expression);
+      if (containsBareRecord(ast)) throw new Error('constraint expressions must select explicit local fields');
+      for (const dep of extractDependencies(constraint.expression)) {
+        if (dep.includes('.')) throw new Error(`constraint dependency '${dep}' must be a local field`);
+        const field = m.fields.get(dep);
+        if (!field || field.delegated || field.related || ['write_uid', 'write_date', 'parent_path'].includes(dep) ||
+            ['many2one', 'one2many', 'many2many'].includes(field.type) ||
+            field.compute && !field.computeExpr || field.computeExpr && !field.store) {
+          throw new Error(`constraint dependency '${dep}' must be a local stored scalar column`);
+        }
+        // Stored expression fields are permitted only after the stored-compute validator
+        // below has proved their inputs are local, unrestricted and deterministic.
+      }
+    } catch (err) {
+      throw new EngineError(`Invalid constraint expression '${constraint.name}' on '${m.name}': ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
   // A relation table may be shared only by the two sides of one relation (same tables and columns).
   const relations = new Map<string, { key: string; owner: string }>();
   for (const m of out.values()) {
     for (const f of m.fields.values() as Iterable<ResolvedField>) {
-      if (f.delegated || f.type !== 'many2many' || !f.relationTable || f.compute || f.related) continue;
+      if (f.delegated || f.type !== 'many2many' || !f.relationTable || f.compute || f.computeExpr || f.related) continue;
       if (byTable.has(f.relationTable) || f.relationTable.startsWith('nx_')) {
         throw new EngineError(`many2many '${m.name}.${f.name}' relation table '${f.relationTable}' clashes with a model or engine table`);
       }
@@ -202,7 +239,7 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
     for (const f of m.fields.values() as Iterable<ResolvedField>) {
       if (f.delegated) continue;
       if (f.related) {
-        if (f.compute) throw new EngineError(`Field '${m.name}.${f.name}' cannot be both related and computed`);
+        if (f.compute || f.computeExpr) throw new EngineError(`Field '${m.name}.${f.name}' cannot be both related and computed`);
         const end = walkPath(out, m, f.related, `${m.name}.${f.name} related`);
         if (end.type !== f.type) {
           throw new EngineError(`Related field '${m.name}.${f.name}' is ${f.type} but '${f.related}' is ${end.type}`);
@@ -212,7 +249,30 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
         // a related field must not expose a field restricted to some groups
         if (!f.groups && end.groups) f.groups = end.groups;
       }
-      if (f.compute || f.related) {
+      if (f.computeExpr) {
+        if (f.compute) throw new EngineError(`Field '${m.name}.${f.name}' cannot have both compute and computeExpr`);
+        try {
+          const deps = extractDependencies(f.computeExpr);
+          const ast = parseExpression(f.computeExpr);
+          if (containsBareRecord(ast)) throw new Error('expression must select explicit record fields');
+          if (f.store && containsExternalExpressionReference(ast)) {
+            throw new Error('stored expression cannot use identity, context, time, or helper values');
+          }
+          f.depends = [...new Set([...(f.depends ?? []), ...deps])];
+          for (const dep of f.depends) walkPath(out, m, dep, `${m.name}.${f.name} depends`);
+          if (f.store) for (const dep of f.depends) {
+            const source = dep.includes('.') ? undefined : m.fields.get(dep);
+            if (!source || source.delegated || source.compute || source.computeExpr || source.related || source.groups?.length || source.translate ||
+                ['write_uid', 'write_date', 'parent_path'].includes(dep) ||
+                ['many2one', 'one2many', 'many2many'].includes(source.type)) {
+              throw new Error(`stored expression dependency '${dep}' must be an unrestricted local scalar column`);
+            }
+          }
+        } catch (err) {
+          throw new EngineError(`Invalid expression or dependency on '${m.name}.${f.name}': ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      if (f.compute || f.computeExpr || f.related) {
         if (MAGIC_FIELDS[f.name]) throw new EngineError(`Field '${m.name}.${f.name}' cannot be computed`);
         if (typeof f.compute === 'string' && !(m.def.methods && Object.hasOwn(m.def.methods, f.compute))) {
           throw new EngineError(`Compute method '${f.compute}' not found on '${m.name}'`);
@@ -224,7 +284,55 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
       }
     }
   }
+  const expressionGraph = new Map<string, string[]>();
+  for (const m of out.values()) for (const f of m.fields.values() as Iterable<ResolvedField>) {
+    if (!f.computeExpr) continue;
+    const source = `${m.name}.${f.name}`;
+    const edges = (f.depends ?? []).flatMap((dep) => {
+      const target = walkPath(out, m, dep, `${source} depends`);
+      return target.computeExpr ? [`${target.model}.${target.name}`] : [];
+    });
+    expressionGraph.set(source, edges);
+  }
+  const visitedExpressions = new Set<string>();
+  const activeExpressions = new Set<string>();
+  const visitExpression = (name: string): void => {
+    if (activeExpressions.has(name)) throw new EngineError(`Computed expression dependency cycle at '${name}'`);
+    if (visitedExpressions.has(name)) return;
+    activeExpressions.add(name);
+    for (const next of expressionGraph.get(name) ?? []) visitExpression(next);
+    activeExpressions.delete(name);
+    visitedExpressions.add(name);
+  };
+  for (const name of expressionGraph.keys()) visitExpression(name);
   return out;
+}
+
+const expressionGlobals = new Set(['user', 'company', 'companies', 'context', 'today', 'now', 'ref', 'search', 'read_group']);
+function containsExternalExpressionReference(node: ExprNode): boolean {
+  switch (node.kind) {
+    case 'path': return node.parts.length > 0 && (expressionGlobals.has(node.parts[0]!) || node.parts[0] === 'record' && node.parts.length < 2);
+    case 'array': return node.values.some(containsExternalExpressionReference);
+    case 'unary': return containsExternalExpressionReference(node.value);
+    case 'binary': return containsExternalExpressionReference(node.left) || containsExternalExpressionReference(node.right);
+    case 'conditional': return containsExternalExpressionReference(node.test) || containsExternalExpressionReference(node.yes) || containsExternalExpressionReference(node.no);
+    case 'call': return containsExternalExpressionReference(node.callee) || node.args.some(containsExternalExpressionReference);
+    case 'method': return containsExternalExpressionReference(node.receiver) || node.args.some(containsExternalExpressionReference);
+    case 'literal': return false;
+  }
+}
+
+function containsBareRecord(node: ExprNode): boolean {
+  switch (node.kind) {
+    case 'path': return node.parts[0] === 'record' && node.parts.length === 1;
+    case 'array': return node.values.some(containsBareRecord);
+    case 'unary': return containsBareRecord(node.value);
+    case 'binary': return containsBareRecord(node.left) || containsBareRecord(node.right);
+    case 'conditional': return containsBareRecord(node.test) || containsBareRecord(node.yes) || containsBareRecord(node.no);
+    case 'call': return containsBareRecord(node.callee) || node.args.some(containsBareRecord);
+    case 'method': return containsBareRecord(node.receiver) || node.args.some(containsBareRecord);
+    case 'literal': return false;
+  }
 }
 
 /** Follow a dotted path through relational fields and return the last field. */
@@ -248,7 +356,7 @@ export function walkPath(
 
 /** Fill many2many relation defaults and check one2many inverses (mutates the resolved field copy). */
 function resolveRelational(models: ReadonlyMap<string, ResolvedModel>, m: ResolvedModel, f: ResolvedField): void {
-  if (f.compute || f.related) return;
+  if (f.compute || f.computeExpr || f.related) return;
   const co = f.comodel ? models.get(f.comodel)! : undefined;
   if (f.type === 'one2many') {
     const inv = f.inverseName ? co!.fields.get(f.inverseName) : undefined;
@@ -282,7 +390,7 @@ export function translationLanguage(lang: unknown): string {
 export function isColumn(f: FieldDef): boolean {
   if (f.delegated) return false;
   if (f.type === 'one2many' || f.type === 'many2many') return false;
-  if ((f.compute || f.related) && !f.store) return false;
+  if ((f.compute || f.computeExpr || f.related) && !f.store) return false;
   return true;
 }
 

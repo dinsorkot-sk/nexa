@@ -61,6 +61,16 @@ curl -s -X POST localhost:3001/api/model/res.users/search_read \
 
 `read_group` รองรับช่วงเวลา `day`, `week`, `month`, `quarter` และ `year` เช่น `groupBy: ["create_date:month"]` สำหรับการจัดกลุ่มตามเดือน การจัดกลุ่ม datetime ใช้ UTC
 
+### NX-Expr ใน Studio
+
+ผู้ดูแล Settings ตั้ง `defaultExpr` หรือ `computeExpr` ผ่าน `POST /api/studio/field` เช่น `"computeExpr": "record.x_qty * 2"` ใช้ `"store": true` เมื่อต้องการเก็บค่าคำนวณจากฟิลด์ scalar ที่ผู้อ่าน record ทุกคนเห็นได้ ระบบเติมค่าให้ record เดิมเมื่อเพิ่มฟิลด์
+
+`POST /api/studio/expressions` แทนที่ onchange และ constraints ของ custom model ที่ระบุ ส่ง `onchange` เป็น map จากฟิลด์ที่เปลี่ยนไปยัง expression ที่คืนคู่ `[field, value]` และส่ง `constraints` เป็นรายการที่มี `name`, `expression` และ `message` ตามต้องการ Constraint ต้องคืน `true` จึงผ่าน หากส่ง map หรือรายการว่าง ระบบจะล้าง hooks ชนิดนั้น
+
+Expression constraint ใช้ได้กับฟิลด์ scalar ที่เก็บใน record เดียวกัน การตรวจจะทำในธุรกรรมที่สร้างหรือแก้ record นั้น
+
+โมดูลเขียน record-rule domain เป็น NX-Expr ได้ เช่น `'[["company_id", "in", companyIds]]'` ผลลัพธ์ต้องเป็น domain ที่ engine ตรวจสอบได้
+
 ### ทดลอง Contacts และ Sales
 
 ตั้ง `NEXA_MODULES=base,contacts,sales_lite` ใน `apps/api/.env` แล้วรีสตาร์ต API เมื่อเปิด tenant ครั้งถัดไป engine จะติดตั้งโมดูลที่ยังขาด จากนั้นเปิดเมนู **Contacts** และ **Sales** เพื่อดูผู้ติดต่อและใบสั่งขายตัวอย่าง

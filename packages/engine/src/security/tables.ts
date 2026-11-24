@@ -1,4 +1,5 @@
 import { ValidationError, type AccessOperation, type AccessRule, type RecordRule, type SqlDriver } from '../contracts/index.js';
+import { validateRuleExpression } from './rule-expression.js';
 
 /**
  * Engine-owned security tables (Odoo ir.model.access / ir.rule equivalents).
@@ -35,7 +36,8 @@ export async function writeModuleSecurity(
 ): Promise<void> {
   for (const r of rules) {
     if (typeof r.domain === 'string') {
-      throw new ValidationError(`Record rule '${module}.${r.name}': expression domains need the sandbox (D4); use a JSON domain`);
+      try { validateRuleExpression(r.domain); }
+      catch (error) { throw new ValidationError(`Record rule '${module}.${r.name}': invalid expression (${String(error)})`); }
     }
   }
   await db.transaction(async (tx) => {

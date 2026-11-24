@@ -9,6 +9,8 @@ import { roundMonetary } from './decimal.js';
 import { isColumn, translationLanguage, type ResolvedField } from './registry.js';
 import { checkModelAccess, checkRecordRules, combine, hiddenFields, readRuleResolver, ruleDomain, userSecurity } from '../security/access.js';
 import { assertAdminRemains, beginAdminStateChange } from '../security/last-admin.js';
+import { evaluateExpression, extractDependencies, type ExprValue } from '../expr/index.js';
+import { expressionContext, expressionRecord } from './compute.js';
 
 const MAGIC = new Set(['id', 'create_date', 'write_date', 'create_uid', 'write_uid']);
 const MAX_ONCHANGE_ROUNDS = 10;
@@ -97,7 +99,7 @@ export class RecordsetImpl implements Recordset {
       const [name, granularity] = spec.split(':');
       const field = this.field(name);
       if (hidden.has(name)) throw new AccessError(`Field '${this.model}.${name}' is restricted`);
-      if (field.delegated || (field.related && !field.store) || (field.compute && !field.store) || !isColumn(field)) {
+      if (field.delegated || (field.related && !field.store) || ((field.compute || field.computeExpr) && !field.store) || !isColumn(field)) {
         throw new ValidationError(`Field '${name}' cannot be grouped`);
       }
       if (granularity && (!['date', 'datetime'].includes(field.type) || !['day', 'week', 'month', 'quarter', 'year'].includes(granularity))) {
@@ -172,7 +174,7 @@ export class RecordsetImpl implements Recordset {
         type: field.type,
         string: field.string ?? name,
         required: !!field.required,
-        readonly: !!field.readonly || !!field.compute || !!field.related,
+        readonly: !!field.readonly || !!field.compute || !!field.computeExpr || !!field.related,
         ...(field.comodel ? { relation: field.comodel } : {}),
         ...(field.selection ? { selection: field.selection } : {}),
         ...(field.translate ? { translate: true } : {}),
@@ -192,9 +194,10 @@ export class RecordsetImpl implements Recordset {
     for (const name of fields) {
       const field = this.field(name);
       if (hidden.has(name)) throw new AccessError(`Field '${this.model}.${name}' is restricted`);
-      if (field.compute || field.related || MAGIC.has(name) || name === 'parent_path') continue;
+      if (field.compute || field.computeExpr || field.related || MAGIC.has(name) || name === 'parent_path') continue;
       const contextValue = this.env.context['default_' + name];
       if (contextValue !== undefined) out[name] = contextValue;
+      else if (field.defaultExpr !== undefined) out[name] = evaluateExpression(field.defaultExpr, await expressionContext(this.env)) as unknown;
       else if (field.default !== undefined) out[name] = typeof field.default === 'function'
         ? await (field.default as (env: unknown) => unknown)(this.env)
         : field.default;
@@ -552,9 +555,16 @@ export class RecordsetImpl implements Recordset {
       const key = queue.shift()!;
       const h = Object.hasOwn(handlers, key) ? handlers[key] : undefined;
       if (!h) continue;
-      const res = (await h(draft, this.env)) ?? {};
+      const expressionHandler = typeof h === 'string';
+      const res = typeof h === 'string'
+        ? expressionPatch(evaluateExpression(h, { ...(draft as Record<string, ExprValue>), record: draft as ExprValue, ...await expressionContext(this.env) }))
+        : (await h(draft, this.env)) ?? {};
       for (const [k, v] of Object.entries(res)) {
-        this.field(k);
+        const output = this.field(k);
+        if (expressionHandler) {
+          if (output.readonly || isComputed(output)) throw new ValidationError(`Onchange cannot update read-only field '${this.model}.${k}'`);
+          await this.checkFieldWrite([k]);
+        }
         if (Object.is(draft[k], v)) continue;
         draft[k] = patch[k] = v;
         queue.push(k);
@@ -601,10 +611,22 @@ export class RecordsetImpl implements Recordset {
 
   async checkConstraints(changed: ReadonlySet<string> | 'all'): Promise<void> {
     for (const c of this.meta.def.constraints ?? []) {
-      if (!c.check) continue;
-      if (changed !== 'all' && c.fields?.length && !c.fields.some((f) => changed.has(f))) continue;
+      if (!c.check && !c.expression) continue;
+      const expressionFields = c.expression ? extractDependencies(c.expression).map((path) => path.split('.')[0]!) : [];
+      const changedFields = [...new Set([...(c.fields ?? []), ...expressionFields])];
+      if (changed !== 'all' && !c.expression && c.fields?.length && !c.fields.some((f) => changed.has(f))) continue;
+      if (changed !== 'all' && c.expression && changedFields.length && !changedFields.some((f) => changed.has(f))) continue;
       try {
-        await c.check(this);
+        if (c.check) await c.check(this);
+        if (c.expression) {
+          const dependencies = extractDependencies(c.expression);
+          for (const id of this.ids) {
+            const record = await expressionRecord(this, id, dependencies);
+            if (evaluateExpression(c.expression, { ...(record as Record<string, ExprValue>), record: record as ExprValue, ...await expressionContext(this.env) }) !== true) {
+              throw new ValidationError(c.message ?? `Constraint '${c.name}' failed`);
+            }
+          }
+        }
       } catch (err) {
         if (err instanceof ValidationError) throw err;
         throw new ValidationError(c.message ?? (err instanceof Error ? err.message : String(err)));
@@ -706,6 +728,8 @@ export class RecordsetImpl implements Recordset {
       const contextKey = 'default_' + f.name;
       if (Object.hasOwn(this.env.context, contextKey)) {
         out[f.name] = this.env.context[contextKey];
+      } else if (f.defaultExpr !== undefined) {
+        out[f.name] = evaluateExpression(f.defaultExpr, await expressionContext(this.env)) as unknown;
       } else if (f.default !== undefined) {
         out[f.name] = typeof f.default === 'function' ? await (f.default as (e: unknown) => unknown)(this.env) : f.default;
       }
@@ -919,6 +943,19 @@ function toCommands(f: ResolvedField, v: unknown): X2ManyCommand[] {
     }
     throw new ValidationError(`Invalid command for '${f.name}': ${JSON.stringify(c)}`);
   });
+}
+
+/** NX-Expr has no object literal; onchange expressions return [[field, value], ...]. */
+function expressionPatch(value: ExprValue): Vals {
+  if (!Array.isArray(value)) throw new ValidationError('Onchange expression must return a list of [field, value] pairs');
+  const patch: Vals = {};
+  for (const entry of value) {
+    if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string' || !/^[a-z][a-z0-9_]*$/.test(entry[0])) {
+      throw new ValidationError('Onchange expression must return a list of [field, value] pairs');
+    }
+    patch[entry[0]] = entry[1];
+  }
+  return patch;
 }
 
 /** Map database constraint violations to ValidationError. */

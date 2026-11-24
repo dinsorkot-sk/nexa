@@ -20,6 +20,8 @@ export interface FieldDef {
   index?: boolean;
   unique?: boolean;
   default?: unknown | ((env: Env) => unknown);
+  /** NX-Expr evaluated when the field has no explicit value or contextual default. */
+  defaultExpr?: string;
   /** selection options */
   selection?: ReadonlyArray<readonly [value: string, label: string]>;
   /** Options appended to an inherited selection; existing keys update their label. */
@@ -39,6 +41,8 @@ export interface FieldDef {
   ondelete?: OnDelete;
   /** computed / related */
   compute?: string | ComputeFn;
+  /** NX-Expr compute, distinct from the legacy compute method name. */
+  computeExpr?: string;
   depends?: string[];
   store?: boolean;
   related?: string;           // dotted path e.g. 'partner_id.country_id'
@@ -73,7 +77,7 @@ export interface ModelDef {
   recName?: string;
   fields: Record<string, FieldDef>;
   constraints?: ConstraintDef[];
-  onchange?: Record<string, OnchangeFn>;
+  onchange?: Record<string, OnchangeFn | string>;
   methods?: Record<string, ModelMethod>;
   origin: 'module' | 'custom'; // code (low-code) vs nx_model (no-code)
   module?: string;
@@ -83,6 +87,8 @@ export interface ConstraintDef {
   name: string;
   sql?: string;                                       // e.g. 'UNIQUE(code, company_id)'
   check?: (records: Recordset) => void | Promise<void>; // throw ValidationError
+  /** NX-Expr predicate for each record; it must return true to pass. */
+  expression?: string;
   fields?: string[];
   message?: string;
 }
