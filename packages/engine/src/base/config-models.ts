@@ -3,6 +3,7 @@ import {
   checkAutomationRecords, checkButtonRecords, checkConfigParameters, checkServerActionRecords, computeNumberNextActual, checkCronRecords,
   checkDefaults, checkSequenceRanges, checkSequences,
 } from '../services/config.js';
+import { checkAccessRecords, checkRuleRecords } from '../security/records.js';
 
 const all = { read: true, write: true, create: true, unlink: true };
 const SYSTEM = 'base.group_system';
@@ -145,6 +146,41 @@ export const configModels: ModelDef[] = [
     },
     constraints: [{ name: 'ir_button_valid', check: checkButtonRecords }],
   },
+  {
+    name: 'ir.model.access', origin: 'module', module: 'base', order: 'model_name asc, id asc', description: 'Access Right',
+    fields: {
+      name: { type: 'char', required: true },
+      model_name: { type: 'char', required: true, string: 'Model' },
+      group_id: { type: 'many2one', comodel: 'res.groups', ondelete: 'restrict', required: true, string: 'Group' },
+      perm_read: { type: 'boolean', default: false, string: 'Read' },
+      perm_write: { type: 'boolean', default: false, string: 'Write' },
+      perm_create: { type: 'boolean', default: false, string: 'Create' },
+      perm_unlink: { type: 'boolean', default: false, string: 'Delete' },
+      active: { type: 'boolean', default: true },
+    },
+    constraints: [{ name: 'ir_model_access_valid', check: checkAccessRecords }],
+  },
+  {
+    name: 'ir.rule', origin: 'module', module: 'base', order: 'model_name asc, id asc', description: 'Record Rule',
+    fields: {
+      name: { type: 'char', required: true },
+      model_name: { type: 'char', required: true, string: 'Model' },
+      group_ids: {
+        type: 'many2many', comodel: 'res.groups', string: 'Groups', help: 'Empty: global rule (applies to every user, ANDed)',
+        relationTable: 'ir_rule_group_rel', column1: 'rule_id', column2: 'group_id',
+      },
+      domain_force: {
+        type: 'text', string: 'Domain',
+        help: 'JSON domain (values may be {"$ctx": "uid" | "company_id" | "company_ids" | "group_codes"}) or an NX-Expr returning a domain',
+      },
+      perm_read: { type: 'boolean', default: true, string: 'Read' },
+      perm_write: { type: 'boolean', default: true, string: 'Write' },
+      perm_create: { type: 'boolean', default: true, string: 'Create' },
+      perm_unlink: { type: 'boolean', default: true, string: 'Delete' },
+      active: { type: 'boolean', default: true },
+    },
+    constraints: [{ name: 'ir_rule_valid', check: checkRuleRecords }],
+  },
 ];
 
 export const configAccess: AccessRule[] = [
@@ -157,6 +193,8 @@ export const configAccess: AccessRule[] = [
   { model: 'ir.automation', group: SYSTEM, perms: all },
   { model: 'ir.actions.server', group: SYSTEM, perms: all },
   { model: 'ir.button', group: SYSTEM, perms: all },
+  { model: 'ir.model.access', group: SYSTEM, perms: all },
+  { model: 'ir.rule', group: SYSTEM, perms: all },
 ];
 
 export const configRules: RecordRule[] = [

@@ -179,7 +179,7 @@ export async function computeValues(records: RecordsetImpl, f: ResolvedField): P
     const out = new Map<number, unknown>();
     for (const id of records.ids) {
       const record = await expressionRecord(records, id, paths);
-      const value = await evaluateEnvExpression(records.env, f.computeExpr, { ...(record as Record<string, ExprValue>), record: record as ExprValue });
+      const value = await evaluateEnvExpression(records.env, f.computeExpr, { ...(record as Record<string, ExprValue>), record: record as ExprValue }, { readOnly: true });
       if (!validExpressionValue(f, value)) throw new ValidationError(`Expression result has the wrong type for '${records.model}.${f.name}'`);
       out.set(id, value);
     }

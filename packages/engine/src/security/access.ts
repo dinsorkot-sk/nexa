@@ -114,9 +114,7 @@ export function ruleDomainFor(sec: UserSecurity, model: string, op: AccessOperat
   for (const r of sec.ruleRows) {
     if (r.model !== model || !r.perms[op]) continue;
     if (r.groups.length && !r.groups.some((g) => sec.groups.has(g))) continue;
-    const d = typeof r.domain === 'string'
-      ? evaluateRuleExpression(r.domain, sec)
-      : substitute(r.domain, sec);
+    const d = resolveRuleDomain(r.domain, sec);
     if (!r.groups.length) globals.push(d);
     else grouped.push(d);
   }
@@ -200,7 +198,15 @@ function normalizeAnd(d: Domain): DomainTerm[] {
   return [...Array<DomainTerm>(count - 1).fill('&'), ...d];
 }
 
-function substitute(domain: Domain, sec: UserSecurity): Domain {
+/** Identity facts a rule domain may reference. */
+export type RuleIdentity = Pick<UserSecurity, 'uid' | 'companyId' | 'companyIds' | 'groups'>;
+
+/** Evaluates an NX-Expr rule domain or substitutes the placeholders of a JSON rule domain. */
+export function resolveRuleDomain(domain: Domain | string, sec: RuleIdentity): Domain {
+  return typeof domain === 'string' ? evaluateRuleExpression(domain, sec) : substitute(domain, sec);
+}
+
+function substitute(domain: Domain, sec: RuleIdentity): Domain {
   const val = (v: unknown): unknown => {
     if (v && typeof v === 'object' && !Array.isArray(v) && '$ctx' in v) {
       switch ((v as { $ctx: string }).$ctx) {

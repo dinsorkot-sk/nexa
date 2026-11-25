@@ -4,6 +4,7 @@ import './automation.js';
 import { AccessError, ValidationError, type Domain, type Env, type Recordset } from '../contracts/index.js';
 import { EnvImpl, SUPERUSER_ID, recordHooks, setDefaultsProvider, setRecordHooks } from '../orm/env.js';
 import { userSecurity } from '../security/access.js';
+import { securityRecordsAfterWrite, securityRecordsBeforeUnlink } from '../security/records.js';
 import { assertSystem, ensureServiceTables, requireKey, tenantDriver } from './common.js';
 import { AutomationRuleService, type AutomationTrigger } from './automation.js';
 import { SchedulerService } from './index.js';
@@ -533,10 +534,12 @@ setRecordHooks({
     const chained = state as { sequence?: Map<string, number>; previous?: unknown } | undefined;
     await sequenceAfterWrite(env, model, ids, vals, chained?.sequence);
     await previous?.afterWrite(env, model, ids, vals, chained?.previous);
+    await securityRecordsAfterWrite(env, model, vals);
   },
   beforeUnlink: async (env, model, ids) => {
     await previous?.beforeUnlink(env, model, ids);
     await removeRuntime(env, model, ids);
+    await securityRecordsBeforeUnlink(env, model, ids);
     await dropBacking(env, model, ids);
   },
 });

@@ -122,6 +122,7 @@ function sse(path: string, token: string): Promise<SseClient> {
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
+const year = () => today().slice(0, 4);
 
 beforeAll(async () => {
   vi.stubEnv('NODE_ENV', 'production');
@@ -158,12 +159,15 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
     const group = async (code: string) => (await searchRead('res.groups', [['code', '=', code]], ['id']))[0]!.id as number;
     ids.groupUser = await group('base.group_user');
     ids.groupSystem = await group('base.group_system');
-    // GAP-ACL-1: Studio models are granted to base.group_system only and there is no API for access
-    // rows, so sales users must be Settings administrators to use the app at all.
+    // sales groups are plain res.groups records; salespeople get no Settings rights (GAP-ACL-1 closed)
+    ids.groupSales = await create('res.groups', { name: 'Sales / User', code: 'x_sales.user', implied_ids: [{ op: 'set', ids: [ids.groupUser] }] });
+    ids.groupSalesManager = await create('res.groups', {
+      name: 'Sales / Manager', code: 'x_sales.manager', implied_ids: [{ op: 'set', ids: [ids.groupSales] }],
+    });
     for (const [user, name] of [['alice', 'Alice Seller'], ['bob', 'Bob Seller']] as const) {
       ids[user] = await create('res.users', {
         name, login: user, company_id: ids.companyA, company_ids: [{ op: 'set', ids: [ids.companyA, ids.companyB] }],
-        group_ids: [{ op: 'set', ids: [ids.groupUser, ids.groupSystem] }],
+        group_ids: [{ op: 'set', ids: [ids.groupSales] }],
       });
       // harness: GAP-AUTH-1 (no HTTP endpoint to set a password / invite a user)
       await app.get(AuthService).provisionPassword(TENANT, user, PASSWORDS[user]);
@@ -174,7 +178,7 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
     // units, products, pricelist, taxes (T30 primitives configured as data)
     const unitCat = await create('uom.category', { name: 'Unit' });
     ids.uomUnit = await create('uom.uom', { name: 'Units', category_id: unitCat, factor: 1, rounding: 1 });
-    ids.uomDozen = await create('uom.uom', { name: 'Dozens', category_id: unitCat, factor: 1 / 12, rounding: 1 });
+    ids.uomDozen = await create('uom.uom', { name: 'Dozens', category_id: unitCat, factor: 12, rounding: 1 });
     const tmplChair = await create('product.template', { name: 'Office Chair', uom_id: ids.uomUnit, currency_id: ids.usd, list_price: 120 });
     const tmplDesk = await create('product.template', { name: 'Standing Desk', uom_id: ids.uomUnit, currency_id: ids.usd, list_price: 450 });
     ids.chair = await create('product.product', { name: 'Office Chair', product_tmpl_id: tmplChair, default_code: 'CHAIR' });
@@ -201,7 +205,8 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
     await studioField('res.partner', 'x_pricelist_id', { type: 'many2one', comodel: 'product.pricelist', label: 'Pricelist' });
 
     // ---- order header ----
-    await studioField(ORDER, 'x_name', { type: 'char', label: 'Order Reference' });
+    // numbered from the ir.sequence on create (sequence_next, GAP-SEQ-1 closed)
+    await studioField(ORDER, 'x_name', { type: 'char', label: 'Order Reference', defaultExpr: "sequence_next('x_sale.order')" });
     await studioField(ORDER, 'x_partner_id', { type: 'many2one', comodel: 'res.partner', label: 'Customer', required: true, tracking: true });
     await studioField(ORDER, 'x_date', { type: 'date', label: 'Order Date', defaultExpr: 'today' });
     await studioField(ORDER, 'x_state', {
@@ -233,24 +238,31 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
     });
     // non-stored compute may traverse relations (read with the caller's access)
     await studioField(LINE, 'x_product_code', { type: 'char', label: 'Internal Reference', computeExpr: 'x_product_id.default_code' });
+    // line tax through the account.tax primitive (tax_compute, GAP-PRIM-1); non-stored because it reads tax records
+    await studioField(LINE, 'x_price_tax', {
+      type: 'float', label: 'Tax',
+      computeExpr: "[tax_compute(x_tax_ids, (x_price_unit or 0) * (1 - (x_discount or 0) / 100), x_qty or 0, x_product_id, x_order_id.x_partner_id, x_order_id.x_currency_id)].sum('tax')",
+    });
+    // the order's lines (one2many, GAP-O2M-1 closed); the inverse must be a many2one back to the order
+    expectRejected(await post('studio/field', { model: ORDER, name: 'x_bad_ids', type: 'one2many', comodel: LINE, inverseName: 'x_product_id' }, tokens.admin!), /must be a stored many2one/);
+    expectRejected(await post('studio/field', { model: ORDER, name: 'x_bad_ids', type: 'one2many', comodel: LINE }, tokens.admin!), /inverse/);
+    await studioField(ORDER, 'x_line_ids', { type: 'one2many', comodel: LINE, inverseName: 'x_order_id', label: 'Order Lines' });
 
     // model-level NX-Expr constraint (T18)
     await ok('studio/expressions', {
       model: LINE,
-      // description from product as an onchange (probed below: the draft holds ids only, GAP-REL-1)
+      // description from product as an onchange (probed below: the onchange draft still holds ids only, GAP-REL-1)
       onchange: { x_product_id: "[['x_name', x_product_id.name]]" },
       constraints: [{ name: 'x_discount_range', expression: '(x_discount or 0) >= 0 and (x_discount or 0) <= 100', fields: ['x_discount'], message: 'Discount must be between 0 and 100' }],
     });
 
     // ---- probes of what Studio cannot express (asserted so a fix flips the test) ----
-    // GAP-O2M-1: Studio cannot add one2many fields (schema enum excludes it), so the order has no lines field
-    expect((await post('studio/field', { model: ORDER, name: 'x_line_ids', type: 'one2many', comodel: LINE, inverseName: 'x_order_id' }, tokens.admin!)).status).toBe(400);
     // GAP-COMP-1: stored computes may only depend on local scalar columns, so totals cannot be stored computes
     const storedRelational = await post('studio/field', {
       model: LINE, name: 'x_list_price', type: 'float', store: true, computeExpr: 'x_product_id.product_tmpl_id.list_price',
     }, tokens.admin!);
     expectRejected(storedRelational, /must be an unrestricted local scalar column/);
-    // GAP-COMP-2: currency_round / float_round are impure helpers and are rejected in stored computes
+    // GAP-COMP-2 (kept): a precision NAME / currency is tenant data, so float_round / currency_round stay impure in stored computes
     expectRejected(await post('studio/field', {
       model: LINE, name: 'x_subtotal_cur', type: 'float', store: true, computeExpr: "float_round(x_qty * x_price_unit, 'Product Price')",
     }, tokens.admin!), /stored expression cannot use/);
@@ -266,65 +278,64 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
     expect(Object.keys(fields)).toEqual(expect.arrayContaining(['message_ids', 'activity_ids', 'x_state', 'x_amount_total']));
   });
 
+  it('grants the sales groups access rights and record rules as ir.model.access / ir.rule records (GAP-ACL-1, GAP-RULE-1)', async () => {
+    for (const model of [ORDER, LINE]) {
+      await create('ir.model.access', {
+        name: `${model} sales user`, model_name: model, group_id: ids.groupSales, perm_read: true, perm_write: true, perm_create: true,
+      });
+      await create('ir.model.access', { name: `${model} sales manager`, model_name: model, group_id: ids.groupSalesManager, perm_unlink: true });
+    }
+    // salespeople see their own orders, managers all of them; every order is limited to the active companies
+    await create('ir.rule', {
+      name: 'Own orders', model_name: ORDER, group_ids: [{ op: 'set', ids: [ids.groupSales] }],
+      domain_force: JSON.stringify([['x_user_id', '=', { $ctx: 'uid' }]]),
+    });
+    await create('ir.rule', { name: 'All orders', model_name: ORDER, group_ids: [{ op: 'set', ids: [ids.groupSalesManager] }], domain_force: '[]' });
+    await create('ir.rule', { name: 'Order company', model_name: ORDER, domain_force: "[['x_company_id', 'in', companyIds]]" });
+    await create('ir.rule', {
+      name: 'Own order lines', model_name: LINE, group_ids: [{ op: 'set', ids: [ids.groupSales] }],
+      domain_force: JSON.stringify([['x_order_id.x_user_id', '=', { $ctx: 'uid' }]]),
+    });
+    await create('ir.rule', { name: 'All order lines', model_name: LINE, group_ids: [{ op: 'set', ids: [ids.groupSalesManager] }], domain_force: '[]' });
+    // invalid domains and lock-out attempts are refused
+    expectRejected(await post('model/ir.rule/create', { values: { name: 'bad', model_name: ORDER, domain_force: '[["x_nope", "=", 1]]' } }, tokens.admin!), /invalid domain/);
+    expectRejected(await post('model/ir.rule/create', { values: { name: 'lock', model_name: 'res.users', domain_force: '[["id", "=", 0]]' } }, tokens.admin!), /managed by modules/);
+    // ... and salespeople cannot manage security
+    expect((await post('model/ir.model.access/create', { values: { name: 'x', model_name: ORDER, perm_unlink: true } }, tokens.alice!)).status).toBe(403);
+  });
+
   it('configures defaults, sequence, server actions, automations, buttons, cron, template and report as records', async () => {
     // ir.default: the order currency defaults to USD for everyone (company currency is not reachable from defaultExpr)
     await create('ir.default', { model_name: ORDER, field_name: 'x_currency_id', value_json: JSON.stringify(ids.usd) });
-    // ir.sequence with a yearly date range; it can be defined, but not drawn from no-code (GAP-SEQ-1)
+    // ir.sequence with a yearly date range, drawn by the x_name default (sequence_next)
     ids.sequence = await create('ir.sequence', {
       name: 'Sales Orders', code: 'x_sale.order', prefix: 'SO/%(year)s/', padding: 4, use_date_range: true, date_range_period: 'year',
     });
 
     const action = (values: Json) => create('ir.actions.server', values);
-    // --- partner -> pricelist (script: action expressions see a flat record, GAP-REL-1) ---
+    // --- partner -> pricelist: declarative, the action expression follows the many2one (GAP-REL-1 closed) ---
     await action({
-      key: 'ncs.order_pricelist', name: 'Pricelist from customer', model_name: ORDER, type: 'script', code: `
-        for (const id of records.ids) {
-          const [order] = env.model('${ORDER}').search([['id', '=', id]], { fields: ['x_partner_id'] });
-          if (!order || !order.x_partner_id) continue;
-          const [partner] = env.model('res.partner').search([['id', '=', order.x_partner_id]], { fields: ['x_pricelist_id'] });
-          if (partner && partner.x_pricelist_id) env.model('${ORDER}').write([id], { x_pricelist_id: partner.x_pricelist_id });
-        }`,
+      key: 'ncs.order_pricelist', name: 'Pricelist from customer', model_name: ORDER, type: 'update_record',
+      values_json: JSON.stringify({ x_pricelist_id: 'x_partner_id.x_pricelist_id' }),
     });
-    // --- line defaults: description, unit and unit price from the pricelist (re-implemented: GAP-PRIM-1) ---
+    // --- line defaults: description, unit and unit price from the pricelist primitive (GAP-PRIM-1 closed) ---
     await action({
-      key: 'ncs.line_defaults', name: 'Line defaults from product', model_name: LINE, type: 'script', code: `
-        for (const id of records.ids) {
-          const [line] = env.model('${LINE}').search([['id', '=', id]], { fields: ['x_order_id', 'x_product_id', 'x_name', 'x_uom_id', 'x_price_unit', 'x_qty'] });
-          const [product] = env.model('product.product').search([['id', '=', line.x_product_id]], { fields: ['name', 'product_tmpl_id'] });
-          const [tmpl] = env.model('product.template').search([['id', '=', product.product_tmpl_id]], { fields: ['list_price', 'uom_id'] });
-          const [order] = env.model('${ORDER}').search([['id', '=', line.x_order_id]], { fields: ['x_pricelist_id'] });
-          const values = {};
-          if (!line.x_name) values.x_name = product.name;
-          if (!line.x_uom_id) values.x_uom_id = tmpl.uom_id;
-          if (!line.x_price_unit) {
-            let price = tmpl.list_price;
-            if (order.x_pricelist_id) {
-              const [item] = env.model('product.pricelist.item').search([
-                ['pricelist_id', '=', order.x_pricelist_id], ['product_id', '=', line.x_product_id],
-                ['compute_price', '=', 'fixed'], ['min_quantity', '<=', line.x_qty || 0],
-              ], { fields: ['amount'], order: 'sequence asc, min_quantity desc', limit: 1 });
-              if (item) price = item.amount;
-            }
-            values.x_price_unit = price;
-          }
-          if (Object.keys(values).length) env.model('${LINE}').write([id], values);
-        }`,
+      key: 'ncs.line_defaults', name: 'Line defaults from product', model_name: LINE, type: 'update_record', values_json: JSON.stringify({
+        x_name: 'x_name or x_product_id.name',
+        x_uom_id: 'x_uom_id or x_product_id.product_tmpl_id.uom_id',
+        x_price_unit: 'x_price_unit or pricelist_price(x_order_id.x_pricelist_id, x_product_id, x_qty or 0, x_order_id.x_date, x_uom_id)',
+      }),
     });
-    // --- order totals from its lines and taxes (no one2many / no stored relational compute: GAP-O2M-1, GAP-COMP-1;
-    //     tax primitive not callable: GAP-PRIM-1, so percent/fixed taxes are re-implemented here) ---
+    // --- order totals from its lines: still a script, because a line change must write the order and stored
+    //     relational computes are not allowed (GAP-COMP-1); the line tax comes from tax_compute (x_price_tax) ---
     await action({
       key: 'ncs.order_totals', name: 'Recompute order totals', model_name: LINE, type: 'script', code: `
         const round2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
         const orderIds = [...new Set(env.model('${LINE}').search([['id', 'in', records.ids]], { fields: ['x_order_id'] }).map((l) => l.x_order_id))];
         for (const orderId of orderIds) {
-          const lines = env.model('${LINE}').search([['x_order_id', '=', orderId]], { fields: ['x_price_subtotal', 'x_qty', 'x_tax_ids'] });
-          let untaxed = 0, tax = 0;
-          for (const line of lines) {
-            untaxed += line.x_price_subtotal || 0;
-            const taxes = line.x_tax_ids.length ? env.model('account.tax').search([['id', 'in', line.x_tax_ids]], { fields: ['amount_type', 'amount'] }) : [];
-            for (const t of taxes) tax += round2(t.amount_type === 'percent' ? (line.x_price_subtotal || 0) * t.amount / 100 : t.amount * (line.x_qty || 0));
-          }
-          untaxed = round2(untaxed); tax = round2(tax);
+          const lines = env.model('${LINE}').search([['x_order_id', '=', orderId]], { fields: ['x_price_subtotal', 'x_price_tax'] });
+          const untaxed = round2(lines.reduce((sum, line) => sum + (line.x_price_subtotal || 0), 0));
+          const tax = round2(lines.reduce((sum, line) => sum + (line.x_price_tax || 0), 0));
           env.model('${ORDER}').write([orderId], { x_amount_untaxed: untaxed, x_amount_tax: tax, x_amount_total: round2(untaxed + tax) });
         }`,
     });
@@ -359,11 +370,13 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
     ids.template = await create('mail.template', {
       name: 'Sales: quotation', model_name: ORDER, email_to: 'x_partner_id.email',
       subject: 'Quotation {{ x_name or id }}',
-      body_html: '<p>Dear {{ x_partner_id.name }},</p><p>Your quotation total is {{ x_amount_total | money(x_currency_id) }}.</p>',
+      body_html: '<p>Dear {{ x_partner_id.name }},</p><p>Your quotation total is {{ x_amount_total | money(x_currency_id) }}.</p>'
+        + '<ul>{% for line in x_line_ids %}<li>{{ line.x_name }} x {{ line.x_qty }}</li>{% endfor %}</ul>',
     });
     ids.report = await create('ir.actions.report', {
       name: 'Quotation / Order', model_name: ORDER,
       body_html: '<h1>Quotation {{ x_name or id }}</h1><p>{{ x_partner_id.name }}</p>'
+        + '<table>{% for line in x_line_ids %}<tr><td>{{ line.x_name }}</td><td>{{ line.x_price_subtotal }}</td></tr>{% endfor %}</table>'
         + '<p>Untaxed {{ x_amount_untaxed }}</p><p>Taxes {{ x_amount_tax }}</p><p>Total {{ x_amount_total }}</p>',
     });
   });
@@ -379,8 +392,11 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
     ids.order = await create(ORDER, { x_partner_id: ids.customer }, alice);
     let order = await read(ORDER, ids.order, ['x_state', 'x_user_id', 'x_company_id', 'x_currency_id', 'x_pricelist_id', 'x_date'], alice);
     expect(order).toMatchObject({ x_state: 'draft', x_user_id: ids.alice, x_company_id: ids.companyA, x_currency_id: ids.usd, x_pricelist_id: ids.pricelistVip });
+    // the order reference is drawn from the ir.sequence by the x_name default (GAP-SEQ-1 closed)
+    expect((await read(ORDER, ids.order, ['x_name'], alice)).x_name).toBe(`SO/${year()}/0001`);
 
-    // onchange probe: the expression sees the draft's raw id, so the product name is not reachable (GAP-REL-1)
+    // onchange probe: server actions now follow relations (GAP-REL-1), but the onchange draft is still flat,
+    // so the product name is not reachable from an onchange expression (GAP-REL-2)
     const change = await ok(`model/${LINE}/onchange`, { values: { x_order_id: ids.order, x_product_id: ids.chair }, field: 'x_product_id' }, alice);
     // the handler runs but resolves the name to null (and would blank a typed description)
     expect(change.value).toEqual({ x_name: null });
@@ -391,13 +407,16 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
     expect(line1).toMatchObject({ x_name: 'Office Chair', x_uom_id: ids.uomUnit, x_price_unit: 100, x_price_subtotal: 200, x_product_code: 'CHAIR' });
     const line2 = await read(LINE, ids.line2, ['x_name', 'x_price_unit', 'x_price_subtotal'], alice);
     expect(line2).toMatchObject({ x_name: 'Standing Desk', x_price_unit: 450, x_price_subtotal: 405 });
+    // the order lists its lines (one2many, GAP-O2M-1 closed)
+    expect((await read(ORDER, ids.order, ['x_line_ids'], alice)).x_line_ids).toEqual([ids.line1, ids.line2]);
 
     order = await read(ORDER, ids.order, ['x_amount_untaxed', 'x_amount_tax', 'x_amount_total'], alice);
     expect(order).toEqual(expect.objectContaining({ x_amount_untaxed: 605, x_amount_tax: 42.35, x_amount_total: 647.35 }));
 
-    // the same numbers as the T30 tax primitive (cross-check only; the app cannot call it, GAP-PRIM-1)
+    // the line tax comes from the T30 tax primitive through tax_compute (GAP-PRIM-1 closed); same number as the RPC
     const reference = await ok('model/account.tax/call/compute', { ids: [ids.vat7], args: [405, ids.usd, 1] }, alice);
     expect(reference.result).toMatchObject({ totalTax: 28.35 });
+    expect((await read(LINE, ids.line2, ['x_price_tax'], alice)).x_price_tax).toBe(28.35);
 
     // editing a line recomputes the stored subtotal and the order totals
     await ok(`model/${LINE}/write`, { ids: [ids.line1], values: { x_qty: 3 } }, alice);
@@ -414,14 +433,16 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
     await ok(`model/res.partner/write`, { ids: [ids.customer2], values: { x_pricelist_id: ids.pricelistVip } }, tokens.admin!);
     await ok(`model/${ORDER}/write`, { ids: [ids.order], values: { x_partner_id: ids.customer2 } }, alice);
     await ok(`model/${ORDER}/write`, { ids: [ids.order], values: { x_partner_id: ids.customer } }, alice);
-    const tracked = await searchRead('mail.tracking.value', [['field', '=', 'x_partner_id']], ['new_value_char'], alice);
+    // chatter internals are Settings-only for direct reads (GAP-MAIL-2): inspected as the administrator
+    const tracked = await searchRead('mail.tracking.value', [['field', '=', 'x_partner_id']], ['new_value_char']);
     expect(tracked.map((t) => t.new_value_char)).toEqual(expect.arrayContaining(['Globex', 'Acme Corp']));
   });
 
   it('sends the quotation by email (template + T29 queue), prints it (T28) and runs the guarded state machine', async () => {
     const alice = tokens.alice!;
-    // "Send by email" is two client calls: queue the template, then the guarded state button (GAP-ACT-1)
-    const queued = expectStatus(await post(`mail/templates/${ids.template}/queue`, { recordId: ids.order, requestId: '6f1c1d8e-3c55-4c1e-9d55-0e0a7d1c0a33' }, alice), 201);
+    // "Send by email" is two client calls: queue the template, then the guarded state button (GAP-ACT-1);
+    // queueing a template mail is Settings-only, so the administrator queues it (GAP-MAIL-2)
+    const queued = expectStatus(await post(`mail/templates/${ids.template}/queue`, { recordId: ids.order, requestId: '6f1c1d8e-3c55-4c1e-9d55-0e0a7d1c0a33' }, tokens.admin!), 201);
     expect(queued.messageId).toEqual(expect.any(Number));
     await ok(`model/${ORDER}/button`, { ids: [ids.order], action: 'ncs.mark_sent' }, alice);
     expect((await read(ORDER, ids.order, ['x_state'], alice)).x_state).toBe('sent');
@@ -430,16 +451,19 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
     const deliver = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(app.get(SmtpMailService), 'transportFor').mockReturnValue({ deliver });
     expect(await ok('mail/queue/process', { limit: 5 })).toMatchObject({ sent: 1, failed: 0 });
-    expect(deliver).toHaveBeenCalledWith(expect.objectContaining({ recipients: ['buyer@acme.example'], subject: `Quotation ${ids.order}` }));
+    expect(deliver).toHaveBeenCalledWith(expect.objectContaining({ recipients: ['buyer@acme.example'], subject: `Quotation SO/${year()}/0001` }));
     const sent = deliver.mock.calls[0]![0] as { bodyHtml: string };
     expect(sent.bodyHtml).toContain('Dear Acme Corp');
     expect(sent.bodyHtml).toContain('754.35');
+    // the template lists the order lines through the one2many (GAP-O2M-1 closed)
+    expect(sent.bodyHtml).toContain('<li>Office Chair x 3</li><li>Standing Desk x 1</li>');
 
     // print: HTML through the report action, PDF through the report endpoint (GAP-ACT-1: not a button)
     const html = await ok('model/ir.actions.report/call/render_html', { ids: [ids.report], args: [[ids.order]] }, alice);
     const content = ((html.result as Json[])[0]!).content as string;
     expect(content).toContain('Acme Corp');
     expect(content).toContain('Total 754.35');
+    expect(content).toContain('<tr><td>Office Chair</td><td>300</td></tr><tr><td>Standing Desk</td><td>405</td></tr>');
     const pdf = await fetch(new URL(`/api/reports/${ids.report}/pdf`, base), {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${alice}` }, body: JSON.stringify({ recordId: ids.order }),
     });
@@ -451,14 +475,14 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
     await ok(`model/${ORDER}/button`, { ids: [ids.order], action: 'ncs.confirm' }, alice);
     expect((await read(ORDER, ids.order, ['x_state'], alice)).x_state).toBe('sale');
     expectRejected(await post(`model/${ORDER}/button`, { ids: [ids.order], action: 'ncs.confirm' }, alice), /not allowed/);
-    const messages = await searchRead('mail.message', [['model', '=', ORDER], ['res_id', '=', ids.order]], ['body', 'tracking_value_ids'], alice);
+    const messages = await searchRead('mail.message', [['model', '=', ORDER], ['res_id', '=', ids.order]], ['body', 'tracking_value_ids']);
     expect(messages.some((m) => String(m.body).includes('Order confirmed. Total: 754.35'))).toBe(true);
-    const stateTracking = await searchRead('mail.tracking.value', [['field', '=', 'x_state']], ['old_value_char', 'new_value_char'], alice);
+    const stateTracking = await searchRead('mail.tracking.value', [['field', '=', 'x_state']], ['old_value_char', 'new_value_char']);
     expect(stateTracking).toEqual(expect.arrayContaining([
       expect.objectContaining({ old_value_char: 'Quotation', new_value_char: 'Quotation Sent' }),
       expect.objectContaining({ old_value_char: 'Quotation Sent', new_value_char: 'Sales Order' }),
     ]));
-    const totalTracking = await searchRead('mail.tracking.value', [['field', '=', 'x_amount_total']], ['new_value_float'], alice);
+    const totalTracking = await searchRead('mail.tracking.value', [['field', '=', 'x_amount_total']], ['new_value_float']);
     expect(totalTracking.map((t) => t.new_value_float)).toContain(754.35);
 
     // Cancel from a confirmed order, then nothing else applies
@@ -488,23 +512,18 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
 
   it('imports three orders with their lines through /import and exports them', async () => {
     const bob = tokens.bob!;
+    // one file: the lines are nested under their order through the one2many (GAP-O2M-1 closed)
     const orders = expectStatus(await post(`model/${ORDER}/import`, {
-      header: ['id', 'x_partner_id', 'x_note'],
-      rows: [['so_imp_1', 'Acme Corp', 'Imported 1'], ['so_imp_2', 'Globex', 'Imported 2'], ['so_imp_3', 'Acme Corp', 'Imported 3']],
-    }, bob));
-    expect(orders).toMatchObject({ ok: true, created: 3 });
-    // GAP-O2M-1: lines cannot be nested under the order (no one2many), so they are a second file keyed by xmlid
-    const lines = expectStatus(await post(`model/${LINE}/import`, {
-      header: ['x_order_id/id', 'x_product_id', 'x_qty', 'x_tax_ids'],
+      header: ['id', 'x_partner_id', 'x_note', 'x_line_ids/x_product_id', 'x_line_ids/x_qty', 'x_line_ids/x_tax_ids'],
       rows: [
-        ['so_imp_1', 'Office Chair', 2, 'VAT 7%'],
-        ['so_imp_2', 'Standing Desk', 1, 'VAT 7%'],
-        ['so_imp_3', 'Office Chair', 1, null],
-        ['so_imp_3', 'Standing Desk', 1, null],
+        ['so_imp_1', 'Acme Corp', 'Imported 1', 'Office Chair', 2, 'VAT 7%'],
+        ['so_imp_2', 'Globex', 'Imported 2', 'Standing Desk', 1, 'VAT 7%'],
+        ['so_imp_3', 'Acme Corp', 'Imported 3', 'Office Chair', 1, null],
+        ['', '', '', 'Standing Desk', 1, null],
       ],
     }, bob));
-    expect(lines).toMatchObject({ ok: true, created: 4 });
-
+    expect(orders).toMatchObject({ ok: true, created: 7 });
+    expect(orders.ids).toHaveLength(3);
     const orderIds = orders.ids as number[];
     const exported = await ok(`model/${ORDER}/export`, { ids: orderIds, fields: ['id', 'x_partner_id', 'x_user_id', 'x_state', 'x_amount_total'] }, bob);
     expect(exported.rows).toEqual([
@@ -519,7 +538,7 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
   it('pushes a bus event to the salesperson when an order they follow gets a message', async () => {
     const alice = tokens.alice!;
     const [alicePartner] = await searchRead('res.users', [['id', '=', ids.alice!]], ['partner_id']);
-    const followers = await searchRead('mail.followers', [['res_model', '=', ORDER], ['res_id', '=', ids.order!]], ['partner_id'], alice);
+    const followers = await searchRead('mail.followers', [['res_model', '=', ORDER], ['res_id', '=', ids.order!]], ['partner_id']); // GAP-MAIL-2: admin inspection
     expect(followers.map((f) => f.partner_id)).toContain(alicePartner!.partner_id);
 
     const stream = await sse('/api/bus', alice);
@@ -536,10 +555,22 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
     }
   });
 
-  it('documents the current access outcome: without record rules every salesperson sees every order (GAP-RULE-1)', async () => {
-    const seen = await searchRead(ORDER, [['id', '=', ids.order!]], ['x_user_id'], tokens.bob!);
-    expect(seen).toEqual([expect.objectContaining({ x_user_id: ids.alice })]);
-    // a plain internal user (no Settings group) cannot use the app at all (GAP-ACL-1)
+  it('salespeople see only their own orders, managers all; plain users none (GAP-ACL-1, GAP-RULE-1)', async () => {
+    expect(await searchRead(ORDER, [['id', '=', ids.order!]], ['x_user_id'], tokens.bob!)).toEqual([]);
+    expect((await post(`model/${ORDER}/write`, { ids: [ids.order!], values: { x_note: 'x' } }, tokens.bob!)).status).toBe(403);
+    const mine = await searchRead(ORDER, [], ['x_user_id'], tokens.bob!);
+    expect(mine.length).toBeGreaterThan(0);
+    expect(mine.every((o) => o.x_user_id === ids.bob)).toBe(true);
+    expect(await searchRead(LINE, [['x_order_id', '=', ids.order!]], ['id'], tokens.bob!)).toEqual([]);
+    // a sales manager (no Settings rights either) sees every order of the company
+    const all = (await searchRead(ORDER, [], ['x_user_id'])).length;
+    await ok('model/res.users/write', { ids: [ids.bob], values: { group_ids: [{ op: 'set', ids: [ids.groupSalesManager] }] } });
+    const managed = await searchRead(ORDER, [], ['x_user_id'], tokens.bob!);
+    expect(managed.length).toBe(all);
+    expect(managed.some((o) => o.x_user_id === ids.alice)).toBe(true);
+    await ok('model/res.users/write', { ids: [ids.bob], values: { group_ids: [{ op: 'set', ids: [ids.groupSales] }] } });
+    expect(await searchRead(ORDER, [['id', '=', ids.order!]], ['id'], tokens.bob!)).toEqual([]);
+    // a plain internal user (no sales group) has no access right on the orders
     const plain = await create('res.users', {
       name: 'Carol Plain', login: 'carol', company_id: ids.companyA, company_ids: [{ op: 'set', ids: [ids.companyA] }],
       group_ids: [{ op: 'set', ids: [ids.groupUser] }],
@@ -550,19 +581,67 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
     expect((await post(`model/${ORDER}/search_read`, { fields: ['id'] }, carol)).status).toBe(403);
   });
 
-  it('keeps the order reference empty: the sequence exists but nothing can draw from it (GAP-SEQ-1)', async () => {
+  it('restricts orders to x_company_id in the current company (GAP-RULE-1 multi-company)', async () => {
+    const alice = tokens.alice!;
+    await ok('model/res.users/write', { ids: [ids.alice], values: { company_id: ids.companyB } });
+    const orderB = await create(ORDER, { x_partner_id: ids.customer }, alice);
+    const visible = async () => (await searchRead(ORDER, [['id', 'in', [ids.order!, orderB]]], ['id', 'x_company_id'], alice));
+    expect(await visible()).toEqual([{ id: orderB, x_company_id: ids.companyB }]);
+    await ok('model/res.users/write', { ids: [ids.alice], values: { company_id: ids.companyA } });
+    expect(await visible()).toEqual([{ id: ids.order, x_company_id: ids.companyA }]);
+  });
+
+  it('numbers every order from the ir.sequence on create, imports included (GAP-SEQ-1)', async () => {
     const [seq] = await searchRead('ir.sequence', [['id', '=', ids.sequence!]], ['prefix', 'use_date_range']);
     expect(seq).toMatchObject({ prefix: 'SO/%(year)s/', use_date_range: true });
-    expect((await read(ORDER, ids.order!, ['x_name'])).x_name).toBeNull();
+    const names = (await searchRead(ORDER, [], ['x_name'])).map((o) => o.x_name as string);
+    expect(names.length).toBeGreaterThan(4);
+    expect(names.every((name) => new RegExp(`^SO/${year()}/\\d{4}$`).test(name))).toBe(true);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('edits lines inline on the order through the one2many (GAP-O2M-1)', async () => {
+    const alice = tokens.alice!;
+    const orderId = await create(ORDER, {
+      x_partner_id: ids.customer,
+      x_line_ids: [{ op: 'create', values: { x_product_id: ids.desk, x_qty: 2, x_tax_ids: [{ op: 'set', ids: [ids.vat7] }] } }],
+    }, alice);
+    let lines = (await read(ORDER, orderId, ['x_line_ids'], alice)).x_line_ids as number[];
+    expect(lines).toHaveLength(1);
+    expect(await read(LINE, lines[0]!, ['x_name', 'x_price_unit', 'x_price_subtotal'], alice)).toMatchObject({ x_name: 'Standing Desk', x_price_unit: 450, x_price_subtotal: 900 });
+    await ok(`model/${ORDER}/write`, { ids: [orderId], values: { x_line_ids: [
+      { op: 'update', id: lines[0], values: { x_qty: 1 } },
+      { op: 'create', values: { x_product_id: ids.chair, x_qty: 1 } },
+    ] } }, alice);
+    lines = (await read(ORDER, orderId, ['x_line_ids'], alice)).x_line_ids as number[];
+    expect(lines).toHaveLength(2);
+    expect(await read(ORDER, orderId, ['x_amount_untaxed', 'x_amount_tax', 'x_amount_total'], alice))
+      .toEqual(expect.objectContaining({ x_amount_untaxed: 550, x_amount_tax: 31.5, x_amount_total: 581.5 }));
+    // deleting a line is a manager right (unlink is granted to Sales / Manager only)
+    expect((await post(`model/${ORDER}/write`, { ids: [orderId], values: { x_line_ids: [{ op: 'delete', id: lines[1] }] } }, alice)).status).toBe(403);
+    await ok(`model/${ORDER}/write`, { ids: [orderId], values: { x_line_ids: [{ op: 'delete', id: lines[1] }] } }, tokens.admin!);
+    expect((await read(ORDER, orderId, ['x_line_ids'], alice)).x_line_ids).toEqual([lines[0]]);
+    ids.inlineOrder = orderId;
+  });
+
+  it('prices a line per dozen through the pricelist primitive with unit-of-measure conversion (GAP-PRIM-1)', async () => {
+    const alice = tokens.alice!;
+    const line = await create(LINE, { x_order_id: ids.inlineOrder, x_product_id: ids.chair, x_qty: 1, x_uom_id: ids.uomDozen }, alice);
+    // VIP fixed price 100 per unit -> 1200 per dozen; the description still comes from the product
+    expect(await read(LINE, line, ['x_name', 'x_uom_id', 'x_price_unit', 'x_price_subtotal'], alice))
+      .toMatchObject({ x_name: 'Office Chair', x_uom_id: ids.uomDozen, x_price_unit: 1200, x_price_subtotal: 1200 });
+  });
+
+  it('previews never draw numbers and onchange needs the model access (review)', async () => {
+    // default_get omits the sequence default instead of burning a number
+    const defaults = (await ok(`model/${ORDER}/default_get`, { fields: ['x_name', 'x_state'] }, tokens.alice!)).values as Json;
+    expect(defaults).toEqual(expect.objectContaining({ x_state: 'draft' }));
+    expect(defaults).not.toHaveProperty('x_name');
+    // a user without access to the lines cannot run their onchange
+    const carol = await login('carol', 'ncs-carol-password-unique');
+    expect((await post(`model/${LINE}/onchange`, { values: { x_product_id: ids.chair }, field: 'x_product_id' }, carol)).status).toBe(403);
   });
 
   // ---- scenario steps blocked by engine/API gaps (see docs/nocode-sales-proof.md) ----
-  it.todo('GAP-SEQ-1: assigns SO/<year>/NNNN from the ir.sequence on create (needs a next_by_code helper or action)');
-  it.todo('GAP-ACL-1: grants a "Sales / User" group access to x_sale_order without Settings rights (no ACL records API)');
-  it.todo('GAP-RULE-1: salespeople see only their own orders, managers see all (no record-rule records API)');
-  it.todo('GAP-RULE-1: multi-company rule restricts orders to x_company_id in the allowed companies');
-  it.todo('GAP-O2M-1: edits lines inline on the order (one2many) and imports orders with nested lines');
-  it.todo('GAP-O2M-1: lists the order lines in the quotation template and PDF report');
-  it.todo('GAP-PRIM-1: prices a line through the pricelist primitive with unit-of-measure conversion (per dozen)');
   it.todo('GAP-ACT-1: "Send by email" and "Print" as single ir.button records (no mail/report action type)');
 });
