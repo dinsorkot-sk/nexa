@@ -16,7 +16,7 @@ const readOnly = { read: true, write: false, create: false, unlink: false };
  */
 export const baseModule: ModuleManifest = {
   name: 'base',
-  version: '1.2.0',
+  version: '1.3.0',
   summary: 'Companies, users, groups, access control, partners, currencies, countries and languages',
   depends: [],
   models: [...securityModels, ...configModels, ...currencyModels, ...countryModels, ...langModels, ...partnerModels],
@@ -37,6 +37,8 @@ export const baseModule: ModuleManifest = {
       xmlId: 'group_system', model: 'res.groups',
       values: { name: 'Settings', code: 'base.group_system', implied_ids: [{ ref: 'group_erp_manager' }] },
     },
+    { xmlId: 'group_portal', model: 'res.groups', values: { name: 'Portal', code: 'base.group_portal', implied_ids: [] } },
+    { xmlId: 'group_public', model: 'res.groups', values: { name: 'Public', code: 'base.group_public', implied_ids: [] } },
     {
       xmlId: 'user_admin', model: 'res.users', noUpdate: true,
       values: {

@@ -68,6 +68,20 @@ describe('reference data', () => {
       USD: true, group_system: false, group_user: false, lang_en_US: true, th: true,
     });
   });
+
+  it('seeds portal and public groups without implied groups or internal ACLs', async () => {
+    for (const code of ['base.group_portal', 'base.group_public']) {
+      const id = await ref(code);
+      const [group] = await env.model('res.groups').browse(id).read(['code', 'implied_ids']);
+      expect(group).toMatchObject({ code, implied_ids: [] });
+      const company = await ref('base.main_company');
+      const [user] = (await env.model('res.users').create({
+        name: code, login: code, company_id: company, company_ids: [{ op: 'set', ids: [company] }],
+        group_ids: [{ op: 'set', ids: [id] }],
+      })).ids;
+      await expect(h.env({ uid: user! }).model('res.company').search([])).rejects.toThrow(AccessError);
+    }
+  });
 });
 
 describe('partners', () => {
@@ -287,7 +301,8 @@ describe('upgrade from the pre-T21 base and demo contacts', () => {
     const oldBase: ModuleManifest = {
       ...baseModule, version: '1.0.0', hooks: {},
       models: [...securityModels, ...configModels],
-      data: baseModule.data!.filter((d) => ['res.company', 'res.groups', 'res.users'].includes(d.model))
+      data: baseModule.data!.filter((d) => ['res.company', 'res.groups', 'res.users'].includes(d.model)
+        && !['group_portal', 'group_public'].includes(d.xmlId))
         .map((d) => d.xmlId === 'main_company' ? { ...d, values: { name: 'My Company' } } : d),
       access: baseModule.access!.filter((a) => !newModels.has(a.model)),
       rules: baseModule.rules!.filter((r) => !newModels.has(r.model)),
@@ -335,6 +350,12 @@ describe('upgrade from the pre-T21 base and demo contacts', () => {
         const [nexa] = await e2.model('res.partner').searchRead([['name', '=', 'Nexa Systems']], ['is_company', 'complete_name', 'commercial_partner_id', 'parent_path']);
         expect(nexa).toMatchObject({ is_company: true, complete_name: 'Nexa Systems', commercial_partner_id: nexa.id, parent_path: `${nexa.id as number}/` });
         expect(await e2.model('res.country').searchCount([])).toBe(249);
+        const externalGroups = await e2.model('res.groups').searchRead(
+          [['code', 'in', ['base.group_portal', 'base.group_public']]], ['code', 'implied_ids'],
+        );
+        expect(externalGroups.map(({ code, implied_ids }) => [code, implied_ids])).toEqual([
+          ['base.group_portal', []], ['base.group_public', []],
+        ]);
         const [mali] = await e2.model('res.partner').searchRead([['name', '=', 'Mali Chaiyaporn']], ['complete_name']);
         expect(mali.complete_name).toBe('Mali Chaiyaporn');
       } finally {
