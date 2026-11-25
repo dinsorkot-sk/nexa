@@ -67,6 +67,16 @@ curl -s -X POST localhost:3001/api/model/res.users/search_read \
 - `POST /api/mail/aliases` ผูกอีเมล alias กับ `model` และ `recordId` ของเอกสารที่รองรับ chatter ลบการผูกด้วย `POST /api/mail/aliases/remove` และ body `{"alias":"..."}`
 - ตัวรับอีเมลที่เชื่อถือได้ส่ง envelope alias และข้อความที่แยกแล้วไปที่ `POST /api/mail/inbound` ด้วย `alias`, `messageId`, `from`, `text` และ `subject` ถ้ามี ระบบเพิ่มโน้ตภายในเอกสารเดิมและใช้ Message-ID กันการส่งซ้ำ
 
+#### หน่วยวัด สินค้า และภาษี
+
+เพิ่ม `product` และ `account_core` ใน `NEXA_MODULES` ตามที่ต้องการ โมดูล `product` ติดตั้ง `uom` ให้ด้วย ผู้ดูแล Settings จัดการหมวดและหน่วยวัด เทมเพลตสินค้า variant ที่มี SKU ไม่ซ้ำ และกฎราคาได้ผ่าน Model API
+
+เรียก `POST /api/model/product.pricelist/call/quote` ด้วย `{"ids":[pricelistId],"args":[{"productId":variantId,"quantity":1}]}` ส่ง `date` และ `uomId` ใน object เดียวกันได้ กฎรองรับราคาคงที่และส่วนลดเปอร์เซ็นต์ เลือกจาก variant ก่อน template แล้วจึงกฎรวม จากนั้นเรียงตาม sequence ต่ำสุด จำนวนขั้นต่ำสูงสุด และ ID ต่ำสุด จำนวนขั้นต่ำกับราคาคงที่กำหนดในหน่วยฐานของสินค้า ผลลัพธ์เป็นราคาต่อหน่วยที่ขอ
+
+แปลงหน่วยในหมวดเดียวกันผ่าน `POST /api/model/uom.uom/call/convert_quantity` ด้วย `{"ids":[fromUnitId],"args":[quantity,toUnitId]}` ผลลัพธ์ปัดตามความละเอียดของหน่วยปลายทาง ส่ง `false` เป็นอาร์กิวเมนต์ที่สามเพื่อขอค่าแบบไม่ปัด
+
+คำนวณภาษีด้วย `POST /api/model/account.tax/call/compute` และ `{"ids":[taxId],"args":[unitAmount,currencyId,quantity]}` รองรับภาษีคงที่และเปอร์เซ็นต์ คำขอหนึ่งใช้ภาษีที่บวกเพิ่มหลายรายการ หรือภาษีที่รวมในราคาแล้วหนึ่งรายการ อัตราภาษีมาจากข้อมูลที่ตั้งค่าใน tenant
+
 | Endpoint | หน้าที่ |
 |---|---|
 | `POST /api/model/:model/search_read` | `{domain, fields, offset, limit, order}` → `{records, length}` |

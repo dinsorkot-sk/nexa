@@ -45,5 +45,8 @@ export {
 export { SavedFilterService, type SavedFilterInput, type SavedFilter } from './services/filters.js';
 export * from './mail/index.js';
 export * from './report/index.js';
+export * from './uom/index.js';
+export * from './product/index.js';
+export * from './account-core/index.js';
 export { evaluateEnvExpression, registerExpressionHelper, precisionDigits, fieldDigits, type ExpressionHelperDef, type EvaluateOptions } from './orm/expr-helpers.js';
 export { localClock } from './orm/clock.js';
