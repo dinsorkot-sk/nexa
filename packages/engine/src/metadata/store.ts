@@ -358,12 +358,20 @@ export class MetadataStore {
    */
   async addMixin(model: string, mixin: string, opts: { actor?: Env } = {}): Promise<void> {
     await this.checkMixinTarget(model, mixin, opts.actor);
-    const parent = this.registry.models.get(mixin);
-    if (!parent || !parent.def.abstract || parent.def.origin !== 'module') throw new ValidationError(`'${mixin}' is not an abstract module mixin`);
-    if (inheritsModel(this.registry, model, mixin)) throw new ValidationError(`Model '${model}' already inherits '${mixin}'`);
-    const existing = this.registry.get(model);
-    const added = [...parent.fields.values()].filter((f) => !existing.fields.has(f.name));
+    const check = () => {
+      const parent = this.registry.models.get(mixin);
+      if (!parent || !parent.def.abstract || parent.def.origin !== 'module') throw new ValidationError(`'${mixin}' is not an abstract module mixin`);
+      if (inheritsModel(this.registry, model, mixin)) throw new ValidationError(`Model '${model}' already inherits '${mixin}'`);
+      return parent;
+    };
+    check(); // fail fast before taking the metadata lock
+    let added: { name: string; required?: boolean }[] = [];
+    let existing = this.registry.get(model);
     await this.change(async (tx) => {
+      // recompute under the metadata lock: another change may have altered the model meanwhile
+      const parent = check();
+      existing = this.registry.get(model);
+      added = [...parent.fields.values()].filter((f) => !existing.fields.has(f.name));
       await tx.query({ text: `INSERT INTO nx_model_mixin (model, mixin) VALUES ($1, $2)`, params: [model, mixin] });
       const required = added.filter((f) => f.required);
       if (required.length) {

@@ -1,6 +1,6 @@
 import {
-  AccessError, EngineError, MissingRecordError, ValidationError,
-  type AccessOperation, type Domain, type GroupAggregate, type Recordset, type ResolvedModel, type SearchOptions, type X2ManyCommand,
+  AccessError, ConcurrencyError, EngineError, MissingRecordError, ValidationError,
+  type AccessOperation, type LockOptions, type SearchLockedOptions, type WriteOptions, type Domain, type GroupAggregate, type Recordset, type ResolvedModel, type SearchOptions, type X2ManyCommand,
 } from '../contracts/index.js';
 import { compileDomain, compileOrder } from '../domain/compile.js';
 import { affected, cascadeAffected, computeValues, isComputed, isStoredComputed, mergeTodo, recompute, type Todo } from './compute.js';
@@ -368,6 +368,7 @@ export class RecordsetImpl implements Recordset {
     await this.checkAccess('create');
     const list = Array.isArray(vals) ? vals : [vals];
     return this.env.transaction(async () => {
+      if (this.hasParentPath() && list.some((v) => v.parent_id)) await this.lockHierarchy();
       const ids: number[] = [];
       for (const v of list) {
         await this.checkFieldWrite(Object.keys(v));
@@ -408,7 +409,17 @@ export class RecordsetImpl implements Recordset {
     });
   }
 
-  async write(vals: Vals): Promise<void> {
+  async write(vals: Vals, opts: WriteOptions = {}): Promise<void> {
+    if (Object.hasOwn(this.env.context, 'check_write_date')) {
+      // the context form applies to this (top-level) write only: hooks, automations and recomputes
+      // run on an env without it, so their own writes to the same records never trip the check
+      const map = this.env.context.check_write_date as Record<string, unknown> | null | undefined;
+      const own = map && typeof map === 'object' && Object.hasOwn(map, this.model) ? map[this.model] as WriteOptions['checkWriteDate'] : undefined;
+      const { check_write_date: _drop, ...rest } = this.env.context;
+      void _drop;
+      const stripped = new RecordsetImpl(this.env.withExactContext(rest), this.model, this.ids);
+      return stripped.write(vals, opts.checkWriteDate !== undefined || own === undefined ? opts : { ...opts, checkWriteDate: own });
+    }
     await this.checkAccess('write');
     if (this.ids.length === 0) return;
     await this.checkFieldWrite(Object.keys(vals));
@@ -416,10 +427,13 @@ export class RecordsetImpl implements Recordset {
     const monetary = [...this.meta.fields.values()].some(f => !f.delegated && f.currencyField && (f.name in vals || f.currencyField in vals));
     const delegation = Object.keys(vals).some(n => this.meta.fields.get(n)?.delegated || Object.values(this.meta.def.delegates ?? {}).includes(n));
     if ((monetary || delegation) && this.ids.length > 1) {
-      await this.env.transaction(async () => { for (const id of this.ids) await this.browse(id).write(vals); });
+      await this.env.transaction(async () => { for (const id of this.ids) await this.browse(id).write(vals, opts); });
       return;
     }
     await this.env.transaction(async () => {
+      // lock order: hierarchy advisory lock first, then row locks (same as create/unlink/lock)
+      if (this.hasParentPath() && 'parent_id' in vals) await this.lockHierarchy();
+      await this.checkWriteDates(opts);
       const hooks = recordHooks();
       const hookState = await hooks?.beforeWrite(this.env, this.model, this.ids, vals);
       const adminCount = await beginAdminStateChange(this.env.db, this.env.registry, this.model, Object.keys(vals));
@@ -468,6 +482,7 @@ export class RecordsetImpl implements Recordset {
     await this.env.transaction(async () => {
       const adminCount = await beginAdminStateChange(this.env.db, this.env.registry, this.model, [], true);
       await checkRecordRules(this.env, this.model, this.ids, 'unlink');
+      if (this.hasParentPath()) await this.lockHierarchy();
       await recordHooks()?.beforeUnlink(this.env, this.model, this.ids);
       const { todo } = await cascadeAffected(this.env, this.model, this.ids);
       const oldPaths = this.hasParentPath() ? (await this.env.db.query<{ parent_path: string | null }>({
@@ -480,6 +495,99 @@ export class RecordsetImpl implements Recordset {
       await validateRecomputed(this.env, await recompute(this.env, todo));
       await assertAdminRemains(this.env.db, adminCount);
     });
+  }
+
+  async lock(opts: LockOptions = {}): Promise<number[]> {
+    await this.checkAccess('write');
+    const clause = lockClause(opts);
+    if (this.ids.length === 0) return [];
+    if (this.ids.length > MAX_LOCK_ROWS) throw new ValidationError(`At most ${MAX_LOCK_ROWS} records can be locked at once`);
+    this.requireTransaction();
+    // keep the global lock order (hierarchy advisory lock before row locks): a later parent move in this
+    // transaction would otherwise wait on the advisory lock while holding rows another mover needs
+    if (this.hasParentPath()) await this.lockHierarchy();
+    // check first without locking, so rows the caller may not write are never locked
+    await checkRecordRules(this.env, this.model, this.ids, 'write');
+    const params: unknown[] = [[...this.ids]];
+    const rule = await this.writeRuleSql(params);
+    const rows = await sqlCall(() => this.env.db.query<{ id: number }>({
+      text: `SELECT t.id FROM "${this.table}" t WHERE t.id = ANY($1)${rule ? ` AND (${rule})` : ''} ORDER BY t.id ${clause}`,
+      params,
+    }));
+    if (!opts.skipLocked && rows.length !== this.ids.length) throw new MissingRecordError(`Some ${this.model} records no longer exist`);
+    return rows.map((r) => Number(r.id));
+  }
+
+  async searchLocked(domain: Domain, opts: SearchLockedOptions): Promise<Recordset> {
+    await this.checkAccess('read');
+    await this.checkAccess('write');
+    const limit = nonNegInt(opts?.limit, 'limit');
+    if (limit < 1 || limit > MAX_LOCK_ROWS) throw new ValidationError(`searchLocked limit must be between 1 and ${MAX_LOCK_ROWS}`);
+    const clause = lockClause({ skipLocked: opts.skipLocked ?? !opts.nowait, nowait: opts.nowait });
+    this.requireTransaction();
+    if (this.hasParentPath()) await this.lockHierarchy();
+    const params: unknown[] = [];
+    const where = await this.whereClause(this.activeDomain(domain), params);
+    const rule = await this.writeRuleSql(params);
+    const rows = await sqlCall(() => this.env.db.query<{ id: number }>({
+      text: `SELECT t.id FROM "${this.table}" t WHERE (${where})${rule ? ` AND (${rule})` : ''} `
+        + `ORDER BY ${compileOrder(this.meta, opts.order, 't', this.env.context.lang)} LIMIT ${limit} ${clause}`,
+      params,
+    }));
+    return new RecordsetImpl(this.env, this.model, rows.map((r) => Number(r.id)));
+  }
+
+  /** Compiled write record rule (null for superuser / no rule), appended to params. */
+  private async writeRuleSql(params: unknown[]): Promise<string | null> {
+    const rule = await ruleDomain(this.env, this.model, 'write');
+    if (!rule) return null;
+    await this.checkDelegatedDomainAccess(this.meta, rule);
+    return compileDomain(this.env.registry, this.meta, rule, params, 't', undefined, 'en_US');
+  }
+
+  private requireTransaction(): void {
+    // a lock taken in autocommit mode is released immediately: refuse instead of silently not locking
+    if ((this.env.db as { inTransaction?: boolean }).inTransaction === false) {
+      throw new EngineError('Row locks require an enclosing env.transaction()');
+    }
+  }
+
+  /**
+   * Optimistic concurrency: compare each listed record's write_date with the caller's copy, under
+   * a row lock so a concurrent writer cannot slip in between the check and the UPDATE.
+   */
+  private async checkWriteDates(opts: WriteOptions): Promise<void> {
+    const expected = opts.checkWriteDate;
+    if (expected === undefined || expected === null) return;
+    if (typeof expected !== 'object' || Array.isArray(expected)) throw new ValidationError('check_write_date must map record ids to timestamps');
+    const ids: number[] = []; const stamps: string[] = []; const micro: boolean[] = [];
+    for (const id of this.ids) {
+      if (!Object.hasOwn(expected, id)) continue;
+      const raw = expected[id];
+      let text: string;
+      if (raw instanceof Date && Number.isFinite(raw.getTime())) text = raw.toISOString();
+      else if (typeof raw === 'string' && WRITE_DATE_RE.test(raw) && Number.isFinite(new Date(raw.replace(/(\.\d{3})\d+/, '$1')).getTime())) text = raw;
+      else throw new ValidationError(`Invalid write_date for ${this.model}(${id}): an ISO timestamp with Z or an explicit offset is required`);
+      ids.push(id); stamps.push(text);
+      micro.push((/\.(\d+)/.exec(text)?.[1]?.length ?? 0) > 3);
+    }
+    if (!ids.length) return;
+    // compare in SQL: at full precision when the client sent microseconds, else at the millisecond
+    // precision that read() returns. write_date is a timestamp without time zone; JS drivers (PGlite,
+    // node-postgres) parse such values as host-local time, so the instant clients see is
+    // write_date interpreted in the host zone. Compare that same instant.
+    const local = `(e.ts::timestamptz AT TIME ZONE $4::text)`;
+    const rows = await sqlCall(() => this.env.db.query<{ id: number; ok: boolean }>({
+      text: `SELECT t.id, CASE WHEN e.micro THEN t.write_date IS NOT DISTINCT FROM ${local}
+          ELSE date_trunc('milliseconds', t.write_date) IS NOT DISTINCT FROM date_trunc('milliseconds', ${local}) END AS ok
+        FROM "${this.table}" t JOIN unnest($1::int[], $2::text[], $3::bool[]) AS e(id, ts, micro) ON e.id = t.id
+        ORDER BY t.id FOR UPDATE OF t`,
+      params: [ids, stamps, micro, HOST_TIME_ZONE],
+    }));
+    if (rows.length !== ids.length) throw new MissingRecordError(`Some ${this.model} records no longer exist`);
+    for (const row of rows) {
+      if (!row.ok) throw new ConcurrencyError(`Record ${this.model}(${row.id}) was modified by another user; reload and try again`);
+    }
   }
 
   async vacuum(before: Date): Promise<number> {
@@ -823,8 +931,9 @@ export class RecordsetImpl implements Recordset {
    * are missing (legacy rows).
    */
   private async repathSubtree(id: number): Promise<void> {
+    await this.lockHierarchy();
     const [row] = await this.env.db.query<{ parent_id: number | null; parent_path: string | null; parent_parent_path: string | null }>({
-      text: `SELECT t.parent_id, t.parent_path, p.parent_path AS parent_parent_path FROM "${this.table}" t LEFT JOIN "${this.table}" p ON p.id = t.parent_id WHERE t.id = $1`,
+      text: `SELECT t.parent_id, t.parent_path, p.parent_path AS parent_parent_path FROM "${this.table}" t LEFT JOIN "${this.table}" p ON p.id = t.parent_id WHERE t.id = $1 FOR UPDATE OF t`,
       params: [id],
     });
     if (!row) return;
@@ -845,6 +954,15 @@ export class RecordsetImpl implements Recordset {
       });
     }
     this.env.cache.invalidate(this.model);
+  }
+
+  /**
+   * Serialize hierarchy changes per table (transaction-scoped advisory lock, re-entrant): two
+   * concurrent moves could otherwise each pass the cycle check on stale paths (A under B and
+   * B under A) or rewrite a subtree from a parent path that is being rewritten.
+   */
+  private async lockHierarchy(): Promise<void> {
+    await sqlCall(() => this.env.db.query({ text: `SELECT pg_advisory_xact_lock(hashtext('nx.parent_path'), hashtext($1::text))`, params: [this.table] }));
   }
 
   /** After deletion: re-root surviving descendants of the deleted records (e.g. ondelete set null). */
@@ -1045,6 +1163,9 @@ async function sqlCall<T>(fn: () => Promise<T>): Promise<T> {
     if (code === '23514') throw new ValidationError(`A value violates a check constraint${col}`);
     if (code === '23503') throw new ValidationError('A referenced record is missing or still in use');
     if (code === '23502') throw new ValidationError(`Missing required value${col}`);
+    // lock conflicts are retryable concurrency failures, not server errors
+    if (code === '55P03') throw new ConcurrencyError('The record is locked by another operation; try again');
+    if (code === '40P01') throw new ConcurrencyError('Concurrent update conflict (deadlock); try again');
     throw err;
   }
 }
@@ -1081,6 +1202,15 @@ function coerce(f: ResolvedField, v: unknown): unknown {
     default:
       return v;
   }
+}
+
+const MAX_LOCK_ROWS = 1_000;
+const HOST_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+const WRITE_DATE_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:?\d{2})$/;
+
+function lockClause(opts: LockOptions): string {
+  if (opts.skipLocked && opts.nowait) throw new ValidationError('skipLocked and nowait cannot be combined');
+  return `FOR UPDATE OF t${opts.skipLocked ? ' SKIP LOCKED' : opts.nowait ? ' NOWAIT' : ''}`;
 }
 
 function normalize(f: ResolvedField, v: unknown, lang?: string): unknown {

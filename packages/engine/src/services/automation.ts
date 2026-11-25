@@ -1,7 +1,7 @@
 import { ValidationError, type Domain, type Env } from '../contracts/index.js';
 import { setRecordHooks, type EnvImpl, type RecordHooks } from '../orm/env.js';
 import { assertSystem, ensureServiceTables, requireKey, tenantDriver } from './common.js';
-import { ServerActionService } from './actions.js';
+import { ServerActionService, lockActionReferences } from './actions.js';
 
 /** Odoo base_automation triggers. */
 export type AutomationTrigger = 'on_create' | 'on_write' | 'on_create_or_write' | 'on_unlink' | 'on_change_fields' | 'on_time';
@@ -47,6 +47,11 @@ export class AutomationRuleService {
   constructor(private readonly env: Env) {}
 
   async define(def: AutomationRuleDef): Promise<void> {
+    // serialize with removeServerActionDefinitions: the referenced action cannot vanish before our row is stored
+    await this.env.transaction(async () => { await lockActionReferences(this.env); await this.defineLocked(def); });
+  }
+
+  private async defineLocked(def: AutomationRuleDef): Promise<void> {
     await assertSystem(this.env);
     requireKey(def.key, 'automation key');
     if (!TRIGGERS.has(def.trigger)) throw new ValidationError(`Unknown automation trigger '${String(def.trigger)}'`);

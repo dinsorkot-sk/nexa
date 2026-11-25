@@ -169,6 +169,33 @@ export interface Env {
   withContext(patch: Partial<Context>): Env;
   /** run fn atomically; nested calls join the outer transaction */
   transaction<T>(fn: (env: Env) => Promise<T>): Promise<T>;
+  /** Shorthand for `model(name).browse(ids).lock(opts)`. */
+  lock(model: string, ids: number | number[], opts?: LockOptions): Promise<number[]>;
+}
+
+/**
+ * Row locking (SELECT ... FOR UPDATE). Locks last until the enclosing transaction ends, so callers
+ * must run inside `env.transaction()`. Only records the caller may write (ACL + write rules) are locked.
+ */
+export interface LockOptions {
+  /** Skip rows locked by another transaction instead of waiting (FOR UPDATE SKIP LOCKED). */
+  skipLocked?: boolean;
+  /** Fail immediately when a row is locked by another transaction (FOR UPDATE NOWAIT). */
+  nowait?: boolean;
+}
+
+export interface SearchLockedOptions extends LockOptions {
+  /** Required upper bound on claimed rows (max 1000). */
+  limit: number;
+  order?: string;
+}
+
+export interface WriteOptions {
+  /**
+   * Optimistic concurrency: expected write_date per record id (as returned by read()). The write
+   * fails with ConcurrencyError when a listed record was modified since.
+   */
+  checkWriteDate?: Record<number, string | Date>;
 }
 
 export interface SearchOptions {
@@ -193,7 +220,14 @@ export interface Recordset {
   defaultGet(fields: string[]): Promise<Record<string, unknown>>;
   read(fields?: string[]): Promise<Record<string, unknown>[]>;
   create(vals: Record<string, unknown> | Record<string, unknown>[]): Promise<Recordset>;
-  write(vals: Record<string, unknown>): Promise<void>;
+  write(vals: Record<string, unknown>, opts?: WriteOptions): Promise<void>;
+  /** Lock these records FOR UPDATE (write access required); returns the ids actually locked. */
+  lock(opts?: LockOptions): Promise<number[]>;
+  /**
+   * Queue/claim pattern: search writable records matching domain and lock them; by default
+   * already-locked rows are skipped (FOR UPDATE SKIP LOCKED).
+   */
+  searchLocked(domain: Domain, opts: SearchLockedOptions): Promise<Recordset>;
   unlink(): Promise<void>;
   copy(defaults?: Record<string, unknown>): Promise<Recordset>;
   /** Remove transient records last updated before the cutoff; superuser only. */
@@ -311,3 +345,5 @@ export class AccessError extends EngineError {}
 export class ValidationError extends EngineError {}
 export class MissingRecordError extends EngineError {}
 export class UserError extends EngineError {}
+/** Optimistic concurrency conflict: the record changed since the client read it (HTTP 409 candidate). */
+export class ConcurrencyError extends ValidationError {}

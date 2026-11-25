@@ -1,5 +1,5 @@
 import { Catch, HttpException, HttpStatus, Logger, type ArgumentsHost, type ExceptionFilter } from '@nestjs/common';
-import { AccessError, EngineError, MissingRecordError, UserError, ValidationError } from '@nexa/engine';
+import { AccessError, ConcurrencyError, EngineError, MissingRecordError, UserError, ValidationError } from '@nexa/engine';
 import type { ErrorResponse } from '@nexa/shared';
 import type { Response } from 'express';
 import { ZodError } from 'zod';
@@ -29,6 +29,7 @@ export class EngineErrorFilter implements ExceptionFilter {
     if (parserType === 'entity.parse.failed') return [HttpStatus.BAD_REQUEST, 'bad_request', 'Invalid JSON body'];
     if (err instanceof AccessError) return [HttpStatus.FORBIDDEN, 'access', err.message];
     if (err instanceof MissingRecordError) return [HttpStatus.NOT_FOUND, 'missing', err.message];
+    if (err instanceof ConcurrencyError) return [HttpStatus.CONFLICT, 'conflict', err.message];
     if (err instanceof ValidationError) return [HttpStatus.UNPROCESSABLE_ENTITY, 'validation', err.message];
     if (err instanceof UserError) return [HttpStatus.UNPROCESSABLE_ENTITY, 'user', err.message];
     if (err instanceof EngineError) return [HttpStatus.BAD_REQUEST, 'bad_request', err.message];

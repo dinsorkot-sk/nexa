@@ -113,7 +113,11 @@ function output(v: Internal, tick: (count?: number) => void, maxCollectionSize: 
       const descriptor = Object.getOwnPropertyDescriptor(v, key)!;
       if (!('value' in descriptor)) throw new TypeError('Expression values cannot contain accessors');
       const item = descriptor.value as Internal;
-      if (item !== undefined && typeof item !== 'function') record[key] = output(item, tick, maxCollectionSize, maxDepth, depth + 1, seen);
+      // never materialize prototype-bearing keys: `record[key] = ...` with '__proto__' would replace the prototype
+      if (forbidden.has(key)) continue;
+      if (item !== undefined && typeof item !== 'function') {
+        Object.defineProperty(record, key, { value: output(item, tick, maxCollectionSize, maxDepth, depth + 1, seen), enumerable: true, writable: true, configurable: true });
+      }
     }
     seen.delete(v);
     return record;

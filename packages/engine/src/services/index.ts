@@ -4,7 +4,7 @@ import { EnvImpl, SUPERUSER_ID } from '../orm/env.js';
 import {
   assertReadable, assertSystem, assertWritable, ensureServiceTables, nonNegativeInt, positiveInt, requireKey, requireModel, tenantDriver,
 } from './common.js';
-import { ServerActionService, postMessage } from './actions.js';
+import { ServerActionService, lockActionReferences, postMessage } from './actions.js';
 import { runTimeAutomations } from './automation.js';
 
 export { ensureServiceTables } from './common.js';
@@ -44,6 +44,11 @@ export class SchedulerService {
   constructor(private readonly env: Env) {}
 
   async schedule(job: ScheduledJob): Promise<void> {
+    // serialize with removeServerActionDefinitions: the referenced action cannot vanish before our row is stored
+    await this.env.transaction(async () => { await lockActionReferences(this.env); await this.scheduleLocked(job); });
+  }
+
+  private async scheduleLocked(job: ScheduledJob): Promise<void> {
     requireKey(job.key, 'job key');
     positiveInt(job.intervalMs, 'job interval');
     await assertSystem(this.env);

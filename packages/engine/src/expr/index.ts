@@ -163,6 +163,10 @@ export interface SafeScriptBridge {
   call(actionId: string, args: ExprValue | undefined, limits: { maxRows: number }, signal?: AbortSignal): Promise<{ value: ExprValue; rowsConsumed: number }> | { value: ExprValue; rowsConsumed: number };
   raise(message: string): never;
   log(message: string): void;
+  /** Lock records FOR UPDATE (write access required); returns locked ids. Charged one row per id. */
+  lock?(model: string, ids: ExprValue, options?: ExprValue, signal?: AbortSignal): Promise<ExprValue> | ExprValue;
+  /** Claim writable records FOR UPDATE SKIP LOCKED (queue pattern); bounded like search. */
+  claim?(model: string, domain?: ExprValue, options?: ExprValue, signal?: AbortSignal): Promise<ExprValue> | ExprValue;
 }
 
 export interface ScriptSandboxOptions {
@@ -232,7 +236,7 @@ export async function runServerScript(source: string, bridge: SafeScriptBridge, 
       if (controller.signal.aborted) failQuota('Script time quota exceeded');
       if (new TextEncoder().encode(JSON.stringify(values)).byteLength > maxBridgePayloadBytes) failQuota('Script bridge payload quota exceeded');
       let callValues = values;
-      if (name === '__nx_search') {
+      if (name === '__nx_search' || name === '__nx_claim') {
         const suppliedOptions = values[2];
         if (suppliedOptions !== undefined && suppliedOptions !== null && (typeof suppliedOptions !== 'object' || Array.isArray(suppliedOptions))) {
           throw new TypeError('search options must be an object');
@@ -245,7 +249,7 @@ export async function runServerScript(source: string, bridge: SafeScriptBridge, 
         if (remaining <= 0) failQuota('Script row quota exceeded');
         const boundedLimit = Math.min(remaining, requestedLimit);
         callValues = [values[0]!, values[1], { ...(suppliedOptions as Record<string, ExprValue> | undefined), limit: boundedLimit }];
-      } else if (['__nx_create', '__nx_write', '__nx_unlink', '__nx_message_post'].includes(name)) {
+      } else if (['__nx_create', '__nx_write', '__nx_unlink', '__nx_message_post', '__nx_lock'].includes(name)) {
         const inputRows = values[1];
         const cost = Array.isArray(inputRows) ? inputRows.length : 1;
         if (rowCount + cost > maxRows) failQuota('Script row quota exceeded');
@@ -255,7 +259,7 @@ export async function runServerScript(source: string, bridge: SafeScriptBridge, 
       // cancellation, settle/abort in-flight DB work, then allow caller rollback.
       const result = await callback(...callValues);
       if (controller.signal.aborted) failQuota('Script time quota exceeded');
-      if (name === '__nx_search' && Array.isArray(result)) {
+      if ((name === '__nx_search' || name === '__nx_claim') && Array.isArray(result)) {
         if (result.length > Number((callValues[2] as { limit: number }).limit)) failQuota('Script row quota exceeded');
         rowCount += result.length;
       }
@@ -284,6 +288,10 @@ export async function runServerScript(source: string, bridge: SafeScriptBridge, 
     expose('__nx_unlink', (model, ids) => bridge.unlink(String(model), ids, controller.signal));
     expose('__nx_message_post', (model, ids, message) => bridge.message_post(String(model), ids, String(message), controller.signal));
     expose('__nx_call', (id, args) => bridge.call(String(id), args, { maxRows: maxRows - rowCount }, controller.signal));
+    const unsupported = (what: string) => (): never => { throw new TypeError(`${what} is not available`); };
+    const { lock, claim } = bridge;
+    expose('__nx_lock', lock ? (model, ids, opts) => lock.call(bridge, String(model), ids, opts, controller.signal) : unsupported('lock'));
+    expose('__nx_claim', claim ? (model, domain, opts) => claim.call(bridge, String(model), domain, opts, controller.signal) : unsupported('claim'));
     expose('__nx_raise', (message) => bridge.raise(String(message)));
     expose('__nx_log', (message) => { bridge.log(String(message)); return null; });
     const bootstrap = `
@@ -291,7 +299,9 @@ export async function runServerScript(source: string, bridge: SafeScriptBridge, 
         search: (domain, options) => JSON.parse(__nx_search(name, domain, options)),
         create: (values) => JSON.parse(__nx_create(name, values)),
         write: (ids, values) => JSON.parse(__nx_write(name, ids, values)),
-        unlink: (ids) => JSON.parse(__nx_unlink(name, ids))
+        unlink: (ids) => JSON.parse(__nx_unlink(name, ids)),
+        lock: (ids, options) => JSON.parse(__nx_lock(name, ids, options)),
+        claim: (domain, options) => JSON.parse(__nx_claim(name, domain, options))
       }) });
       globalThis.message_post = (model, ids, message) => JSON.parse(__nx_message_post(model, ids, message));
       globalThis.call_action = (actionId, args) => JSON.parse(__nx_call(actionId, args));

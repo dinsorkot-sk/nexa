@@ -77,6 +77,11 @@ export class ServerActionService {
   constructor(private readonly env: Env, private readonly limits: ServerActionLimits = {}) {}
 
   async define(def: ServerActionDef): Promise<void> {
+    // serialize with removeServerActionDefinitions: the referenced action cannot vanish before our row is stored
+    await this.env.transaction(async () => { await lockActionReferences(this.env); await this.defineLocked(def); });
+  }
+
+  private async defineLocked(def: ServerActionDef): Promise<void> {
     await assertSystem(this.env);
     const action = validateDefinition(this.env, def);
     await ensureServiceTables(this.env);
@@ -189,9 +194,22 @@ function recordIds(value: unknown): number[] {
   return [...new Set(list as number[])];
 }
 
+const UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
 function plainValues(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new ValidationError(`${label} must be an object`);
   return value as Record<string, unknown>;
+}
+
+function lockOptions(value: unknown, label: string): { skipLocked?: boolean; nowait?: boolean } {
+  const opts = value === undefined || value === null ? {} : plainValues(value, label);
+  const out: { skipLocked?: boolean; nowait?: boolean } = {};
+  for (const key of ['skipLocked', 'nowait'] as const) {
+    if (opts[key] === undefined) continue;
+    if (typeof opts[key] !== 'boolean') throw new ValidationError(`${label}: ${key} must be a boolean`);
+    out[key] = opts[key] as boolean;
+  }
+  return out;
 }
 
 function jsonValue(value: unknown): ExprValue {
@@ -248,7 +266,10 @@ async function evaluateFor(env: Env, source: string, record: Record<string, Expr
 
 async function evaluateValues(env: Env, values: Record<string, string>, record: Record<string, ExprValue> | null): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
-  for (const [field, source] of Object.entries(values)) out[field] = await evaluateFor(env, source, record);
+  for (const [field, source] of Object.entries(values)) {
+    if (UNSAFE_KEYS.has(field)) throw new ValidationError(`Invalid field name '${field}'`);
+    Object.defineProperty(out, field, { value: await evaluateFor(env, source, record), enumerable: true, writable: true, configurable: true });
+  }
   return out;
 }
 
@@ -391,6 +412,31 @@ async function runScript(
       live(signal);
       return true;
     },
+    async lock(name, rawIds, options, signal) {
+      live(signal);
+      const target = recordIds(rawIds);
+      charge(state, target.length);
+      const locked = await records(name).browse(target).lock(lockOptions(options, 'lock options'));
+      live(signal);
+      return locked;
+    },
+    async claim(name, domain, options, signal) {
+      live(signal);
+      if (domain !== undefined && domain !== null && !Array.isArray(domain)) throw new ValidationError('claim domain must be a list');
+      const opts = options === undefined || options === null ? {} : plainValues(options, 'claim options');
+      if (opts.order !== undefined && typeof opts.order !== 'string') throw new ValidationError('claim order must be a string');
+      // live budget: earlier bridge calls / nested actions in this run already consumed rows
+      const left = state.maxRows - state.rows;
+      if (left < 1) throw new ValidationError('Server action row quota exceeded');
+      const limit = typeof opts.limit === 'number' ? opts.limit : left;
+      if (!Number.isSafeInteger(limit) || limit < 1) throw new ValidationError('claim limit must be a positive integer');
+      const claimed = await records(name).searchLocked((domain ?? []) as Domain, {
+        ...lockOptions(opts, 'claim options'), limit: Math.min(limit, left, 1_000), ...(opts.order ? { order: opts.order as string } : {}),
+      });
+      live(signal);
+      charge(state, claimed.ids.length);
+      return [...claimed.ids];
+    },
     async message_post(name, rawIds, message, signal) {
       live(signal);
       const target = recordIds(rawIds);
@@ -478,6 +524,11 @@ export class ButtonService {
   constructor(private readonly env: Env, private readonly limits: ServerActionLimits = {}) {}
 
   async define(def: ButtonDef): Promise<void> {
+    // serialize with removeServerActionDefinitions: the referenced action cannot vanish before our row is stored
+    await this.env.transaction(async () => { await lockActionReferences(this.env); await this.defineLocked(def); });
+  }
+
+  private async defineLocked(def: ButtonDef): Promise<void> {
     await assertSystem(this.env);
     knownModel(this.env, def.model);
     const { kind, ref } = buttonTarget(def);
@@ -546,6 +597,9 @@ export async function removeServerActionDefinitions(env: Env, keys: readonly str
   await ensureServiceTables(env);
   const db = tenantDriver(env);
   const list = [...new Set(keys)];
+  await env.transaction(async () => {
+  // same lock as every definition that stores a reference: check and delete are atomic with respect to them
+  await lockActionReferences(env);
   const [ref] = await db.query<{ what: string; key: string }>({
     text: `SELECT 'automation rule ' || key AS what, action AS key FROM nx_automation WHERE action = ANY($1)
       UNION ALL SELECT 'scheduled job ' || key, action FROM nx_scheduled_job WHERE action = ANY($1)
@@ -558,6 +612,16 @@ export async function removeServerActionDefinitions(env: Env, keys: readonly str
   });
   if (ref) throw new ValidationError(`Server action '${ref.key}' is still used by ${ref.what}`);
   await db.query({ text: `DELETE FROM nx_server_action WHERE key = ANY($1)`, params: [list] });
+  });
+}
+
+/**
+ * Transaction-scoped advisory lock shared by everything that adds or removes references to stored
+ * server actions (automation rules, scheduled jobs, buttons, multi actions, removal). Call inside
+ * env.transaction(); it is held until that transaction ends.
+ */
+export async function lockActionReferences(env: Env): Promise<void> {
+  await tenantDriver(env).query({ text: `SELECT pg_advisory_xact_lock(hashtext('nx.server_action_refs'))`, params: [] });
 }
 
 /** Removes button definitions (admin-only). Each entry names exactly one of `action` / `method`. */

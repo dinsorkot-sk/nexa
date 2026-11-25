@@ -70,7 +70,7 @@ export const unlinkRequestSchema = z.object({ ids: ids.min(1) })
 export const callRequestSchema = z.object({ ids: ids.default([]), args: z.array(z.unknown()).max(20).default([]) })
 export const onchangeRequestSchema = z.object({ values, field: fieldName, context: modelContext })
 
-export const errorTypes = ['access', 'validation', 'missing', 'user', 'bad_request', 'unauthorized', 'internal'] as const
+export const errorTypes = ['access', 'validation', 'conflict', 'missing', 'user', 'bad_request', 'unauthorized', 'internal'] as const
 
 export const errorResponseSchema = z.object({
   error: z.object({ type: z.enum(errorTypes), message: z.string() }),

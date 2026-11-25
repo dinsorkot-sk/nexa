@@ -1,4 +1,4 @@
-import type { Context, Env, Recordset, Registry, SqlDriver } from '../contracts/index.js';
+import type { Context, Env, LockOptions, Recordset, Registry, SqlDriver } from '../contracts/index.js';
 import { RecordsetImpl } from './recordset.js';
 
 /** Odoo convention: uid 1 is the superuser (__system__) and always runs in superuser mode. */
@@ -132,6 +132,15 @@ export class EnvImpl implements Env {
   /** Env carrying a server-action run state shared by nested actions and the automations they trigger. */
   withActionState(state: object): EnvImpl {
     return this.derive({ actionState: state });
+  }
+
+  lock(model: string, ids: number | number[], opts?: LockOptions): Promise<number[]> {
+    return this.model(model).browse(ids).lock(opts);
+  }
+
+  /** Env with exactly this context (no merge), e.g. to drop a one-shot key. */
+  withExactContext(context: Context): EnvImpl {
+    return this.derive({ context });
   }
 
   withContext(patch: Partial<Context>): Env {

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, UnauthorizedException, Req } from '@nestjs/common';
-import { AccessError, ButtonService, getAction, getMenus, getView, MetadataStore, userSecurity, ValidationError, type Domain, type Env, type FieldDef, type ViewNode, type ViewType } from '@nexa/engine';
+import { AccessError, ButtonService, getAction, isThread, getMenus, getView, MetadataStore, userSecurity, ValidationError, type Domain, type Env, type FieldDef, type TenantHandle, type ViewNode, type ViewType } from '@nexa/engine';
 import {
   callRequestSchema, copyRequestSchema, createRequestSchema, defaultGetRequestSchema, fieldsGetRequestSchema,
   nameSearchRequestSchema, onchangeRequestSchema, readGroupRequestSchema, readRequestSchema, searchCountRequestSchema,
@@ -57,7 +57,12 @@ const studioField = z.object({
   label: z.string().max(120).optional(),
   required: z.boolean().optional(),
   translate: z.boolean().optional(),
-  digits: z.tuple([z.number().int().min(1).max(1000), z.number().int().min(0).max(1000)]).optional(),
+  // [precision, scale] or the name of a decimal.precision record (checked to exist)
+  digits: z.union([
+    z.tuple([z.number().int().min(1).max(1000), z.number().int().min(0).max(1000)]),
+    z.string().trim().min(1).max(80),
+  ]).optional(),
+  tracking: z.boolean().optional(),
   copy: z.boolean().optional(),
   aggregator: z.enum(['sum', 'avg', 'min', 'max', 'count', 'count_distinct']).optional(),
   currencyField: z.string().regex(/^[a-z][a-z0-9_]*$/).max(63).optional(),
@@ -75,7 +80,7 @@ const studioField = z.object({
   if (field.type === 'selection' && !field.selection) {
     ctx.addIssue({ code: 'custom', path: ['selection'], message: 'Selection fields require at least one choice.' });
   }
-  if (field.digits && (field.type !== 'float' || field.digits[1] > field.digits[0])) {
+  if (field.digits !== undefined && (field.type !== 'float' || (Array.isArray(field.digits) && field.digits[1] > field.digits[0]))) {
     ctx.addIssue({ code: 'custom', path: ['digits'], message: 'Digits require a float field and scale at most precision.' });
   }
   if (field.translate && field.type !== 'char' && field.type !== 'text') {
@@ -85,6 +90,21 @@ const studioField = z.object({
     ctx.addIssue({ code: 'custom', path: ['currencyField'], message: 'Currency field requires a monetary field.' });
   }
 });
+const mixinName = z.string().regex(/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$/).max(120);
+const studioMixin = z.strictObject({ model: modelName, mixin: mixinName });
+const studioMixinDetach = z.strictObject({ model: modelName, mixin: mixinName, confirmDestructive: z.boolean().optional() });
+/** Models Studio must not reshape (security, configuration, mail internals); abstract models are refused too. */
+const STUDIO_PROTECTED_MODELS = new Set([
+  'res.users', 'res.groups', 'res.company', 'decimal.precision',
+  'mail.message', 'mail.tracking.value', 'mail.followers', 'mail.message.subtype',
+]);
+function assertStudioTarget(handle: TenantHandle, model: string): void {
+  const target = handle.registry.models.get(model);
+  if (!target) throw new ValidationError(`Unknown model '${model}'`);
+  if (target.def.abstract || !target.table || STUDIO_PROTECTED_MODELS.has(model) || model.startsWith('ir.') || model.startsWith('nx.')) {
+    throw new ValidationError(`Studio cannot modify the model '${model}'`);
+  }
+}
 const viewNodeSchema: z.ZodType<ViewNode> = z.lazy(() => z.object({
   tag: z.string().regex(/^[a-z][a-z0-9_-]*$/).max(40),
   attrs: z.record(z.string(), z.unknown()).optional(),
@@ -96,6 +116,24 @@ const studioView = z.object({
   type: z.enum(['list', 'form', 'search']),
   arch: viewNodeSchema,
 });
+
+/**
+ * Fields a mixin contributes to a model that neither the model's own (custom metadata) definition
+ * nor its other parents provide: the columns a detach drops.
+ */
+async function mixinOwnFields(handle: TenantHandle, model: string, mixin: string): Promise<string[]> {
+  const registry = handle.registry;
+  const target = registry.models.get(model);
+  const parent = registry.models.get(mixin);
+  if (!target || !parent) return [];
+  const custom = (await MetadataStore.for(handle).list()).find((d) => d.name === model);
+  const others = new Set<string>(Object.keys(custom?.fields ?? {}));
+  for (const other of target.def.extends ?? []) {
+    if (other === mixin || other === model) continue;
+    for (const name of registry.models.get(other)?.fields.keys() ?? []) others.add(name);
+  }
+  return [...parent.fields.keys()].filter((name) => target.fields.has(name) && !others.has(name)).sort();
+}
 
 /**
  * Generic engine API (ADR 0001): every operation runs as the authenticated user through the engine,
@@ -240,14 +278,23 @@ export class EngineController {
   @Post('studio/field')
   @HttpCode(200)
   async createStudioField(@CallerParam() c: Caller, @Body() body: unknown) {
+    const { env, handle } = await this.studio(c);
     const req = studioField.parse(body);
-    const { handle } = await this.studio(c);
+    assertStudioTarget(handle, req.model);
+    if (req.tracking && !isThread(env, req.model)) {
+      throw new ValidationError(`Tracking requires '${req.model}' to inherit mail.thread`);
+    }
+    if (typeof req.digits === 'string') {
+      const count = await env.model('decimal.precision').searchCount([['name', '=', req.digits]]);
+      if (!count) throw new ValidationError(`Unknown decimal precision '${req.digits}'`);
+    }
     const field: FieldDef = {
       type: req.type,
       ...(req.label ? { string: req.label } : {}),
       ...(req.required ? { required: true } : {}),
       ...(req.translate !== undefined ? { translate: req.translate } : {}),
-      ...(req.digits ? { digits: req.digits } : {}),
+      ...(req.digits !== undefined ? { digits: req.digits } : {}),
+      ...(req.tracking !== undefined ? { tracking: req.tracking } : {}),
       ...(req.copy !== undefined ? { copy: req.copy } : {}),
       ...(req.aggregator ? { aggregator: req.aggregator } : {}),
       ...(req.currencyField ? { currencyField: req.currencyField } : {}),
@@ -261,6 +308,47 @@ export class EngineController {
     };
     await MetadataStore.for(handle).addField(req.model, req.name, field);
     return { model: req.model, field: req.name };
+  }
+
+  /** Abstract module mixins that can be attached, and the mixins attached through metadata per model. */
+  @Get('studio/mixins')
+  async studioMixins(@CallerParam() c: Caller) {
+    const { handle } = await this.studio(c);
+    const available = [...handle.registry.models.values()]
+      .filter((m) => m.def.abstract && m.def.origin === 'module')
+      .map((m) => ({ name: m.name, description: m.def.description ?? m.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return { available, attached: await MetadataStore.for(handle).listMixins() };
+  }
+
+  /** Attach an abstract mixin as the caller (actor); the store re-checks the caller is an administrator. */
+  @Post('studio/mixin/attach')
+  @HttpCode(200)
+  async attachStudioMixin(@CallerParam() c: Caller, @Body() body: unknown) {
+    const { env, handle } = await this.studio(c);
+    const req = studioMixin.parse(body);
+    assertStudioTarget(handle, req.model);
+    await MetadataStore.for(handle).addMixin(req.model, req.mixin, { actor: env });
+    // a fresh env sees the rebuilt registry
+    const fresh = await this.engine.env(env.tenant, env.uid);
+    return { model: req.model, mixin: req.mixin, fields: await fresh.model(req.model).fieldsGet() };
+  }
+
+  /** Detach a mixin: drops the columns it added, so an explicit confirmation is required. */
+  @Post('studio/mixin/detach')
+  @HttpCode(200)
+  async detachStudioMixin(@CallerParam() c: Caller, @Body() body: unknown) {
+    const { env, handle } = await this.studio(c);
+    const req = studioMixinDetach.parse(body);
+    if (req.confirmDestructive !== true) {
+      const dropped = await mixinOwnFields(handle, req.model, req.mixin);
+      throw new ValidationError(
+        `Detaching '${req.mixin}' from '${req.model}' drops the fields: ${dropped.join(', ') || '(none)'}; set confirmDestructive: true`,
+      );
+    }
+    await MetadataStore.for(handle).removeMixin(req.model, req.mixin, { allowDestructive: true, actor: env });
+    const fresh = await this.engine.env(env.tenant, env.uid);
+    return { model: req.model, mixin: req.mixin, fields: await fresh.model(req.model).fieldsGet() };
   }
 
   @Post('studio/expressions')
