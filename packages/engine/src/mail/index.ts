@@ -1,5 +1,7 @@
 // Importing this module installs the mail record hooks (tracking, auto-follow, cleanup).
 import './hooks.js';
+// The bus hooks chain onto the mail hooks (chatter, activity and record change events).
+import '../bus/hooks.js';
 
 export { mailModule, mailModels, mailAccess, mailRules } from './manifest.js';
 export { MailThreadService, type MessagePostOptions, type MessageRow, type FollowerRow } from './thread.js';
