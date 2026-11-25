@@ -11,7 +11,7 @@ import { checkModelAccess, checkRecordRules, combine, hiddenFields, readRuleReso
 import { assertAdminRemains, beginAdminStateChange } from '../security/last-admin.js';
 import { extractDependencies, type ExprValue } from '../expr/index.js';
 import { expressionRecord } from './compute.js';
-import { evaluateEnvExpression, fieldDigits, roundNamedPrecision } from './expr-helpers.js';
+import { SideEffectRefusedError, evaluateEnvExpression, fieldDigits, roundNamedPrecision } from './expr-helpers.js';
 
 const MAGIC = new Set(['id', 'create_date', 'write_date', 'create_uid', 'write_uid']);
 const MAX_ONCHANGE_ROUNDS = 10;
@@ -203,7 +203,12 @@ export class RecordsetImpl implements Recordset {
       const contextValue = this.env.context['default_' + name];
       if (contextValue !== undefined) out[name] = contextValue;
       else if (stored?.has(name)) out[name] = stored.get(name);
-      else if (field.defaultExpr !== undefined) out[name] = await evaluateEnvExpression(this.env, field.defaultExpr) as unknown;
+      else if (field.defaultExpr !== undefined) {
+        // a form preview must not draw numbers: a default with side effects (sequence_next) is left
+        // out here and applied by create
+        try { out[name] = await evaluateEnvExpression(this.env, field.defaultExpr, {}, { readOnly: true }) as unknown; }
+        catch (error) { if (!(error instanceof SideEffectRefusedError)) throw error; }
+      }
       else if (field.default !== undefined) out[name] = typeof field.default === 'function'
         ? await (field.default as (env: unknown) => unknown)(this.env)
         : field.default;
@@ -679,6 +684,13 @@ export class RecordsetImpl implements Recordset {
 
   async onchange(values: Vals, field: string): Promise<Vals> {
     this.field(field);
+    // onchange previews a create (no ids) or an edit of these records: the caller needs that right
+    await this.checkAccess('read');
+    if (this.ids.length) {
+      await this.checkAccess('write');
+      const visible = await this.read(['id']);
+      if (visible.length !== new Set(this.ids).size) throw new AccessError('Record is unavailable');
+    } else await this.checkAccess('create');
     const handlers = this.meta.def.onchange ?? {};
     const draft: Vals = { ...values };
     const patch: Vals = {};
@@ -692,7 +704,7 @@ export class RecordsetImpl implements Recordset {
       if (!h) continue;
       const expressionHandler = typeof h === 'string';
       const res = typeof h === 'string'
-        ? expressionPatch(await evaluateEnvExpression(this.env, h, { ...(draft as Record<string, ExprValue>), record: draft as ExprValue }))
+        ? expressionPatch(await evaluateEnvExpression(this.env, h, { ...(draft as Record<string, ExprValue>), record: draft as ExprValue }, { readOnly: true }))
         : (await h(draft, this.env)) ?? {};
       for (const [k, v] of Object.entries(res)) {
         const output = this.field(k);
@@ -757,7 +769,7 @@ export class RecordsetImpl implements Recordset {
           const dependencies = extractDependencies(c.expression);
           for (const id of this.ids) {
             const record = await expressionRecord(this, id, dependencies);
-            if (await evaluateEnvExpression(this.env, c.expression, { ...(record as Record<string, ExprValue>), record: record as ExprValue }) !== true) {
+            if (await evaluateEnvExpression(this.env, c.expression, { ...(record as Record<string, ExprValue>), record: record as ExprValue }, { readOnly: true }) !== true) {
               throw new ValidationError(c.message ?? `Constraint '${c.name}' failed`);
             }
           }

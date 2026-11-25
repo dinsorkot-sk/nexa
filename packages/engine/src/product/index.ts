@@ -2,6 +2,7 @@ import { currencyConvert, currencyRound, contextToday } from '../base/currency.j
 import { AccessError, ValidationError, type Domain, type Env, type ModelDef, type ModuleManifest, type Recordset } from '../contracts/index.js';
 import { positiveInt } from '../services/common.js';
 import { convertQuantity } from '../uom/index.js';
+import './expr-helpers.js';
 
 const models: ModelDef[] = [
   {

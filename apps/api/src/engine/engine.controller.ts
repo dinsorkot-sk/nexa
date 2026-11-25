@@ -69,7 +69,7 @@ const studioExpressions = z.strictObject({
 const studioField = z.object({
   model: modelName,
   name: z.string().regex(/^x_[a-z0-9_]+$/).max(63),
-  type: z.enum(['char', 'text', 'integer', 'float', 'monetary', 'boolean', 'date', 'datetime', 'selection', 'json', 'many2one', 'many2many', 'reference']),
+  type: z.enum(['char', 'text', 'integer', 'float', 'monetary', 'boolean', 'date', 'datetime', 'selection', 'json', 'many2one', 'one2many', 'many2many', 'reference']),
   label: z.string().max(120).optional(),
   required: z.boolean().optional(),
   translate: z.boolean().optional(),
@@ -87,11 +87,17 @@ const studioField = z.object({
   store: z.boolean().optional(),
   depends: z.array(z.string().regex(/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/).max(200)).max(100).optional(),
   comodel: modelName.optional(),
-  inverseName: z.string().regex(/^x_[a-z0-9_]+$/).max(63).optional(),
+  inverseName: z.string().regex(/^[a-z][a-z0-9_]*$/).max(63).optional(),
   selection: z.array(z.tuple([z.string().min(1).max(40), z.string().min(1).max(80)])).min(1).max(50).optional(),
 }).superRefine((field, ctx) => {
-  if (['many2one', 'many2many'].includes(field.type) && !field.comodel) {
+  if (['many2one', 'one2many', 'many2many'].includes(field.type) && !field.comodel) {
     ctx.addIssue({ code: 'custom', path: ['comodel'], message: 'Relation fields require a related model.' });
+  }
+  if (field.type === 'one2many' && !field.inverseName) {
+    ctx.addIssue({ code: 'custom', path: ['inverseName'], message: 'One2many fields require the inverse many2one field name.' });
+  }
+  if (field.type === 'one2many' && (field.store !== undefined || field.computeExpr || field.defaultExpr || field.required || field.depends)) {
+    ctx.addIssue({ code: 'custom', path: ['type'], message: 'One2many fields cannot be computed, defaulted, required or set storage.' });
   }
   if (field.type === 'selection' && !field.selection) {
     ctx.addIssue({ code: 'custom', path: ['selection'], message: 'Selection fields require at least one choice.' });
@@ -305,6 +311,16 @@ export class EngineController {
     if (typeof req.digits === 'string') {
       const count = await env.model('decimal.precision').searchCount([['name', '=', req.digits]]);
       if (!count) throw new ValidationError(`Unknown decimal precision '${req.digits}'`);
+    }
+    if (req.type === 'one2many') {
+      // the comodel must be a concrete model with a stored many2one back to this model
+      const comodel = handle.registry.models.get(req.comodel!);
+      if (!comodel || comodel.def.abstract) throw new ValidationError(`Unknown related model '${req.comodel}'`);
+      const inverse = comodel.fields.get(req.inverseName!);
+      if (!inverse || inverse.type !== 'many2one' || inverse.comodel !== req.model || inverse.store === false
+        || inverse.compute || inverse.computeExpr || inverse.related) {
+        throw new ValidationError(`'${req.comodel}.${req.inverseName}' must be a stored many2one field to '${req.model}'`);
+      }
     }
     const field: FieldDef = {
       type: req.type,

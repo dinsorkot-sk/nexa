@@ -1,6 +1,7 @@
 import { AccessError, ValidationError, type Env, type Recordset, type SqlDriver } from '../contracts/index.js';
 import { userSecurity } from '../security/access.js';
 import type { EnvImpl } from '../orm/env.js';
+import { registerExpressionHelper } from '../orm/expr-helpers.js';
 import { ensureServiceTables, nonNegativeInt, positiveInt, requireKey, tenantDriver } from './common.js';
 
 export interface SequenceOptions {
@@ -234,6 +235,31 @@ export class SequenceService {
     return legacyNext(this.env, code, options);
   }
 }
+
+/**
+ * NX-Expr `sequence_next(code, company_id?)`: Odoo `ir.sequence.next_by_code` for no-code create-time
+ * defaults and server-action / automation field values. Access model: like SequenceService, drawing a number
+ * needs no ACL on ir.sequence (the configuration is read with the sequence's own rights, so plain
+ * users can number their documents); the caller's identity still decides the company: the env's
+ * current company by default, or an explicit company that must be one of the caller's allowed
+ * companies. Only `ir.sequence` records are used (no implicit legacy counter is created for an
+ * unknown code); an unknown code returns null like next_by_code's False. The helper has side
+ * effects, so it is impure (rejected in stored computes) and refused in read-only evaluations:
+ * computed fields, constraints, onchange, button guards and action messages; default_get omits such a
+ * default (the number is drawn by create).
+ * Within one expression evaluation identical calls are memoized and return the same number.
+ */
+registerExpressionHelper('sequence_next', {
+  sideEffects: true,
+  resolve: async (env, [code, company]) => {
+    if (typeof code !== 'string' || !code.trim() || code.length > 128) throw new ValidationError('sequence_next requires a sequence code');
+    if (company !== undefined && company !== null && (typeof company !== 'number' || !Number.isSafeInteger(company) || company <= 0)) {
+      throw new ValidationError('sequence_next company must be a company id');
+    }
+    if (!sequenceRegistered(env)) return null;
+    return nextFromRecord(env, code, typeof company === 'number' ? { companyId: company } : {});
+  },
+});
 
 // ---------- record validation and PostgreSQL-sequence bookkeeping ----------
 
