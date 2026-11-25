@@ -128,6 +128,23 @@ export interface SqlDriver {
   close(): Promise<void>;
 }
 
+/** A driver that can subscribe to Postgres NOTIFY on a channel; the callback sees only committed notifications. */
+export interface ListenableSqlDriver extends SqlDriver {
+  /**
+   * `onReconnect` runs after a lost LISTEN connection was re-established: notifications sent while it
+   * was down are lost, so subscribers must resynchronize.
+   */
+  listen(channel: string, onPayload: (payload: string) => void, opts?: { onReconnect?: () => void }): Promise<() => Promise<void>>;
+}
+
+/**
+ * A driver shared by several processes (a PostgreSQL server) that can exclude concurrent schema changes
+ * in other processes. Re-entrant within one async context. PGlite drivers do not implement it.
+ */
+export interface SchemaLockableSqlDriver extends SqlDriver {
+  withSchemaLock<T>(fn: () => Promise<T>): Promise<T>;
+}
+
 export interface TenantManager {
   open(tenant: string): Promise<TenantHandle>;
   create(tenant: string, modules: string[]): Promise<TenantHandle>;

@@ -51,3 +51,6 @@ export * from './account-core/index.js';
 export { evaluateEnvExpression, registerExpressionHelper, precisionDigits, fieldDigits, type ExpressionHelperDef, type EvaluateOptions } from './orm/expr-helpers.js';
 export { localClock } from './orm/clock.js';
 export * from './bus/index.js';
+export { PgDriver, type PgDriverOptions } from './driver/pg.js';
+export { PgTenantManager, type PgTenantManagerOptions } from './tenant/pg.js';
+export { BaseTenantManager, type BaseTenantManagerOptions } from './tenant/manager.js';

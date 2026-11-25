@@ -1,6 +1,6 @@
 import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import {
-  AccessError, ModuleCatalog, ModuleService, PgliteTenantManager, SUPERUSER_ID, ValidationError, activeLangCodes, baseModule, demoModules, mailModule,
+  AccessError, ModuleCatalog, ModuleService, PgTenantManager, PgliteTenantManager, SUPERUSER_ID, ValidationError, activeLangCodes, baseModule, demoModules, mailModule,
   accountCoreModule, productModule, reportModule, uomModule, withUserContext, type Env, type ModuleManifest, type TenantHandle,
 } from '@nexa/engine';
 import { loadEngineConfig, type EngineConfig } from './config';
@@ -16,11 +16,7 @@ export const MODULES: ModuleManifest[] = [baseModule, mailModule, reportModule, 
 export class EngineService implements OnModuleDestroy {
   private readonly logger = new Logger('Engine');
   readonly config: EngineConfig = loadEngineConfig();
-  private readonly manager = new PgliteTenantManager({
-    ...(this.config.dataDir ? { rootDir: this.config.dataDir } : {}),
-    catalog: new ModuleCatalog(MODULES),
-    onWarning: (tenant, w) => this.logger.warn(`[${tenant}] ${w.message}`),
-  });
+  private readonly manager = this.createManager();
   private readonly ready = new Map<string, Promise<TenantHandle>>();
 
   tenant(name: string): Promise<TenantHandle> {
@@ -75,6 +71,16 @@ export class EngineService implements OnModuleDestroy {
       await svc.install(missing);
     }
     return h;
+  }
+
+  /** NEXA_DB selects the backend: PGlite data dirs (default) or one PostgreSQL database per tenant. */
+  private createManager(): PgliteTenantManager | PgTenantManager {
+    const common = {
+      catalog: new ModuleCatalog(MODULES),
+      onWarning: (tenant: string, w: { message: string }) => this.logger.warn(`[${tenant}] ${w.message}`),
+    };
+    if (this.config.db === 'postgres') return new PgTenantManager({ ...common, url: this.config.pgUrl! });
+    return new PgliteTenantManager({ ...common, ...(this.config.dataDir ? { rootDir: this.config.dataDir } : {}) });
   }
 
   async onModuleDestroy(): Promise<void> {

@@ -77,6 +77,12 @@ export class PgliteDriver implements SqlDriver {
     return this.scope.getStore()?.db === this.db;
   }
 
+  /** LISTEN on `channel` (in-process: PGlite delivers NOTIFYs of committed transactions on its single connection). */
+  async listen(channel: string, onPayload: (payload: string) => void): Promise<() => Promise<void>> {
+    const unlisten = await this.db.listen(channel, onPayload);
+    return () => unlisten();
+  }
+
   async close(): Promise<void> {
     await this.db.close();
   }
