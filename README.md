@@ -50,6 +50,14 @@ curl -s -X POST localhost:3001/api/model/res.users/search_read \
 
 ผู้รับใช้ `POST /api/portal/read` กับ `Authorization: Bearer <token>` ผ่าน HTTPS โดยไม่ต้องล็อกอิน ส่ง token ใน header และเก็บออกจาก URL กับ log ผลตอบกลับมีข้อมูลปัจจุบันของเอกสารเพียงรายการเดียวเฉพาะฟิลด์ที่เลือก หากเปิด chatter จะเห็นเฉพาะข้อความที่เปิดเผยได้และตัดรูปออก ผู้สร้างเพิกถอนลิงก์ได้ด้วย `POST /api/portal/links/revoke` และ body `{"id": ...}` ระบบตรวจสิทธิ์ปัจจุบันของผู้สร้างทุกครั้งที่ผู้รับอ่าน
 
+#### รายงาน HTML และ PDF
+
+เพิ่ม `report` ใน `NEXA_MODULES` เพื่อเปิดใช้โมดูลรายงาน ผู้ดูแล Settings สร้าง `ir.actions.report` ผ่าน `POST /api/model/ir.actions.report/create` โดยกำหนด `name`, `model_name` และ `body_html` ที่ใช้ไวยากรณ์เดียวกับ mail template เช่น `<h1>{{ record.name }}</h1>`
+
+เรียก `POST /api/model/ir.actions.report/call/render_html` ด้วย `{"ids":[reportId],"args":[[documentId]]}` และ credential ปกติของ Engine API ผลลัพธ์อยู่ใน `result` โดยแต่ละรายการมี `res_id`, `format`, `contentType` และ `content` ระบบตรวจสิทธิ์รายงาน เอกสาร และฟิลด์ด้วยสิทธิ์ของผู้เรียก
+
+สำหรับ PDF ให้ติดตั้ง Chromium บนเครื่องที่รัน API ด้วย `pnpm --filter @nexa/api exec playwright install chromium` บน Linux อาจต้องใช้ `install --with-deps chromium` เพิ่ม ให้รัน API ด้วยผู้ใช้ที่เปิด Chromium sandbox ได้ จากนั้นเรียก `POST /api/reports/:id/pdf` ด้วย `{"recordId": documentId}` เพื่อดาวน์โหลดไฟล์ PDF ครั้งละหนึ่งเอกสาร หาก Chromium ยังไม่พร้อมหรือกำลังสร้างไฟล์ให้คำขออื่น API จะตอบ `503`
+
 | Endpoint | หน้าที่ |
 |---|---|
 | `POST /api/model/:model/search_read` | `{domain, fields, offset, limit, order}` → `{records, length}` |

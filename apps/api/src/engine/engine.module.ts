@@ -6,10 +6,11 @@ import { EngineErrorFilter } from './errors.filter';
 import { EngineService } from './engine.service';
 import { AuthService } from './auth.service';
 import { PortalController } from './portal.controller';
+import { ReportPdfService } from './report-pdf.service';
 
 @Module({
   controllers: [EngineController, DataTransferController, PortalController],
-  providers: [EngineService, AuthService, { provide: APP_FILTER, useClass: EngineErrorFilter }],
+  providers: [EngineService, AuthService, ReportPdfService, { provide: APP_FILTER, useClass: EngineErrorFilter }],
   exports: [EngineService],
 })
 export class EngineModule {}

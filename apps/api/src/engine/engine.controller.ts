@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, UnauthorizedException, Req } from '@nestjs/common';
-import { AccessError, ButtonService, getAction, isThread, getMenus, getView, MetadataStore, userSecurity, ValidationError, type Domain, type Env, type FieldDef, type TenantHandle, type ViewNode, type ViewType } from '@nexa/engine';
+import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, StreamableFile, UnauthorizedException, Req } from '@nestjs/common';
+import { AccessError, ButtonService, getAction, isThread, getMenus, getView, MetadataStore, ReportService, userSecurity, ValidationError, type Domain, type Env, type FieldDef, type TenantHandle, type ViewNode, type ViewType } from '@nexa/engine';
 import {
   callRequestSchema, copyRequestSchema, createRequestSchema, defaultGetRequestSchema, fieldsGetRequestSchema,
   nameSearchRequestSchema, onchangeRequestSchema, readGroupRequestSchema, readRequestSchema, searchCountRequestSchema,
@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { EngineService } from './engine.service';
 import { CallerParam, type Caller } from './request-env';
 import { AuthService, type AuthenticatedToken } from './auth.service';
+import { ReportPdfService } from './report-pdf.service';
 import type { Request } from 'express';
 
 const loginRequest = z.object({
@@ -22,6 +23,8 @@ const apiKeyRequest = z.object({
   expiresInDays: z.number().int().min(1).max(365).optional(),
 });
 const revokeKeyRequest = z.object({ id: z.number().int().positive() });
+const reportId = z.string().regex(/^[1-9][0-9]{0,9}$/).transform(Number).pipe(z.number().max(2_147_483_647));
+const reportPdfRequest = z.strictObject({ recordId: z.number().int().positive().max(2_147_483_647) });
 
 const modelName = z.string().regex(/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/).max(120);
 const methodName = z.string().regex(/^[a-z][a-zA-Z0-9_]*$/).max(80);
@@ -145,6 +148,7 @@ export class EngineController {
   constructor(
     @Inject(EngineService) private readonly engine: EngineService,
     @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(ReportPdfService) private readonly reportsPdf: ReportPdfService,
   ) {}
 
   private async resolveCaller(caller: Caller): Promise<{ tenant: string; uid: number }> {
@@ -517,6 +521,22 @@ export class EngineController {
     // the target records must exist and pass the user's read rules before any method runs on them
     if (req.ids.length) await m.browse(req.ids).read(['id']);
     return { result: await m.browse(req.ids).call(methodName.parse(method), ...req.args) };
+  }
+
+  @Post('reports/:id/pdf')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  @Header('X-Content-Type-Options', 'nosniff')
+  async reportPdf(@CallerParam() caller: Caller, @Param('id') id: string, @Body() body: unknown) {
+    const report = reportId.parse(id);
+    const { recordId } = reportPdfRequest.parse(body);
+    const service = new ReportService(await this.env(caller), this.reportsPdf);
+    const [file] = await service.render(report, [recordId], 'pdf');
+    if (!file) throw new ValidationError('Report output is unavailable');
+    return new StreamableFile(Buffer.from(file.content, 'base64'), {
+      type: 'application/pdf',
+      disposition: `attachment; filename="report-${report}-${recordId}.pdf"`,
+    });
   }
 
   /**
