@@ -3,6 +3,7 @@ import { withUserContext } from '../base/lang.js';
 import type { EnvImpl } from '../orm/env.js';
 import { checkRecordRules } from '../security/access.js';
 import { assertReadable, assertWritable, positiveInt, requireModel } from '../services/common.js';
+import { BusService, userChannel } from '../bus/service.js';
 import { createMessage, mailInstalled, resolveSubtype, xmlRef } from './message.js';
 import { escapeHtml, sanitizeHtml } from './sanitize.js';
 
@@ -224,6 +225,14 @@ export class ActivityService {
             user_id: (nextType!.default_user_id as number | null) ?? (row.user_id as number | null) ?? env.uid,
           });
         }
+      }
+      // assignees learn the activity is done (ids only; delivered after commit)
+      const bus = new BusService(env);
+      for (const row of rows) {
+        if (typeof row.user_id !== 'number') continue;
+        await bus.publish(userChannel(row.user_id), 'mail.activity.done', { activity_id: row.id, model: row.res_model, res_id: row.res_id }, {
+          record: [row.res_model as string, row.res_id as number],
+        });
       }
       await su.model('mail.activity').browse(ids).unlink();
       return messages;
