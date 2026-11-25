@@ -33,7 +33,8 @@ export function columnType(f: FieldDef): string {
     case 'monetary': return 'NUMERIC';
     case 'boolean': return 'BOOLEAN';
     case 'date': return 'DATE';
-    case 'datetime': return 'name' in f && (f.name === 'create_date' || f.name === 'write_date') ? 'TIMESTAMP' : 'TIMESTAMP WITH TIME ZONE';
+    // every datetime (incl. magic create_date/write_date) is an instant: timestamptz
+    case 'datetime': return 'TIMESTAMP WITH TIME ZONE';
     case 'json': return 'JSONB';
     case 'binary': return 'BYTEA';
     case 'many2one': return 'INTEGER';
@@ -60,7 +61,7 @@ export type MigrationOp =
   | { kind: 'create_table'; table: string; destructive: false }
   | { kind: 'add_column'; table: string; column: string; field: FieldDef; destructive: false }
   | { kind: 'create_index'; table: string; column: string; name: string; unique: boolean; destructive: false }
-  | { kind: 'alter_type'; table: string; column: string; from: string; to: string; translated?: boolean; jsonConversion?: boolean; destructive: true }
+  | { kind: 'alter_type'; table: string; column: string; from: string; to: string; translated?: boolean; jsonConversion?: boolean; destructive: boolean }
   | { kind: 'drop_column'; table: string; column: string; destructive: true }
   | { kind: 'drop_table'; table: string; destructive: true }
   | { kind: 'create_relation'; table: string; column1: string; table1: string; column2: string; table2: string; destructive: false }
@@ -140,6 +141,9 @@ export async function planMigration(
       const ddlType = columnType(f);
       if (have === undefined) {
         ops.push({ kind: 'add_column', table, column: f.name, field: f, destructive: false });
+      } else if (isNaiveToTz(have.data_type, ddlType)) {
+        // lossless: naive values were written in UTC (session TimeZone), reinterpreted as UTC instants
+        ops.push({ kind: 'alter_type', table, column: f.name, from: have.data_type, to: ddlType, destructive: false });
       } else if (have.data_type !== (ddlType.startsWith('NUMERIC(') ? 'numeric' : DATA_TYPE[ddlType]) ||
         (Array.isArray(f.digits) && (have.numeric_precision !== f.digits[0] || have.numeric_scale !== f.digits[1])) ||
         (ddlType === 'NUMERIC' && have.numeric_precision !== null)) {
@@ -206,6 +210,31 @@ export async function planMigration(
   return { ops, models };
 }
 
+/**
+ * timestamp -> timestamptz is the one safe retype: every connection pins TimeZone to UTC (and PGlite's
+ * default session zone was already UTC), so naive values hold UTC wall-clock time and
+ * `col AT TIME ZONE 'UTC'` keeps the same instants. Applied by additive sync, never blocked.
+ */
+export function isNaiveToTz(from: string, to: string): boolean {
+  return from === 'timestamp without time zone' && to === 'TIMESTAMP WITH TIME ZONE';
+}
+
+/**
+ * Upgrade engine-owned (nx_*) columns that older tenants created as naive TIMESTAMP to timestamptz,
+ * keeping the same UTC instants. Idempotent; a no-op once converted.
+ */
+export async function upgradeNaiveTimestamps(db: SqlDriver, table: string, columns: string[]): Promise<void> {
+  const naive = await db.query<{ column_name: string }>({
+    text: `SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1
+      AND column_name = ANY($2::text[]) AND data_type = 'timestamp without time zone'`,
+    params: [table, columns],
+  });
+  for (const { column_name } of naive) {
+    const c = quoteIdent(column_name);
+    await db.query({ text: `ALTER TABLE ${quoteIdent(table)} ALTER COLUMN ${c} TYPE TIMESTAMP WITH TIME ZONE USING ${c} AT TIME ZONE 'UTC'`, params: [] });
+  }
+}
+
 const ON_DELETE = { cascade: 'CASCADE', 'set null': 'SET NULL', restrict: 'RESTRICT' } as const;
 
 function ddlFor(op: MigrationOp, models: ReadonlyMap<string, ResolvedModel>): string {
@@ -228,7 +257,7 @@ function ddlFor(op: MigrationOp, models: ReadonlyMap<string, ResolvedModel>): st
       if (!(op.to in DATA_TYPE) && !/^NUMERIC\((?:[1-9]\d{0,2}|1000),(?:\d{1,3}|1000)\)$/.test(op.to)) throw new EngineError(`Unsupported column type '${op.to}'`);
       const c = quoteIdent(op.column);
       // Existing naive datetimes were stored as UTC; do not depend on the session timezone.
-      const using = op.from === 'timestamp without time zone' && op.to === 'TIMESTAMP WITH TIME ZONE'
+      const using = isNaiveToTz(op.from, op.to)
         ? `${c} AT TIME ZONE 'UTC'`
         : op.from === 'text' && op.to === 'JSONB' && op.translated
           ? `CASE WHEN ${c} IS NULL THEN NULL ELSE jsonb_build_object('en_US', ${c}) END`
@@ -287,8 +316,7 @@ export async function applyMigration(
 /** Refuse schema activation if runtime SQL would use an incompatible physical type. */
 export function assertCompatibleMigration(plan: MigrationPlan): void {
   const incompatible = plan.ops.filter((op): op is Extract<MigrationOp, { kind: 'alter_type' }> => op.kind === 'alter_type' &&
-    ((op.from === 'jsonb' && op.to === 'TEXT') || (!!op.translated && op.from === 'text' && op.to === 'JSONB') ||
-     (op.from === 'timestamp without time zone' && op.to === 'TIMESTAMP WITH TIME ZONE')));
+    ((op.from === 'jsonb' && op.to === 'TEXT') || (!!op.translated && op.from === 'text' && op.to === 'JSONB')));
   if (incompatible.length) {
     throw new EngineError(`Schema requires an explicitly approved migration before opening: ${incompatible.map(op => `${op.table}.${op.column}`).join(', ')}`);
   }

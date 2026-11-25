@@ -4,7 +4,7 @@ import {
 } from '../contracts/index.js';
 import { EnvImpl } from '../orm/env.js';
 import { isColumn, type ModelRegistry } from '../orm/registry.js';
-import { applyMigration, assertCompatibleMigration, planMigration, quoteIdent, type MigrationOp } from '../schema/sync.js';
+import { applyMigration, assertCompatibleMigration, planMigration, quoteIdent, upgradeNaiveTimestamps, type MigrationOp } from '../schema/sync.js';
 import { assertSecurityTablesMayBeDropped } from '../security/last-admin.js';
 import { removeModuleSecurity, writeModuleSecurity } from '../security/tables.js';
 import { removeModuleUi, writeModuleUi } from '../ui-meta/tables.js';
@@ -57,9 +57,10 @@ export async function ensureModuleTables(db: SqlDriver): Promise<void> {
       text: `CREATE TABLE IF NOT EXISTS nx_module (
         name TEXT PRIMARY KEY, version TEXT NOT NULL,
         state TEXT NOT NULL CHECK (state IN ('installed', 'to_upgrade', 'uninstalled')),
-        install_date TIMESTAMP)`,
+        install_date TIMESTAMPTZ)`,
       params: [],
     });
+    await upgradeNaiveTimestamps(tx, 'nx_module', ['install_date']);
     await tx.query({
       text: `CREATE TABLE IF NOT EXISTS nx_model_data (
         id SERIAL PRIMARY KEY, module TEXT NOT NULL, name TEXT NOT NULL, model TEXT NOT NULL,

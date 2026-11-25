@@ -7,7 +7,7 @@ import { parseExpression } from '../expr/index.js';
 import { recompute } from '../orm/compute.js';
 import { EnvImpl, SUPERUSER_ID } from '../orm/env.js';
 import { ModelRegistry, tableName } from '../orm/registry.js';
-import { applyMigration, planMigration, type MigrationOp } from '../schema/sync.js';
+import { applyMigration, planMigration, upgradeNaiveTimestamps, type MigrationOp } from '../schema/sync.js';
 import { withDriverLock } from '../modules/lock.js';
 import { PRECISION_NAME_RE } from '../orm/registry.js';
 import { userSecurity } from '../security/access.js';
@@ -27,7 +27,7 @@ export async function ensureMetadataTables(db: SqlDriver): Promise<void> {
     await tx.query({
       text: `CREATE TABLE IF NOT EXISTS nx_model (
         id SERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT, "order" TEXT,
-        create_date TIMESTAMP NOT NULL DEFAULT now())`, params: [],
+        create_date TIMESTAMPTZ NOT NULL DEFAULT now())`, params: [],
     });
     await tx.query({ text: `ALTER TABLE nx_model ADD COLUMN IF NOT EXISTS expression_hooks JSONB NOT NULL DEFAULT '{}'::jsonb`, params: [] });
     await tx.query({
@@ -36,7 +36,7 @@ export async function ensureMetadataTables(db: SqlDriver): Promise<void> {
         required BOOLEAN NOT NULL DEFAULT false, readonly BOOLEAN NOT NULL DEFAULT false,
         "index" BOOLEAN NOT NULL DEFAULT false, "unique" BOOLEAN NOT NULL DEFAULT false,
         default_value JSONB, selection JSONB, comodel TEXT, inverse_name TEXT, relation_table TEXT, ondelete TEXT,
-        create_date TIMESTAMP NOT NULL DEFAULT now(), UNIQUE (model, name))`, params: [],
+        create_date TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (model, name))`, params: [],
     });
     // Existing tenant metadata is upgraded additively; older rows keep an empty options object.
     await tx.query({ text: `ALTER TABLE nx_field ADD COLUMN IF NOT EXISTS field_options JSONB NOT NULL DEFAULT '{}'::jsonb`, params: [] });
@@ -44,8 +44,10 @@ export async function ensureMetadataTables(db: SqlDriver): Promise<void> {
     await tx.query({
       text: `CREATE TABLE IF NOT EXISTS nx_model_mixin (
         id SERIAL PRIMARY KEY, model TEXT NOT NULL, mixin TEXT NOT NULL,
-        create_date TIMESTAMP NOT NULL DEFAULT now(), UNIQUE (model, mixin))`, params: [],
+        create_date TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (model, mixin))`, params: [],
     });
+    // tenants created before T26b used naive TIMESTAMP (UTC wall clock)
+    for (const table of ['nx_model', 'nx_field', 'nx_model_mixin']) await upgradeNaiveTimestamps(tx, table, ['create_date']);
   });
 }
 

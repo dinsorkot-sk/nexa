@@ -211,8 +211,8 @@ describe('field model', () => {
     const cols = await h.driver.query<{ column_name: string; data_type: string; numeric_precision: number; numeric_scale: number }>({ text: `SELECT column_name, data_type, numeric_precision, numeric_scale FROM information_schema.columns WHERE table_name = 'x_item'`, params: [] });
     expect(cols.find(c => c.column_name === 'quantity')).toMatchObject({ data_type: 'numeric', numeric_precision: 8, numeric_scale: 2 });
     expect(cols.find(c => c.column_name === 'happened')?.data_type).toBe('timestamp with time zone');
-    expect(cols.find(c => c.column_name === 'create_date')?.data_type).toBe('timestamp without time zone');
-    expect(cols.find(c => c.column_name === 'write_date')?.data_type).toBe('timestamp without time zone');
+    expect(cols.find(c => c.column_name === 'create_date')?.data_type).toBe('timestamp with time zone');
+    expect(cols.find(c => c.column_name === 'write_date')?.data_type).toBe('timestamp with time zone');
     expect((await planMigration(h.registry, h.driver)).ops.filter(o => o.kind === 'alter_type')).toEqual([]);
     const updated = resolveModels([{ ...definitions[0], fields: { ...definitions[0].fields, quantity: { type: 'float', digits: [9, 3] } } }, definitions[1], ...definitions.slice(2)]);
     expect((await planMigration(updated, h.driver)).ops).toContainEqual(expect.objectContaining({ kind: 'alter_type', column: 'quantity', to: 'NUMERIC(9,3)', destructive: true }));
@@ -246,11 +246,11 @@ describe('field model', () => {
 
     await h.driver.query({ text: `ALTER TABLE x_item ALTER COLUMN happened TYPE TIMESTAMP WITHOUT TIME ZONE USING happened AT TIME ZONE 'UTC'`, params: [] });
     await h.driver.query({ text: `SET TIME ZONE 'Asia/Bangkok'`, params: [] });
-    await expect(syncSchema(h.registry, h.driver)).rejects.toThrow(/explicitly approved migration/);
     const migration = await planMigration(h.registry, h.driver);
     const timestampOps = migration.ops.filter(o => o.kind === 'alter_type' && o.column === 'happened');
-    expect(timestampOps).toHaveLength(1);
-    await applyMigration({ ...migration, ops: timestampOps }, h.driver, { allowDestructive: true });
+    expect(timestampOps).toEqual([expect.objectContaining({ destructive: false })]);
+    // naive -> timestamptz is lossless (UTC wall clock): applied without allowDestructive
+    await applyMigration({ ...migration, ops: timestampOps }, h.driver);
     const instant = await h.driver.query<{ instant: string }>({ text: `SELECT to_char(happened AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS instant FROM x_item WHERE id = $1`, params: [row.ids[0]] });
     expect(instant[0].instant).toBe('2026-11-24 05:00:00');
   }, 60000);

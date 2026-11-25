@@ -33,6 +33,8 @@ export class PgliteDriver implements SqlDriver {
   static async open(dataDir?: string): Promise<PgliteDriver> {
     const db = dataDir ? new PGlite(dataDir) : new PGlite();
     await db.waitReady;
+    // Pin the session zone: now()/timestamptz text and naive<->tz casts must never depend on the host.
+    await db.exec(`SET TimeZone TO 'UTC'`);
     return new PgliteDriver(db);
   }
 

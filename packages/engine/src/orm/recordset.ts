@@ -128,8 +128,9 @@ export class RecordsetImpl implements Recordset {
         expression = `COALESCE(t."${group.name}"->>$${language}::text, t."${group.name}"->>'en_US')`;
       }
       if (group.granularity) {
+        // Preserve Date-valued buckets and keep the driver from interpreting them in the host zone.
         const value = group.field.type === 'datetime' ? `timezone('UTC', ${expression})` : `${expression}::timestamp`;
-        expression = `date_trunc('${group.granularity}', ${value})`;
+        expression = `timezone('UTC', date_trunc('${group.granularity}', ${value}))`;
       }
       return expression;
     });
@@ -573,16 +574,14 @@ export class RecordsetImpl implements Recordset {
     }
     if (!ids.length) return;
     // compare in SQL: at full precision when the client sent microseconds, else at the millisecond
-    // precision that read() returns. write_date is a timestamp without time zone; JS drivers (PGlite,
-    // node-postgres) parse such values as host-local time, so the instant clients see is
-    // write_date interpreted in the host zone. Compare that same instant.
-    const local = `(e.ts::timestamptz AT TIME ZONE $4::text)`;
+    // precision that read() returns. write_date is timestamptz, so this compares instants.
+    const local = `e.ts::timestamptz`;
     const rows = await sqlCall(() => this.env.db.query<{ id: number; ok: boolean }>({
       text: `SELECT t.id, CASE WHEN e.micro THEN t.write_date IS NOT DISTINCT FROM ${local}
           ELSE date_trunc('milliseconds', t.write_date) IS NOT DISTINCT FROM date_trunc('milliseconds', ${local}) END AS ok
         FROM "${this.table}" t JOIN unnest($1::int[], $2::text[], $3::bool[]) AS e(id, ts, micro) ON e.id = t.id
         ORDER BY t.id FOR UPDATE OF t`,
-      params: [ids, stamps, micro, HOST_TIME_ZONE],
+      params: [ids, stamps, micro],
     }));
     if (rows.length !== ids.length) throw new MissingRecordError(`Some ${this.model} records no longer exist`);
     for (const row of rows) {
@@ -1205,7 +1204,6 @@ function coerce(f: ResolvedField, v: unknown): unknown {
 }
 
 const MAX_LOCK_ROWS = 1_000;
-const HOST_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const WRITE_DATE_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:?\d{2})$/;
 
 function lockClause(opts: LockOptions): string {
