@@ -58,6 +58,15 @@ curl -s -X POST localhost:3001/api/model/res.users/search_read \
 
 สำหรับ PDF ให้ติดตั้ง Chromium บนเครื่องที่รัน API ด้วย `pnpm --filter @nexa/api exec playwright install chromium` บน Linux อาจต้องใช้ `install --with-deps chromium` เพิ่ม ให้รัน API ด้วยผู้ใช้ที่เปิด Chromium sandbox ได้ จากนั้นเรียก `POST /api/reports/:id/pdf` ด้วย `{"recordId": documentId}` เพื่อดาวน์โหลดไฟล์ PDF ครั้งละหนึ่งเอกสาร หาก Chromium ยังไม่พร้อมหรือกำลังสร้างไฟล์ให้คำขออื่น API จะตอบ `503`
 
+#### คิวอีเมลและ inbound alias
+
+เปิดโมดูล `mail` และใช้ credential ของผู้ดูแล Settings สำหรับเส้นทางด้านล่าง
+
+- `POST /api/mail/templates/:id/queue` รับ `recordId` และ `requestId` แบบ UUID คำขอที่ลองซ้ำด้วย UUID เดิมจะได้ `messageId` เดิม เทมเพลตระบุผู้รับด้วยอีเมลพื้นฐานคั่นด้วยจุลภาคหรืออีเมลของ partner
+- ตั้ง `NEXA_SMTP_TENANT`, `NEXA_SMTP_HOST`, `NEXA_SMTP_FROM` และถ้าจำเป็นให้ตั้ง `NEXA_SMTP_USER` กับ `NEXA_SMTP_PASSWORD` เรียก `POST /api/mail/queue/process` ด้วย `{"limit":1}` เพื่อประมวลผลคิวของ tenant ที่ตั้งไว้เท่านั้น พอร์ต 465 ใช้ TLS ตั้งแต่เปิดการเชื่อมต่อ พอร์ตอื่นต้องรองรับ STARTTLS ตัวประมวลผลใช้ Message-ID เดิมเมื่อส่งซ้ำหลังความล้มเหลว SMTP อาจส่งซ้ำได้หากรับข้อความแล้วแต่การยืนยันสูญหาย
+- `POST /api/mail/aliases` ผูกอีเมล alias กับ `model` และ `recordId` ของเอกสารที่รองรับ chatter ลบการผูกด้วย `POST /api/mail/aliases/remove` และ body `{"alias":"..."}`
+- ตัวรับอีเมลที่เชื่อถือได้ส่ง envelope alias และข้อความที่แยกแล้วไปที่ `POST /api/mail/inbound` ด้วย `alias`, `messageId`, `from`, `text` และ `subject` ถ้ามี ระบบเพิ่มโน้ตภายในเอกสารเดิมและใช้ Message-ID กันการส่งซ้ำ
+
 | Endpoint | หน้าที่ |
 |---|---|
 | `POST /api/model/:model/search_read` | `{domain, fields, offset, limit, order}` → `{records, length}` |

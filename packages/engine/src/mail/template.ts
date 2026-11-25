@@ -3,8 +3,9 @@ import { evaluateExpression, extractDependencies, parseExpression, type ExprValu
 import { expressionContext, expressionRecord } from '../orm/compute.js';
 import type { EnvImpl } from '../orm/env.js';
 import type { RecordsetImpl } from '../orm/recordset.js';
-import { assertWritable, positiveInt, requireModel, tenantDriver } from '../services/common.js';
+import { assertSystem, assertWritable, positiveInt, requireModel, tenantDriver } from '../services/common.js';
 import { createMessage, mailInstalled, readablePartners, resolveSubtype } from './message.js';
+import { enqueueOutgoingMail } from './outgoing.js';
 import { escapeHtml, sanitizeHtml } from './sanitize.js';
 
 /**
@@ -471,19 +472,86 @@ export class MailTemplateService {
     return out;
   }
 
-  /**
-   * Render and record the outgoing mail as a message on the document (write access required).
-   * No mail server exists yet: nothing is delivered; the message keeps recipients for a future queue.
-   */
+  /** Render and record the mail on the document. Delivery is requested explicitly through queue(). */
   async send(template: number | string, resId: number): Promise<number> {
-    const { model } = await this.load(template);
+    const { model, source } = await this.writableTemplate(template, resId);
+    const [mail] = await this.renderInline(model, [resId], source);
+    return this.recordDelivery(model, resId, mail!);
+  }
+
+  /** Settings administrators can atomically record the email and enqueue its delivery. */
+  async queue(template: number, resId: number, requestId: string): Promise<number> {
+    await assertSystem(this.env);
+    positiveInt(template, 'template id');
+    if (typeof requestId !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(requestId)) {
+      throw new ValidationError('Mail request id must be a UUID');
+    }
+    const key = requestId.toLowerCase();
+    return this.env.transaction(async (tx) => {
+      const service = new MailTemplateService(tx);
+      const { model, source } = await service.writableTemplate(template, resId);
+      const db = tenantDriver(tx);
+      const [schema] = await db.query<{ ready: boolean }>({
+        text: "SELECT to_regclass('nx_mail_template_request') IS NOT NULL AS ready", params: [],
+      });
+      if (!schema?.ready) {
+        await db.query({ text: "SELECT pg_advisory_xact_lock(hashtext('nx.mail.template.request.schema'))", params: [] });
+        await db.query({
+          text: `CREATE TABLE IF NOT EXISTS nx_mail_template_request (
+            uid INTEGER NOT NULL, request_id UUID NOT NULL, template_id INTEGER NOT NULL,
+            record_id INTEGER NOT NULL, message_id INTEGER NOT NULL, PRIMARY KEY (uid, request_id)
+          )`, params: [],
+        });
+      }
+      await db.query({
+        text: "SELECT pg_advisory_xact_lock(hashtext('nx.mail.template.request'), hashtext($1))",
+        params: [`${tx.uid}:${key}`],
+      });
+      const [previous] = await db.query<{ template_id: number; record_id: number; message_id: number }>({
+        text: 'SELECT template_id, record_id, message_id FROM nx_mail_template_request WHERE uid = $1 AND request_id = $2',
+        params: [tx.uid, key],
+      });
+      if (previous) {
+        if (previous.template_id !== template || previous.record_id !== resId) {
+          throw new ValidationError('Mail request id already belongs to another template or record');
+        }
+        return previous.message_id;
+      }
+      const [mail] = await service.renderInline(model, [resId], source);
+      if (!mail) throw new ValidationError('Mail could not be rendered');
+      const partners = mail.partner_ids.length
+        ? await tx.model('res.partner').browse(mail.partner_ids).read(['email'])
+        : [];
+      if (partners.length !== mail.partner_ids.length ||
+          partners.some((partner) => typeof partner.email !== 'string' || !partner.email.trim())) {
+        throw new ValidationError('Every selected partner needs an email address');
+      }
+      const recipients = [
+        ...(mail.email_to?.split(',').map((address) => address.trim()) ?? []),
+        ...partners.map((partner) => (partner.email as string).trim()),
+      ];
+      const messageId = await service.recordDelivery(model, resId, mail);
+      await enqueueOutgoingMail(tx, { messageId, recipients, subject: mail.subject, bodyHtml: mail.body_html });
+      await db.query({
+        text: 'INSERT INTO nx_mail_template_request (uid, request_id, template_id, record_id, message_id) VALUES ($1, $2, $3, $4, $5)',
+        params: [tx.uid, key, template, resId, messageId],
+      });
+      return messageId;
+    });
+  }
+
+  private async writableTemplate(template: number | string, resId: number) {
+    const definition = await this.load(template);
     positiveInt(resId, 'record id');
-    await assertWritable(this.env, model, resId);
-    const [mail] = await this.render(template, [resId]);
+    await assertWritable(this.env, definition.model, resId);
+    return definition;
+  }
+
+  private async recordDelivery(model: string, resId: number, mail: RenderedMail): Promise<number> {
     const subtypeId = await resolveSubtype(this.env, 'mail.mt_comment');
     return createMessage(this.env, {
-      model, resId, body: mail!.body_html, subject: mail!.subject || null, messageType: 'email', subtypeId,
-      partnerIds: mail!.partner_ids, emailTo: mail!.email_to,
+      model, resId, body: mail.body_html, subject: mail.subject || null, messageType: 'email', subtypeId,
+      partnerIds: mail.partner_ids, emailTo: mail.email_to,
     });
   }
 

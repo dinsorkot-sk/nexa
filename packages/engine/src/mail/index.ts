@@ -9,3 +9,5 @@ export {
 } from './template.js';
 export { sanitizeHtml, escapeHtml, textToHtml, safeUrl } from './sanitize.js';
 export { mailInstalled, isThread } from './message.js';
+export { MailQueueService, type MailTransport } from './outgoing.js';
+export { MailAliasService } from './inbound.js';

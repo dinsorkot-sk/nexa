@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, StreamableFile, UnauthorizedException, Req } from '@nestjs/common';
-import { AccessError, ButtonService, getAction, isThread, getMenus, getView, MetadataStore, ReportService, userSecurity, ValidationError, type Domain, type Env, type FieldDef, type TenantHandle, type ViewNode, type ViewType } from '@nexa/engine';
+import { AccessError, ButtonService, getAction, isThread, getMenus, getView, MailAliasService, MailQueueService, MailTemplateService, MetadataStore, ReportService, userSecurity, ValidationError, type Domain, type Env, type FieldDef, type TenantHandle, type ViewNode, type ViewType } from '@nexa/engine';
 import {
   callRequestSchema, copyRequestSchema, createRequestSchema, defaultGetRequestSchema, fieldsGetRequestSchema,
   nameSearchRequestSchema, onchangeRequestSchema, readGroupRequestSchema, readRequestSchema, searchCountRequestSchema,
@@ -10,6 +10,7 @@ import { EngineService } from './engine.service';
 import { CallerParam, type Caller } from './request-env';
 import { AuthService, type AuthenticatedToken } from './auth.service';
 import { ReportPdfService } from './report-pdf.service';
+import { SmtpMailService } from './smtp-mail.service';
 import type { Request } from 'express';
 
 const loginRequest = z.object({
@@ -23,10 +24,22 @@ const apiKeyRequest = z.object({
   expiresInDays: z.number().int().min(1).max(365).optional(),
 });
 const revokeKeyRequest = z.object({ id: z.number().int().positive() });
-const reportId = z.string().regex(/^[1-9][0-9]{0,9}$/).transform(Number).pipe(z.number().max(2_147_483_647));
+const pathRecordId = z.string().regex(/^[1-9][0-9]{0,9}$/).transform(Number).pipe(z.number().max(2_147_483_647));
 const reportPdfRequest = z.strictObject({ recordId: z.number().int().positive().max(2_147_483_647) });
 
 const modelName = z.string().regex(/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/).max(120);
+const mailRecordBody = z.strictObject({ recordId: z.number().int().positive().max(2_147_483_647) });
+const mailTemplateQueueBody = mailRecordBody.extend({ requestId: z.uuid() });
+const mailQueueBody = z.strictObject({ limit: z.number().int().min(1).max(5).default(1) });
+const aliasAddress = z.string().trim().min(3).max(254);
+const mailAliasBody = mailRecordBody.extend({ alias: aliasAddress, model: modelName });
+const inboundMailBody = z.strictObject({
+  alias: aliasAddress,
+  messageId: z.string().min(1).max(254),
+  from: z.string().trim().min(3).max(254),
+  subject: z.string().max(500).optional(),
+  text: z.string().max(45_000),
+});
 const methodName = z.string().regex(/^[a-z][a-zA-Z0-9_]*$/).max(80);
 const buttonRequest = z.strictObject({
   ids: z.array(z.number().int().positive()).min(1).max(1000),
@@ -149,6 +162,7 @@ export class EngineController {
     @Inject(EngineService) private readonly engine: EngineService,
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(ReportPdfService) private readonly reportsPdf: ReportPdfService,
+    @Inject(SmtpMailService) private readonly smtpMail: SmtpMailService,
   ) {}
 
   private async resolveCaller(caller: Caller): Promise<{ tenant: string; uid: number }> {
@@ -528,7 +542,7 @@ export class EngineController {
   @Header('Cache-Control', 'no-store')
   @Header('X-Content-Type-Options', 'nosniff')
   async reportPdf(@CallerParam() caller: Caller, @Param('id') id: string, @Body() body: unknown) {
-    const report = reportId.parse(id);
+    const report = pathRecordId.parse(id);
     const { recordId } = reportPdfRequest.parse(body);
     const service = new ReportService(await this.env(caller), this.reportsPdf);
     const [file] = await service.render(report, [recordId], 'pdf');
@@ -537,6 +551,46 @@ export class EngineController {
       type: 'application/pdf',
       disposition: `attachment; filename="report-${report}-${recordId}.pdf"`,
     });
+  }
+
+  @Post('mail/templates/:id/queue')
+  @HttpCode(201)
+  async queueMail(@CallerParam() caller: Caller, @Param('id') id: string, @Body() body: unknown) {
+    const { recordId, requestId } = mailTemplateQueueBody.parse(body);
+    const result = await new MailTemplateService(await this.env(caller)).queue(pathRecordId.parse(id), recordId, requestId);
+    return { messageId: result };
+  }
+
+  @Post('mail/queue/process')
+  @HttpCode(200)
+  async processMail(@CallerParam() caller: Caller, @Body() body: unknown) {
+    const { limit } = mailQueueBody.parse(body ?? {});
+    const env = await this.env(caller);
+    if (!(await userSecurity(env as Parameters<typeof userSecurity>[0])).groups.has('base.group_system')) {
+      throw new AccessError('Only settings administrators can process outgoing mail');
+    }
+    return new MailQueueService(env, this.smtpMail.transportFor(env.tenant)).process(limit);
+  }
+
+  @Post('mail/aliases')
+  @HttpCode(201)
+  async defineMailAlias(@CallerParam() caller: Caller, @Body() body: unknown) {
+    await new MailAliasService(await this.env(caller)).define(mailAliasBody.parse(body));
+    return { ok: true };
+  }
+
+  @Post('mail/aliases/remove')
+  @HttpCode(200)
+  async removeMailAlias(@CallerParam() caller: Caller, @Body() body: unknown) {
+    const { alias } = z.strictObject({ alias: aliasAddress }).parse(body);
+    await new MailAliasService(await this.env(caller)).remove(alias);
+    return { ok: true };
+  }
+
+  @Post('mail/inbound')
+  @HttpCode(200)
+  async routeInboundMail(@CallerParam() caller: Caller, @Body() body: unknown) {
+    return new MailAliasService(await this.env(caller)).route(inboundMailBody.parse(body));
   }
 
   /**

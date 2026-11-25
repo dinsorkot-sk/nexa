@@ -1,4 +1,5 @@
 import { ValidationError, type AccessRule, type Env, type ModelDef, type ModuleManifest, type Recordset, type RecordRule } from '../contracts/index.js';
+import { tenantDriver } from '../services/common.js';
 import {
   checkActivityDocument, computeActivityIds, computeActivityState, computeDocumentActivityState,
 } from './activity.js';
@@ -214,11 +215,19 @@ export const mailRules: RecordRule[] = [
 export const mailModule: ModuleManifest = {
   name: 'mail',
   version: '1.0.0',
-  summary: 'Chatter: messages, followers, field tracking, activities and templates',
+  summary: 'Chatter, activities, templates, outgoing mail and inbound aliases',
   depends: ['base'],
   models: mailModels,
   access: mailAccess,
   rules: mailRules,
+  hooks: {
+    async uninstall(env) {
+      await tenantDriver(env).query({
+        text: 'DROP TABLE IF EXISTS nx_mail_inbound_receipt, nx_mail_alias, nx_mail_outgoing, nx_mail_template_request',
+        params: [],
+      });
+    },
+  },
   data: [
     { xmlId: 'mt_comment', model: 'mail.message.subtype', values: { name: 'Discussions', sequence: 0, internal: false, default: true } },
     { xmlId: 'mt_note', model: 'mail.message.subtype', values: { name: 'Note', sequence: 100, internal: true, default: false } },

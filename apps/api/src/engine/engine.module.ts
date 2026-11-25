@@ -7,10 +7,11 @@ import { EngineService } from './engine.service';
 import { AuthService } from './auth.service';
 import { PortalController } from './portal.controller';
 import { ReportPdfService } from './report-pdf.service';
+import { SmtpMailService } from './smtp-mail.service';
 
 @Module({
   controllers: [EngineController, DataTransferController, PortalController],
-  providers: [EngineService, AuthService, ReportPdfService, { provide: APP_FILTER, useClass: EngineErrorFilter }],
+  providers: [EngineService, AuthService, ReportPdfService, SmtpMailService, { provide: APP_FILTER, useClass: EngineErrorFilter }],
   exports: [EngineService],
 })
 export class EngineModule {}
