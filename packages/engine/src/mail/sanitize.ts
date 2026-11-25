@@ -15,6 +15,7 @@ const ALLOWED_TAGS = new Set([
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'ins', 'kbd', 'li', 'mark', 'ol', 'p', 'pre', 'q', 's',
   'small', 'span', 'strike', 'strong', 'sub', 'sup', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul',
 ]);
+const PORTAL_ALLOWED_TAGS = new Set([...ALLOWED_TAGS].filter((tag) => tag !== 'img'));
 const VOID_TAGS = new Set(['br', 'col', 'hr', 'img']);
 /** Content is raw text in browsers: skipped up to the matching end tag. */
 const RAW_TEXT_TAGS = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript', 'plaintext']);
@@ -114,7 +115,7 @@ function serializeAttrs(tag: string, attrs: Attr[]): string {
 }
 
 /** Sanitize an HTML fragment (see module comment). */
-export function sanitizeHtml(input: string): string {
+export function sanitizeHtml(input: string, options: { allowImages?: boolean } = {}): string {
   if (typeof input !== 'string') return '';
   if (input.length > MAX_SANITIZE_INPUT) throw new RangeError('HTML is too large to sanitize');
   const src = input.replace(/\u0000/g, '');
@@ -215,7 +216,7 @@ export function sanitizeHtml(input: string): string {
       skip = { tag, depth: 1 };
       continue;
     }
-    if (!ALLOWED_TAGS.has(tag)) continue;
+    if (!(options.allowImages === false ? PORTAL_ALLOWED_TAGS : ALLOWED_TAGS).has(tag)) continue;
     out.push(`<${tag}${serializeAttrs(tag, attrs)}>`);
     if (!VOID_TAGS.has(tag)) {
       if (open.length >= 200) throw new RangeError('HTML nesting is too deep');

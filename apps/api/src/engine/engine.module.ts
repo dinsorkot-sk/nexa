@@ -5,9 +5,10 @@ import { DataTransferController } from './data-transfer.controller';
 import { EngineErrorFilter } from './errors.filter';
 import { EngineService } from './engine.service';
 import { AuthService } from './auth.service';
+import { PortalController } from './portal.controller';
 
 @Module({
-  controllers: [EngineController, DataTransferController],
+  controllers: [EngineController, DataTransferController, PortalController],
   providers: [EngineService, AuthService, { provide: APP_FILTER, useClass: EngineErrorFilter }],
   exports: [EngineService],
 })

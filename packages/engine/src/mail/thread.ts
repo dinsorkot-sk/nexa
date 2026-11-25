@@ -5,7 +5,7 @@ import { assertReadable, assertWritable, nonNegativeInt, positiveInt, requireMod
 import {
   addFollowers, createMessage, documentAttachments, mailInstalled, readablePartners, resolveSubtype, userPartner, type MessageType,
 } from './message.js';
-import { escapeHtml } from './sanitize.js';
+import { escapeHtml, sanitizeHtml } from './sanitize.js';
 
 export interface MessagePostOptions {
   /** HTML body; sanitized (allow-list) before storage. */
@@ -27,6 +27,7 @@ export interface MessageRow {
 }
 
 export interface FollowerRow { id: number; partner_id: number; partner: string | null; subtype_ids: number[] }
+export interface PortalMessageRow { id: number; date: unknown; subject: string | null; body: string }
 
 function requireMail(env: Env): void {
   if (!mailInstalled(env)) throw new ValidationError('The mail module is not installed');
@@ -108,6 +109,25 @@ export class MailThreadService {
         tracking: tracking.filter((t) => t.message_id === r.id && !hidden.has(t.field as string)),
       };
     });
+  }
+
+  /** Minimal, public projection of discussion comments for a single readable document. */
+  async portalMessages(model: string, resId: number): Promise<PortalMessageRow[]> {
+    requireMail(this.env);
+    requireModel(model);
+    positiveInt(resId, 'record id');
+    await assertReadable(this.env, model, resId);
+    const rows = await this.env.sudo().model('mail.message').searchRead(
+      [['model', '=', model], ['res_id', '=', resId], ['message_type', '=', 'comment'], ['subtype_id.internal', '=', false]],
+      ['date', 'subject', 'body'],
+      { limit: 100, order: 'date desc, id desc' },
+    );
+    return rows.map((row) => ({
+      id: row.id as number,
+      date: row.date,
+      subject: (row.subject as string | null) ?? null,
+      body: sanitizeHtml((row.body as string) ?? '', { allowImages: false }),
+    }));
   }
 
   async followers(model: string, resId: number): Promise<FollowerRow[]> {

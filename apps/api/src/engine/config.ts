@@ -7,6 +7,7 @@ export interface EngineConfig {
   tenants: ReadonlySet<string>;
   modules: string[];
   devAuth: boolean;
+  portalModels: ReadonlySet<string>;
 }
 
 const list = (v: string | undefined, fallback: string): string[] =>
@@ -19,5 +20,6 @@ export function loadEngineConfig(env: NodeJS.ProcessEnv = process.env): EngineCo
     tenants: new Set(list(env.NEXA_TENANTS, 'dev')),
     modules: list(env.NEXA_MODULES, 'base'),
     devAuth: env.NEXA_DEV_AUTH === '1' && env.NODE_ENV !== 'production',
+    portalModels: new Set(list(env.NEXA_PORTAL_MODELS, '')),
   };
 }

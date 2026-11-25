@@ -33,6 +33,7 @@ const testModule: ModuleManifest = {
   ],
   access: [
     { model: 'x.ticket', group: 'base.group_user', perms: all },
+    { model: 'x.ticket', group: 'base.group_portal', perms: { read: true, write: false, create: false, unlink: false } },
     { model: 'x.ticket.line', group: 'base.group_user', perms: all },
     { model: 'x.plain', group: 'base.group_user', perms: all },
     { model: 'x.ticket.ref', group: 'base.group_user', perms: all },
@@ -52,6 +53,7 @@ let aliceUid: number;
 let bobUid: number;
 let alicePartner: number;
 let bobPartner: number;
+let portal: Env;
 let customer: number;
 
 const ref = async (xmlId: string): Promise<number> => {
@@ -77,6 +79,11 @@ beforeAll(async () => {
   [bobUid] = (await root.model('res.users').create({ name: 'Bob', login: 'bob', company_id: company, company_ids: [company], group_ids: [user] })).ids as [number];
   alice = h.env({ uid: aliceUid });
   bob = h.env({ uid: bobUid });
+  const portalGroup = await ref('base.group_portal');
+  const [portalUid] = (await root.model('res.users').create({
+    name: 'Portal', login: 'portal', company_id: company, company_ids: [company], group_ids: [portalGroup],
+  })).ids;
+  portal = h.env({ uid: portalUid! });
   const users = await root.model('res.users').browse([aliceUid, bobUid]).read(['partner_id']);
   alicePartner = users[0]!.partner_id as number;
   bobPartner = users[1]!.partner_id as number;
@@ -136,6 +143,32 @@ describe('chatter', () => {
     expect(rec!.message_ids).toEqual([msg]);
     const posted = await alice.model('x.ticket').browse(id).call('message_post', { body: 'note', subtype: 'mail.mt_note' }) as number[];
     expect((await thread.messages('x.ticket', id))[0]).toMatchObject({ id: posted[0], internal: true, subtype: 'Note' });
+  });
+
+  it('returns only public comments with a minimal, re-sanitized projection', async () => {
+    const id = await ticket(alice);
+    const thread = new MailThreadService(alice);
+    await thread.post('x.ticket', id, {
+      body: '<p>Public <a href="https://example.test" target="_blank">link</a><img src="https://track.test/pixel"></p>',
+      subject: 'Visible',
+    });
+    await thread.post('x.ticket', id, {
+      body: '<p>Internal secret</p>', subject: 'Private', subtype: 'mail.mt_note',
+    });
+
+    const rows = await new MailThreadService(portal).portalMessages('x.ticket', id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      subject: 'Visible',
+      body: '<p>Public <a href="https://example.test" target="_blank" rel="noopener noreferrer">link</a></p>',
+    });
+    expect(Object.keys(rows[0]!).sort()).toEqual(['body', 'date', 'id', 'subject']);
+    expect(JSON.stringify(rows)).not.toMatch(/Internal secret|Private|track\.test|author|partner_ids|attachment_ids|tracking/);
+    const [outsider] = (await root.model('res.users').create({
+      name: 'Outsider', login: 'outsider', company_id: await ref('base.main_company'),
+    })).ids;
+    await expect(new MailThreadService(h.env({ uid: outsider! })).portalMessages('x.ticket', id)).rejects.toBeInstanceOf(AccessError);
+    await expect(new MailThreadService(portal).portalMessages('x.ticket', id + 999)).rejects.toBeInstanceOf(AccessError);
   });
 
   it('auto-subscribes creators and checks follower changes', async () => {

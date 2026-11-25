@@ -44,6 +44,12 @@ curl -s -X POST localhost:3001/api/model/res.users/search_read \
 
 เมื่อ tenant มีผู้ดูแลที่ active และมีสิทธิ์ทั้ง Settings และ ERP Manager ระบบจะปฏิเสธการเปลี่ยนแปลงที่ทำให้ผู้ดูแลกลุ่มนี้เหลือศูนย์ การ archive บัญชีจะเพิกถอน session และ API key ของบัญชีนั้น การเปิดบัญชีใหม่ต้องเข้าสู่ระบบอีกครั้ง
 
+#### ลิงก์ Portal แบบอ่านอย่างเดียว
+
+ตั้ง `NEXA_PORTAL_MODELS` เป็นรายชื่อโมเดลเอกสารที่อนุญาตให้แชร์ เช่น `sale.order` ค่าเริ่มต้นคือปิดการแชร์ทุกโมเดล ผู้ดูแล Settings ใช้ login session เรียก `POST /api/portal/links` พร้อม `model`, `recordId`, `fields` และเลือกส่ง `includeChatter` หรือ `expiresInDays` ได้ อายุเริ่มต้น 7 วันและสูงสุด 30 วัน เก็บ `id` ไว้สำหรับเพิกถอน เพราะ API คืนค่า `token` เฉพาะตอนสร้าง
+
+ผู้รับใช้ `POST /api/portal/read` กับ `Authorization: Bearer <token>` ผ่าน HTTPS โดยไม่ต้องล็อกอิน ส่ง token ใน header และเก็บออกจาก URL กับ log ผลตอบกลับมีข้อมูลปัจจุบันของเอกสารเพียงรายการเดียวเฉพาะฟิลด์ที่เลือก หากเปิด chatter จะเห็นเฉพาะข้อความที่เปิดเผยได้และตัดรูปออก ผู้สร้างเพิกถอนลิงก์ได้ด้วย `POST /api/portal/links/revoke` และ body `{"id": ...}` ระบบตรวจสิทธิ์ปัจจุบันของผู้สร้างทุกครั้งที่ผู้รับอ่าน
+
 | Endpoint | หน้าที่ |
 |---|---|
 | `POST /api/model/:model/search_read` | `{domain, fields, offset, limit, order}` → `{records, length}` |
