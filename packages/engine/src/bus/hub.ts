@@ -55,8 +55,9 @@ export interface SubscribeOptions {
  *   and receives its events (still filtered by each user's own read access to the event's record).
  * - Message events are gated by read access to the DOCUMENT (model,res_id), not by mail.message record
  *   rules; they carry ids only and clients fetch message content through the access-checked chatter API.
- * - The PGlite transport reaches the driver's private PGlite handle (see transport.ts; follow-up:
- *   a public PgliteDriver.listen()).
+ * - The transport LISTENs through the driver's public `listen()` (PgliteDriver in-process, PgDriver on a
+ *   dedicated auto-reconnecting connection). After a reconnect every subscription gets a `bus.reset`:
+ *   notifications sent while the connection was down are lost and clients must refetch.
  * - One hub (one LISTEN registration) lives per TenantHandle, for the handle's lifetime; `close()`
  *   unregisters it. Reopened handles get a new hub (and a new event-id epoch).
  */
@@ -64,6 +65,8 @@ export class BusHub {
   private static readonly hubs = new WeakMap<TenantHandle, Promise<BusHub>>();
   private readonly epoch = randomBytes(6).toString('hex');
   private seq = 0;
+  /** seq consumed by the last listener outage: envelopes may be missing before it, so older ids cannot resume */
+  private gapSeq = 0;
   private readonly ring: Stored[] = [];
   private readonly byChannel = new Map<string, Set<BusSubscription>>();
   private stop: (() => Promise<void>) | undefined;
@@ -75,7 +78,7 @@ export class BusHub {
     let p = BusHub.hubs.get(handle);
     if (!p) {
       const hub = new BusHub(handle);
-      p = busTransport().listen(handle.driver, (text) => hub.receive(text)).then((stop) => { hub.stop = stop; return hub; });
+      p = busTransport().listen(handle.driver, (text) => hub.receive(text), () => hub.resetAll()).then((stop) => { hub.stop = stop; return hub; });
       BusHub.hubs.set(handle, p);
       p.catch(() => BusHub.hubs.delete(handle));
     }
@@ -132,8 +135,9 @@ export class BusHub {
     const m = /^([0-9a-f]{12}):([0-9]{1,15})$/.exec(lastEventId);
     const first = this.ring[0]?.seq ?? this.seq + 1;
     const last = m && m[1] === this.epoch ? Number(m[2]) : NaN;
-    // unknown epoch (restart), garbage, a future id or one already evicted: the client must refetch
-    if (!(last >= first - 1 && last <= this.seq)) {
+    // unknown epoch (restart), garbage, a future id, one already evicted, or one from before a listener
+    // outage (notifications were lost in between): the client must refetch
+    if (!(last >= first - 1 && last <= this.seq && last >= this.gapSeq)) {
       sub.emit({ id: this.eventId(this.seq), type: 'bus.reset', channel: '', payload: {} });
       return;
     }
@@ -149,6 +153,17 @@ export class BusHub {
     const targets = new Set<BusSubscription>();
     for (const ch of env.c) for (const s of this.byChannel.get(ch) ?? []) targets.add(s);
     for (const s of targets) s.offer(seq, env);
+  }
+
+  /** Envelopes may have been lost (listener reconnected): every subscriber must refetch. */
+  private resetAll(): void {
+    if (this.closed) return;
+    // the reset takes its own seq (not in the ring): subscribers that receive it can resume from its id,
+    // and anyone resuming from an earlier id gets a reset in replay()
+    this.gapSeq = ++this.seq;
+    const all = new Set<BusSubscription>();
+    for (const set of this.byChannel.values()) for (const s of set) all.add(s);
+    for (const s of all) s.emit({ id: this.eventId(this.seq), type: 'bus.reset', channel: '', payload: {} });
   }
 
   async close(): Promise<void> {
