@@ -4,8 +4,9 @@ import {
 } from '../contracts/index.js';
 import { compileDomain, compileOrder } from '../domain/compile.js';
 import { affected, cascadeAffected, computeValues, isComputed, isStoredComputed, mergeTodo, recompute, type Todo } from './compute.js';
-import { defaultsProvider, recordHooks, type EnvImpl } from './env.js';
+import { defaultsProvider, recordGuards, recordHooks, type EnvImpl } from './env.js';
 import { roundMonetary } from './decimal.js';
+import { columnType } from '../schema/sync.js';
 import { isColumn, translationLanguage, type ResolvedField } from './registry.js';
 import { checkModelAccess, checkRecordRules, combine, hiddenFields, readRuleResolver, ruleDomain, userSecurity } from '../security/access.js';
 import { assertAdminRemains, beginAdminStateChange } from '../security/last-admin.js';
@@ -239,8 +240,9 @@ export class RecordsetImpl implements Recordset {
       }
     }
     const hidden = await hiddenFields(this.env, this.model);
+    const excluded = await recordGuards()?.copyExcluded?.(this.env, this.model);
     const fields = [...this.meta.fields.values()]
-      .filter((field) => !hidden.has(field.name) && !MAGIC.has(field.name) && field.name !== 'parent_path' &&
+      .filter((field) => !hidden.has(field.name) && !excluded?.has(field.name) && !MAGIC.has(field.name) && field.name !== 'parent_path' &&
         field.name !== inverse && !Object.hasOwn(defaults, field.name) && !delegates.has(field.name) &&
         !linkedParents.has(field.delegated?.via ?? '') &&
         !isComputed(field as ResolvedField) && field.copy !== false)
@@ -380,7 +382,9 @@ export class RecordsetImpl implements Recordset {
         await this.checkFieldWrite(Object.keys(v));
         await this.checkFieldWrite([...this.meta.fields.keys()].filter((name) =>
           !(name in v) && Object.hasOwn(this.env.context, 'default_' + name)));
-        const values = await roundNamedPrecision(this.env, this.meta.fields, await this.roundMonetaryValues(await this.delegateValues(await this.withDefaults(v), true)));
+        const defaulted = await this.withDefaults(v);
+        await recordGuards()?.beforeCreate(this.env, this.model, [v], [defaulted]);
+        const values = await roundNamedPrecision(this.env, this.meta.fields, await this.roundMonetaryValues(await this.delegateValues(defaulted, true)));
         await this.validateReferences(values);
         await this.validateCompanyLinks(values);
         await this.validateParentLink(values);
@@ -440,6 +444,7 @@ export class RecordsetImpl implements Recordset {
       // lock order: hierarchy advisory lock first, then row locks (same as create/unlink/lock)
       if (this.hasParentPath() && 'parent_id' in vals) await this.lockHierarchy();
       await this.checkWriteDates(opts);
+      await recordGuards()?.beforeWrite(this.env, this.model, this.ids, vals);
       const hooks = recordHooks();
       const hookState = await hooks?.beforeWrite(this.env, this.model, this.ids, vals);
       const adminCount = await beginAdminStateChange(this.env.db, this.env.registry, this.model, Object.keys(vals));
@@ -489,6 +494,7 @@ export class RecordsetImpl implements Recordset {
       const adminCount = await beginAdminStateChange(this.env.db, this.env.registry, this.model, [], true);
       await checkRecordRules(this.env, this.model, this.ids, 'unlink');
       if (this.hasParentPath()) await this.lockHierarchy();
+      await recordGuards()?.beforeUnlink(this.env, this.model, this.ids);
       await recordHooks()?.beforeUnlink(this.env, this.model, this.ids);
       const { todo } = await cascadeAffected(this.env, this.model, this.ids);
       const oldPaths = this.hasParentPath() ? (await this.env.db.query<{ parent_path: string | null }>({
@@ -725,6 +731,22 @@ export class RecordsetImpl implements Recordset {
   /** Store computed values without triggering write logic (no access check, no write_date). */
   async storeRaw(fname: string, values: Map<number, unknown>): Promise<void> {
     const f = this.field(fname);
+    if (values.size > 1 && !f.translate && f.type !== 'binary') {
+      // one statement per batch: values travel as text and are cast to the column type
+      const ids: number[] = [];
+      const texts: (string | null)[] = [];
+      for (const [id, v] of values) {
+        const c = coerce(f, v);
+        ids.push(id);
+        texts.push(c === null || c === undefined ? null : c instanceof Date ? c.toISOString() : typeof c === 'string' ? c : String(c));
+      }
+      await sqlCall(() => this.env.db.query({
+        text: `UPDATE "${this.table}" AS t SET "${fname}" = v.val::${columnType(f)} FROM unnest($1::int[], $2::text[]) AS v(id, val) WHERE t.id = v.id`,
+        params: [ids, texts],
+      }));
+      this.env.cache.invalidate(this.model, ids);
+      return;
+    }
     for (const [id, v] of values) {
       await sqlCall(() => this.env.db.query({
         text: `UPDATE "${this.table}" SET "${fname}" = $1 WHERE id = $2`, params: [coerce(f, v), id],
@@ -1054,7 +1076,7 @@ export class RecordsetImpl implements Recordset {
   private async roundMonetaryValues(vals: Vals, id?: number): Promise<Vals> {
     const out = { ...vals };
     for (const f of this.meta.fields.values()) {
-      if (f.delegated || !f.currencyField || (!(f.name in vals) && !(f.currencyField in vals))) continue;
+      if (f.delegated || isComputed(f) || !f.currencyField || (!(f.name in vals) && !(f.currencyField in vals))) continue;
       let amount = vals[f.name];
       let currency = vals[f.currencyField];
       if (id && (!(f.name in vals) || !(f.currencyField in vals))) {
@@ -1161,7 +1183,7 @@ function expressionPatch(value: ExprValue): Vals {
 }
 
 /** Map database constraint violations to ValidationError. */
-async function sqlCall<T>(fn: () => Promise<T>): Promise<T> {
+export async function sqlCall<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (err) {

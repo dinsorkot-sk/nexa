@@ -2,7 +2,7 @@ import { ValidationError, type Env, type FieldDef } from '../contracts/index.js'
 import {
   evaluateExpressionAsync, isHelperName, reserveHelperName, type AsyncExprHelper, type ExprEnvironment, type ExprValue,
 } from '../expr/index.js';
-import { floatCompare, floatRound, precisionDigits as numericDigits } from '../expr/helpers.js';
+import { floatCompare, floatPrecision, floatRound } from '../expr/helpers.js';
 import { roundMonetary } from './decimal.js';
 import type { EnvImpl } from './env.js';
 import { expressionContext } from './compute.js';
@@ -79,13 +79,14 @@ function recordId(value: ExprValue, what: string): number {
   return value;
 }
 
-async function digitsArg(env: Env, value: ExprValue | undefined): Promise<number> {
-  if (value === undefined || value === null) return DEFAULT_PRECISION_DIGITS;
+async function digitsArg(env: Env, value: ExprValue | undefined, rounding?: ExprValue): Promise<{ digits: number; rounding?: number }> {
+  if (rounding !== undefined && rounding !== null) return floatPrecision(value, rounding);
+  if (value === undefined || value === null) return { digits: DEFAULT_PRECISION_DIGITS };
   if (typeof value === 'string') {
     if (value.length > 64) throw new TypeError('Invalid precision name');
-    return precisionDigits(env, value);
+    return { digits: await precisionDigits(env, value) };
   }
-  return numericDigits(value);
+  return floatPrecision(value);
 }
 
 async function currencyRounding(env: Env, value: ExprValue): Promise<number> {
@@ -117,9 +118,18 @@ async function currencyRateAt(env: Env, currencyId: number, date: string, compan
 /** Engine async helpers bound to the caller's env. */
 function engineAsyncHelpers(env: Env, today: string, companyId: number | null): Record<string, AsyncExprHelper> {
   return {
-    float_round: { resolve: async ([value, digits]) => floatRound(num(value ?? null, 'Value'), await digitsArg(env, digits)) },
-    float_compare: { resolve: async ([a, b, digits]) => floatCompare(num(a ?? null, 'Value'), num(b ?? null, 'Value'), await digitsArg(env, digits)) },
-    float_is_zero: { resolve: async ([value, digits]) => floatRound(num(value ?? null, 'Value'), await digitsArg(env, digits)) === 0 },
+    float_round: { resolve: async ([value, digits, rounding]) => {
+      const precision = await digitsArg(env, digits, rounding);
+      return floatRound(num(value ?? null, 'Value'), precision.digits, precision.rounding);
+    } },
+    float_compare: { resolve: async ([a, b, digits, rounding]) => {
+      const precision = await digitsArg(env, digits, rounding);
+      return floatCompare(num(a ?? null, 'Value'), num(b ?? null, 'Value'), precision.digits, precision.rounding);
+    } },
+    float_is_zero: { resolve: async ([value, digits, rounding]) => {
+      const precision = await digitsArg(env, digits, rounding);
+      return floatRound(num(value ?? null, 'Value'), precision.digits, precision.rounding) === 0;
+    } },
     currency_round: { resolve: async ([amount, currency]) => roundMonetary(num(amount ?? null, 'Amount'), await currencyRounding(env, currency ?? null)) },
     currency_convert: {
       resolve: async ([amount, from, to, date, company]) => {

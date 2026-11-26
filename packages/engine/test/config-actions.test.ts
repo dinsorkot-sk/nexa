@@ -173,4 +173,23 @@ describe('ir.actions.server records', () => {
       expect.objectContaining({ method: 'copy' }),
     ]);
   });
+
+  it('preserves policy action keys when importing service definitions into editable records', async () => {
+    const service = new ServerActionService(root);
+    await service.define({ key: 'cfga.create_post', model: 'cfga.order', type: 'create_record', values: { name: "'copy'" }, thenTransition: 'post' });
+    await service.define({ key: 'cfga.transition', model: 'cfga.order', type: 'transition', transition: 'post' });
+    await service.define({ key: 'cfga.match', model: 'cfga.order', type: 'match', matchRule: 'settle' });
+    await service.define({ key: 'cfga.unmatch', model: 'cfga.order', type: 'unmatch', matchRule: 'settle' });
+    expect(await importServiceConfigRecords(admin)).toBe(4);
+    for (const [key, field, value] of [
+      ['cfga.create_post', 'then_transition', 'post'], ['cfga.transition', 'transition', 'post'],
+      ['cfga.match', 'match_rule', 'settle'], ['cfga.unmatch', 'match_rule', 'settle'],
+    ]) {
+      const [record] = await admin.model('ir.actions.server').searchRead([['key', '=', key!]], [field!]);
+      expect(record?.[field!]).toBe(value);
+    }
+    expect((await runtimeAction('cfga.create_post'))[0]!.definition.thenTransition).toBe('post');
+    expect((await runtimeAction('cfga.transition'))[0]!.definition.transition).toBe('post');
+    expect((await runtimeAction('cfga.match'))[0]!.definition.matchRule).toBe('settle');
+  });
 });

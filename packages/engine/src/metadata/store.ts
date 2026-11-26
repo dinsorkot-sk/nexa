@@ -57,7 +57,7 @@ interface FieldRow {
   required: boolean; readonly: boolean; index: boolean; unique: boolean;
   default_value: unknown; selection: [string, string][] | null; comodel: string | null;
   inverse_name: string | null; relation_table: string | null; ondelete: OnDelete | null;
-  field_options: Pick<FieldDef, 'digits' | 'translate' | 'copy' | 'aggregator' | 'currencyField' | 'computeExpr' | 'defaultExpr' | 'depends' | 'store' | 'tracking'>;
+  field_options: Pick<FieldDef, 'digits' | 'translate' | 'copy' | 'aggregator' | 'currencyField' | 'computeExpr' | 'defaultExpr' | 'depends' | 'store' | 'tracking' | 'checkCompany' | 'writeGroups' | 'ratchet' | 'groups'>;
 }
 
 function rowToField(r: FieldRow): FieldDef {
@@ -72,6 +72,10 @@ function rowToField(r: FieldRow): FieldDef {
   if (r.field_options?.depends !== undefined) f.depends = r.field_options.depends;
   if (r.field_options?.store !== undefined) f.store = r.field_options.store;
   if (r.field_options?.tracking !== undefined) f.tracking = r.field_options.tracking;
+  if (r.field_options?.checkCompany !== undefined) f.checkCompany = r.field_options.checkCompany;
+  if (r.field_options?.writeGroups !== undefined) f.writeGroups = r.field_options.writeGroups;
+  if (r.field_options?.ratchet !== undefined) f.ratchet = r.field_options.ratchet;
+  if (r.field_options?.groups !== undefined) f.groups = r.field_options.groups;
   if (r.string !== null) f.string = r.string;
   if (r.help !== null) f.help = r.help;
   if (r.required) f.required = true;
@@ -221,6 +225,25 @@ function modelExpressions(input: CustomModelExpressions): CustomModelExpressions
   };
 }
 
+const RATCHET_TYPES: ReadonlySet<FieldType> = new Set<FieldType>(['date', 'datetime', 'integer', 'float', 'monetary']);
+
+/** A literal default must be plain JSON matching the field type. */
+function checkLiteralDefault(model: string, name: string, f: FieldDef): void {
+  const v = f.default;
+  const bad = () => new ValidationError(`Default of '${model}.${name}' does not match type '${f.type}'`);
+  switch (f.type) {
+    case 'char': case 'text': case 'html': if (typeof v !== 'string') throw bad(); break;
+    case 'integer': if (typeof v !== 'number' || !Number.isInteger(v)) throw bad(); break;
+    case 'float': case 'monetary': if (typeof v !== 'number' || !Number.isFinite(v)) throw bad(); break;
+    case 'boolean': if (typeof v !== 'boolean') throw bad(); break;
+    case 'date': if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(Date.parse(v))) throw bad(); break;
+    case 'datetime': if (typeof v !== 'string' || Number.isNaN(Date.parse(v))) throw bad(); break;
+    case 'selection': if (typeof v !== 'string' || !(f.selection ?? []).some(([k]) => k === v)) throw bad(); break;
+    case 'json': break;
+    default: throw new ValidationError(`'${model}.${name}' of type '${f.type}' cannot have a literal default`);
+  }
+}
+
 function validateField(model: string, name: string, f: FieldDef): void {
   if (!CUSTOM_FIELD_RE.test(name)) throw new ValidationError(`Custom field '${model}.${name}' must match ${CUSTOM_FIELD_RE}`);
   if (!FIELD_TYPES.has(f.type)) throw new ValidationError(`Unknown field type '${String(f.type)}'`);
@@ -241,6 +264,13 @@ function validateField(model: string, name: string, f: FieldDef): void {
   if (f.depends && (!Array.isArray(f.depends) || f.depends.length > 100 || f.depends.some((dep) => typeof dep !== 'string'))) {
     throw new ValidationError('Invalid compute dependencies');
   }
+  if (f.groups !== undefined) {
+    if (f.computeExpr === undefined) throw new ValidationError(`Only a computed custom field can be restricted to groups ('${model}.${name}')`);
+    if (!Array.isArray(f.groups) || !f.groups.length || f.groups.length > 20 ||
+        f.groups.some((g) => typeof g !== 'string' || !/^[a-z][a-z0-9_]*[.][a-z][a-z0-9_]*$/.test(g))) {
+      throw new ValidationError(`Invalid groups on '${model}.${name}'`);
+    }
+  }
   if (f.selectionAdd) throw new ValidationError(`Custom field '${model}.${name}' cannot extend a selection`);
   if (f.digits !== undefined) {
     const valid = typeof f.digits === 'string'
@@ -253,7 +283,27 @@ function validateField(model: string, name: string, f: FieldDef): void {
   if (f.copy !== undefined && typeof f.copy !== 'boolean') throw new ValidationError('Invalid copy flag');
   if (f.tracking !== undefined && typeof f.tracking !== 'boolean') throw new ValidationError('Invalid tracking flag');
   if (f.aggregator !== undefined && !['sum', 'avg', 'min', 'max', 'count', 'count_distinct'].includes(f.aggregator)) throw new ValidationError('Invalid aggregator');
-  if (f.ondelete !== undefined && !ON_DELETES.has(f.ondelete)) throw new ValidationError(`Invalid ondelete '${String(f.ondelete)}'`);
+  if (f.ondelete !== undefined && (f.type !== 'many2one' || !ON_DELETES.has(f.ondelete))) {
+    throw new ValidationError(`Invalid ondelete '${String(f.ondelete)}' on '${model}.${name}' (many2one: cascade, set null or restrict)`);
+  }
+  if (f.checkCompany !== undefined && (typeof f.checkCompany !== 'boolean' || (f.checkCompany && f.type !== 'many2one'))) {
+    throw new ValidationError(`checkCompany on '${model}.${name}' requires a many2one field`);
+  }
+  for (const flag of ['index', 'readonly'] as const) {
+    if (f[flag] !== undefined && typeof f[flag] !== 'boolean') throw new ValidationError(`Invalid ${flag} flag on '${model}.${name}'`);
+  }
+  if (f.index && (f.type === 'one2many' || f.type === 'many2many')) throw new ValidationError(`'${model}.${name}' has no column to index`);
+  if (f.writeGroups !== undefined && (!Array.isArray(f.writeGroups) || f.writeGroups.length > 50
+    || f.writeGroups.some((g) => typeof g !== 'string' || !g))) {
+    throw new ValidationError(`Invalid writeGroups on '${model}.${name}'`);
+  }
+  if (f.writeGroups?.length && f.required && f.default === undefined && f.defaultExpr === undefined) {
+    throw new ValidationError(`'${model}.${name}' is required with writeGroups, so it needs a default (other users could not create records)`);
+  }
+  if (f.ratchet !== undefined && (f.ratchet !== 'up' || !RATCHET_TYPES.has(f.type))) {
+    throw new ValidationError(`ratchet 'up' on '${model}.${name}' requires a date, datetime, integer, float or monetary field`);
+  }
+  if (f.default !== undefined) checkLiteralDefault(model, name, f);
   if (f.selection && !f.selection.every((p) => Array.isArray(p) && p.length === 2 && p.every((s) => typeof s === 'string'))) {
     throw new ValidationError(`Invalid selection for '${model}.${name}'`);
   }
@@ -316,6 +366,10 @@ export class MetadataStore {
     await this.change(async (tx) => {
       if (!this.registry.models.has(model)) throw new ValidationError(`Unknown model '${model}'`);
       if (this.registry.get(model).fields.has(name)) throw new ValidationError(`Field '${model}.${name}' already exists`);
+      // a DB-level cascade would delete module-owned rows around ACLs, rules, hooks and immutability
+      if (def.ondelete === 'cascade' && this.registry.get(model).def.origin !== 'custom') {
+        throw new ValidationError(`ondelete 'cascade' is only allowed on custom models; '${model}' is module-owned (use 'restrict' or 'set null')`);
+      }
       await this.insertField(tx, model, name, def);
     }, {
       initialize: def.computeExpr && def.store
@@ -443,6 +497,15 @@ export class MetadataStore {
   }
 
   private async insertField(tx: SqlDriver, model: string, name: string, f: FieldDef): Promise<void> {
+    if (f.writeGroups?.length) {
+      const groups = this.registry.models.get('res.groups');
+      if (!groups?.table) throw new ValidationError('writeGroups requires the base module');
+      const marks = f.writeGroups.map((_, i) => `$${i + 1}`).join(', ');
+      const found = await tx.query<{ code: string }>({ text: `SELECT code FROM "${groups.table}" WHERE code IN (${marks})`, params: f.writeGroups });
+      const have = new Set(found.map((r) => r.code));
+      const unknown = f.writeGroups.filter((g) => !have.has(g));
+      if (unknown.length) throw new ValidationError(`Unknown group(s) in writeGroups: ${unknown.join(', ')}`);
+    }
     if (f.comodel && f.comodel !== model && !this.registry.models.has(f.comodel)) {
       const known = await tx.query({ text: `SELECT 1 FROM nx_model WHERE name = $1`, params: [f.comodel] });
       if (!known.length) throw new ValidationError(`Field '${model}.${name}' references unknown model '${f.comodel}'`);
@@ -459,6 +522,7 @@ export class MetadataStore {
         JSON.stringify({
           digits: f.digits, translate: f.translate, copy: f.copy, aggregator: f.aggregator, currencyField: f.currencyField,
           computeExpr: f.computeExpr, defaultExpr: f.defaultExpr, depends: f.depends, store: f.store, tracking: f.tracking,
+          checkCompany: f.checkCompany, writeGroups: f.writeGroups, ratchet: f.ratchet, groups: f.groups,
         }),
       ],
     });

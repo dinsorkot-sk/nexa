@@ -12,6 +12,7 @@ import {
   ButtonService, ServerActionService, removeButtonDefinitions, removeServerActionDefinitions, type ServerActionType,
 } from './actions.js';
 import { dropBacking, sequenceAfterWrite, sequenceBeforeWrite } from './sequence.js';
+import { matchingBeforeMutation } from '../policy/matching.js';
 
 export { checkSequenceRanges, checkSequences, computeNumberNextActual } from './sequence.js';
 
@@ -339,6 +340,17 @@ function parseActionValues(text: string | null, key: string): Record<string, str
   return value as Record<string, string>;
 }
 
+function parseArgsJson(text: string | null, key: string): string[] | undefined {
+  if (text === null || text.trim() === '') return undefined;
+  if (text.length > MAX_VALUES_JSON) throw new ValidationError(`Arguments of server action '${key}' are too long`);
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { throw new ValidationError(`Arguments of server action '${key}' must be a JSON list`); }
+  if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) {
+    throw new ValidationError(`Arguments of server action '${key}' must be a list of NX-Expr strings`);
+  }
+  return value as string[];
+}
+
 /**
  * Validates ir.actions.server records through ServerActionService.define with the writer's env
  * (admin-only) and stores the runtime definition. Archived actions are removed from the runtime,
@@ -349,8 +361,10 @@ export async function checkServerActionRecords(records: Recordset): Promise<void
   const rows = await tenantDriver(env).query<{
     key: string; name: string | null; model_name: string | null; type: ServerActionType; values_json: string | null;
     target_model: string | null; message: string | null; child_keys: string | null; code: string | null; active: boolean | null;
+    lines_field: string | null; lines_source: string | null; lines_values_json: string | null; then_transition: string | null; method: string | null; args_json: string | null; transition: string | null; match_rule: string | null;
   }>({
-    text: `SELECT key, name, model_name, type, values_json, target_model, message, child_keys, code, active
+    text: `SELECT key, name, model_name, type, values_json, target_model, message, child_keys, code, active,
+        lines_field, lines_source, lines_values_json, then_transition, method, args_json, transition, match_rule
       FROM ir_actions_server WHERE id = ANY($1) ORDER BY id`,
     params: [[...records.ids]],
   });
@@ -358,6 +372,9 @@ export async function checkServerActionRecords(records: Recordset): Promise<void
     requireKey(row.key, 'server action key');
     if (!row.active) { await removeServerActionDefinitions(env, [row.key]); continue; }
     const values = parseActionValues(row.values_json, row.key);
+    const lineValues = parseActionValues(row.lines_values_json, row.key);
+    const hasLines = !!(row.lines_field || row.lines_source || lineValues);
+    const args = parseArgsJson(row.args_json, row.key);
     const children = (row.child_keys ?? '').split(',').map((c) => c.trim()).filter(Boolean);
     await new ServerActionService(env).define({
       key: row.key, type: row.type,
@@ -368,6 +385,12 @@ export async function checkServerActionRecords(records: Recordset): Promise<void
       ...(row.message !== null ? { message: row.message } : {}),
       ...(children.length ? { children } : {}),
       ...(row.code !== null ? { code: row.code } : {}),
+      ...(hasLines ? { lines: { field: row.lines_field ?? '', source: row.lines_source ?? '', values: lineValues ?? {} } } : {}),
+      ...(row.then_transition ? { thenTransition: row.then_transition } : {}),
+      ...(row.method ? { method: row.method } : {}),
+      ...(args ? { args } : {}),
+      ...(row.transition ? { transition: row.transition } : {}),
+      ...(row.match_rule ? { matchRule: row.match_rule } : {}),
     });
   }
 }
@@ -449,11 +472,18 @@ export async function importServiceConfigRecords(env: Env): Promise<number> {
     for (const action of actions) {
       const d = action.definition ?? {};
       const values = d.values && typeof d.values === 'object' && Object.keys(d.values).length ? JSON.stringify(d.values) : null;
+      const lines = d.lines as { field: string; source: string; values: Record<string, string> } | undefined;
       const children = Array.isArray(d.children) && d.children.length ? (d.children as string[]).join(',') : null;
       await env.model('ir.actions.server').create({
         key: action.key, name: action.name, model_name: action.model, type: action.type, values_json: values,
         target_model: (d.targetModel as string | null) ?? null, message: (d.message as string | null) ?? null,
         child_keys: children, code: (d.code as string | null) ?? null, active: true,
+        ...(lines ? { lines_field: lines.field, lines_source: lines.source, lines_values_json: JSON.stringify(lines.values ?? {}) } : {}),
+        ...(typeof d.thenTransition === 'string' ? { then_transition: d.thenTransition } : {}),
+        ...(typeof d.transition === 'string' ? { transition: d.transition } : {}),
+        ...(typeof d.matchRule === 'string' ? { match_rule: d.matchRule } : {}),
+        ...(typeof d.method === 'string' ? { method: d.method } : {}),
+        ...(Array.isArray(d.args) && d.args.length ? { args_json: JSON.stringify(d.args) } : {}),
       });
       created += 1;
     }
@@ -513,6 +543,7 @@ if (!previous) throw new Error('Automation record hooks must be installed before
 setRecordHooks({
   afterCreate: async (env, model, ids) => { await previous?.afterCreate(env, model, ids); },
   beforeWrite: async (env, model, ids, vals) => {
+    if (model === 'ir.match.rule') await matchingBeforeMutation(env, ids, vals);
     for (const field of IMMUTABLE[model] ?? []) {
       if (!(field in vals)) continue;
       const table = env.registry.get(model).table!;
@@ -537,6 +568,7 @@ setRecordHooks({
     await securityRecordsAfterWrite(env, model, vals);
   },
   beforeUnlink: async (env, model, ids) => {
+    if (model === 'ir.match.rule') await matchingBeforeMutation(env, ids);
     await previous?.beforeUnlink(env, model, ids);
     await removeRuntime(env, model, ids);
     await securityRecordsBeforeUnlink(env, model, ids);

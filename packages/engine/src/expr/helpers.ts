@@ -36,14 +36,33 @@ export function precisionDigits(value: ExprValue): number {
 }
 
 /** Round to `digits` decimals with exact decimal ties away from zero. */
-export function floatRound(value: ExprValue, digits: number): number {
-  return roundMonetary(finite(value), Number((10 ** -digits).toFixed(digits)));
+export function floatRound(value: ExprValue, digits: number, rounding?: number): number {
+  return roundMonetary(finite(value), rounding ?? Number((10 ** -digits).toFixed(digits)));
 }
 
 /** -1, 0 or 1 comparing two values after rounding their difference to `digits`. */
-export function floatCompare(a: ExprValue, b: ExprValue, digits: number): number {
-  const diff = floatRound(finite(a) - finite(b), digits);
+export function floatCompare(a: ExprValue, b: ExprValue, digits: number, rounding?: number): number {
+  const diff = floatRound(finite(a) - finite(b), digits, rounding);
   return diff === 0 ? 0 : diff > 0 ? 1 : -1;
+}
+
+/**
+ * Integers retain the decimal-digits contract; a fractional value is a rounding increment.
+ * Use the final argument for an integer increment: float_round(amount, null, 5).
+ * Both forms depend only on values, and never resolve currency/precision records.
+ */
+export function floatPrecision(digits: ExprValue = 2, rounding?: ExprValue): { digits: number; rounding?: number } {
+  if (rounding !== undefined && rounding !== null) {
+    const step = finite(rounding);
+    if (step <= 0) throw new RangeError('Rounding increment must be positive');
+    return { digits: 2, rounding: step };
+  }
+  if (digits === null) digits = 2;
+  if (typeof digits === 'number' && !Number.isInteger(digits)) {
+    if (!Number.isFinite(digits) || digits <= 0) throw new RangeError('Rounding increment must be positive');
+    return { digits: 2, rounding: digits };
+  }
+  return { digits: precisionDigits(digits) };
 }
 
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})((?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?)?)$/;
@@ -79,9 +98,18 @@ export function createExpressionHelpers(extra: Partial<ExprEnvironment> = {}): E
     uom: (value: ExprValue, rounding: ExprValue = 1) => roundIncrement(value, rounding),
     date: (value: ExprValue) => isoDate(value),
     abs: (value: ExprValue) => Math.abs(finite(value)),
-    float_round: (value: ExprValue, digits: ExprValue = 2) => floatRound(value, precisionDigits(digits)),
-    float_compare: (a: ExprValue, b: ExprValue, digits: ExprValue = 2) => floatCompare(a, b, precisionDigits(digits)),
-    float_is_zero: (value: ExprValue, digits: ExprValue = 2) => floatRound(value, precisionDigits(digits)) === 0,
+    float_round: (value: ExprValue, digits: ExprValue = 2, rounding?: ExprValue) => {
+      const precision = floatPrecision(digits, rounding);
+      return floatRound(value, precision.digits, precision.rounding);
+    },
+    float_compare: (a: ExprValue, b: ExprValue, digits: ExprValue = 2, rounding?: ExprValue) => {
+      const precision = floatPrecision(digits, rounding);
+      return floatCompare(a, b, precision.digits, precision.rounding);
+    },
+    float_is_zero: (value: ExprValue, digits: ExprValue = 2, rounding?: ExprValue) => {
+      const precision = floatPrecision(digits, rounding);
+      return floatRound(value, precision.digits, precision.rounding) === 0;
+    },
     date_add_days: (value: ExprValue, days: ExprValue) => dateAdd(value, days, 'days'),
     date_add_months: (value: ExprValue, months: ExprValue) => dateAdd(value, months, 'months'),
     ...extra,

@@ -59,6 +59,11 @@ export interface FieldDef {
   /** groups allowed to WRITE the field (others may still read it); e.g. res.users.login */
   writeGroups?: string[];
   /**
+   * Monotonic constraint: the value may only increase (date/datetime/integer/float/monetary).
+   * Enforced by the policy guard, not by the ORM write path itself.
+   */
+  ratchet?: 'up';
+  /**
    * Track value changes in the chatter (mail module): only on models inheriting `mail.thread`,
    * for scalar and many2one fields written directly. Ignored elsewhere.
    */

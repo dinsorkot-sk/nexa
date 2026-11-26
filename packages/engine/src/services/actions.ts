@@ -9,9 +9,22 @@ import { textToHtml } from '../mail/sanitize.js';
 import {
   assertSystem, assertWritable, ensureServiceTables, positiveInt, requireKey, requireModel, tenantDriver,
 } from './common.js';
+import { TransitionService } from '../policy/transition.js';
+import { MatchService } from '../policy/matching.js';
+import { evaluateFor, jsonValue, readRecord, recordOrigin, relationalScope } from './record-scope.js';
 
 /** Odoo ir.actions.server equivalents. Field values and messages are NX-Expr; scripts run in QuickJS. */
-export type ServerActionType = 'update_record' | 'create_record' | 'post_message' | 'multi' | 'script';
+export type ServerActionType = 'update_record' | 'create_record' | 'post_message' | 'multi' | 'script' | 'call_method' | 'transition' | 'match' | 'unmatch';
+
+/** create_record.lines: child rows created through a one2many of the created record, one per source item. */
+export interface ServerActionLines {
+  /** one2many field of the created model. */
+  field: string;
+  /** NX-Expr on the triggering record evaluating to a list (e.g. `record.x_line_ids`, a one2many/many2many field path or a list of objects). */
+  source: string;
+  /** child field -> NX-Expr evaluated per source item with `line` (the item) and `record` in scope. */
+  values: Record<string, string>;
+}
 
 export interface ServerActionDef {
   key: string;
@@ -29,6 +42,18 @@ export interface ServerActionDef {
   children?: string[];
   /** script: sandboxed JavaScript (QuickJS). `records` = { model, ids }. */
   code?: string;
+  /** create_record: build child rows from `record.<source>` (parent and children are created in one transaction). */
+  lines?: ServerActionLines;
+  /** create_record: transition the created records atomically, using the caller's access. */
+  thenTransition?: string;
+  /** call_method: model method run on the target records; must be registered with registerCallableMethod. */
+  method?: string;
+  /** call_method: NX-Expr arguments (`record` is in scope only when exactly one record is targeted). */
+  args?: string[];
+  /** transition: key of the `ir.transition` (of `model`) to run on the target records. */
+  transition?: string;
+  /** match/unmatch: key of the ir.match.rule on the model. */
+  matchRule?: string;
 }
 
 export interface ServerActionRunOptions {
@@ -51,6 +76,7 @@ export interface ServerActionLimits {
 interface ResolvedServerAction {
   key: string; name: string; model: string | null; type: ServerActionType;
   values: Record<string, string>; targetModel: string | null; message: string | null; children: string[]; code: string | null;
+  lines: ServerActionLines | null; thenTransition: string | null; method: string | null; args: string[]; transition: string | null; matchRule: string | null;
 }
 
 interface RunState {
@@ -62,7 +88,33 @@ function logHostError(actionKey: string, error: unknown): void {
   console.error(`[nexa] server action '${actionKey}' failed in a host call`, error);
 }
 
-const TYPES = new Set<ServerActionType>(['update_record', 'create_record', 'post_message', 'multi', 'script']);
+const TYPES = new Set<ServerActionType>(['update_record', 'create_record', 'post_message', 'multi', 'script', 'call_method', 'transition', 'match', 'unmatch']);
+/** Upper bound of child rows one create_record.lines mapping may create per created record. */
+export const MAX_ACTION_LINES = 1000;
+const MAX_CALL_ARGS = 20;
+const CALLABLE_METHOD = /^[a-z][a-zA-Z0-9_]{0,79}$/;
+
+const callableMethods = new Map<string, Set<string>>();
+
+/**
+ * Allowlist of model methods that `call_method` server actions may run. A module registers the
+ * methods it intends to expose to no-code configuration (typically at module load, next to the
+ * model's `methods`); anything not registered is refused at define time and at run time.
+ * An allowlisted method must bound its own work (rows, loops): the action only charges the target rows.
+ * It must also enforce its own write authorization: call_method only checks that the caller can read
+ * the target records; the method decides what the caller may change.
+ */
+export function registerCallableMethod(model: string, method: string): void {
+  requireModel(model);
+  if (typeof method !== 'string' || !CALLABLE_METHOD.test(method)) throw new ValidationError('Invalid method name');
+  let set = callableMethods.get(model);
+  if (!set) { set = new Set(); callableMethods.set(model, set); }
+  set.add(method);
+}
+
+export function isCallableMethod(model: string, method: string): boolean {
+  return callableMethods.get(model)?.has(method) === true;
+}
 const MAX_SCRIPT = 50_000;
 const MAX_IDS = 10_000;
 /** The only text a script sees for an internal (non-engine) host failure. */
@@ -129,7 +181,13 @@ function validateDefinition(env: Env, def: ServerActionDef): ResolvedServerActio
   if (model !== null) knownModel(env, model);
   const out: ResolvedServerAction = {
     key: def.key, name, model, type: def.type, values: {}, targetModel: null, message: null, children: [], code: null,
+    lines: null, thenTransition: null, method: null, args: [], transition: null, matchRule: null,
   };
+  if (def.thenTransition !== undefined) {
+    if (def.type !== 'create_record') throw new ValidationError(`Server action '${def.key}': thenTransition only applies to create_record`);
+    requireKey(def.thenTransition, 'transition key');
+    out.thenTransition = def.thenTransition;
+  }
   switch (def.type) {
     case 'update_record':
     case 'create_record': {
@@ -138,9 +196,11 @@ function validateDefinition(env: Env, def: ServerActionDef): ResolvedServerActio
       const meta = knownModel(env, target);
       if (def.type === 'create_record') out.targetModel = target;
       const values = def.values ?? {};
-      if (typeof values !== 'object' || Array.isArray(values) || !Object.keys(values).length) {
+      if (def.lines !== undefined && def.type !== 'create_record') throw new ValidationError(`Server action '${def.key}': lines only apply to create_record`);
+      if (typeof values !== 'object' || values === null || Array.isArray(values) || (!Object.keys(values).length && def.lines === undefined)) {
         throw new ValidationError(`Server action '${def.key}' needs field values`);
       }
+      if (def.lines !== undefined) out.lines = validateLines(env, def.key, target, def.lines, values);
       for (const [field, source] of Object.entries(values)) {
         if (!meta.fields.has(field)) throw new ValidationError(`Server action '${def.key}': unknown field '${field}' on '${target}'`);
         checkExpression(source, `Server action '${def.key}' value '${field}'`);
@@ -163,6 +223,30 @@ function validateDefinition(env: Env, def: ServerActionDef): ResolvedServerActio
       }
       out.children = [...def.children];
       break;
+    case 'call_method': {
+      if (!model) throw new ValidationError(`Server action '${def.key}' needs a model`);
+      const meta = knownModel(env, model);
+      if (typeof def.method !== 'string' || !CALLABLE_METHOD.test(def.method)) throw new ValidationError(`Server action '${def.key}' needs a valid method name`);
+      if (!isCallableMethod(model, def.method)) throw new ValidationError(`Method '${model}.${def.method}' is not callable from server actions`);
+      if (!meta.def.methods || !Object.hasOwn(meta.def.methods, def.method)) throw new ValidationError(`Model '${model}' has no method '${def.method}'`);
+      const args = def.args ?? [];
+      if (!Array.isArray(args) || args.length > MAX_CALL_ARGS) throw new ValidationError(`Server action '${def.key}' accepts at most ${MAX_CALL_ARGS} arguments`);
+      args.forEach((a, i) => checkExpression(a, `Server action '${def.key}' argument ${i + 1}`));
+      out.method = def.method;
+      out.args = [...args];
+      break;
+    }
+    case 'match':
+    case 'unmatch':
+      if (!model) throw new ValidationError(`Server action '${def.key}' needs a model`);
+      requireKey(def.matchRule as string, 'matching rule key');
+      out.matchRule = def.matchRule!;
+      break;
+    case 'transition':
+      if (!model) throw new ValidationError(`Server action '${def.key}' needs a model`);
+      requireKey(def.transition as string, 'transition key');
+      out.transition = def.transition!;
+      break;
     case 'script':
       if (typeof def.code !== 'string' || !def.code.trim() || def.code.length > MAX_SCRIPT) {
         throw new ValidationError(`Server action '${def.key}' needs code of at most ${MAX_SCRIPT} characters`);
@@ -171,6 +255,31 @@ function validateDefinition(env: Env, def: ServerActionDef): ResolvedServerActio
       break;
   }
   return out;
+}
+
+function validateLines(env: Env, key: string, target: string, lines: ServerActionLines, parentValues: Record<string, string>): ServerActionLines {
+  const where = `Server action '${key}' lines`;
+  if (!lines || typeof lines !== 'object' || Array.isArray(lines)) throw new ValidationError(`${where} must be an object`);
+  const field = typeof lines.field === 'string' ? knownModel(env, target).fields.get(lines.field) : undefined;
+  if (!field) throw new ValidationError(`${where}: unknown field '${String(lines.field)}' on '${target}'`);
+  if (field.type !== 'one2many' || !field.comodel) throw new ValidationError(`${where}: '${lines.field}' is not a one2many field`);
+  const parentFields = knownModel(env, target).fields;
+  if (parentFields.has('line') || parentFields.has('record')) throw new ValidationError(`${where}: model '${target}' has a field named 'line' or 'record', which would be shadowed`);
+  if (Object.hasOwn(parentValues, lines.field)) throw new ValidationError(`${where}: '${lines.field}' cannot also be set in values`);
+  checkExpression(lines.source, `${where} source`);
+  const child = knownModel(env, field.comodel);
+  const values = lines.values;
+  if (typeof values !== 'object' || values === null || Array.isArray(values) || !Object.keys(values).length) throw new ValidationError(`${where} need child values`);
+  for (const [name, source] of Object.entries(values)) {
+    const childField = child.fields.get(name);
+    if (!childField) throw new ValidationError(`${where}: unknown field '${name}' on '${field.comodel}'`);
+    if (name === field.inverseName) throw new ValidationError(`${where}: '${name}' is the inverse field and is set automatically`);
+    if (childField.readonly || childField.compute || childField.computeExpr || childField.store === false) {
+      throw new ValidationError(`${where}: field '${name}' is readonly or computed`);
+    }
+    checkExpression(source, `${where} value '${name}'`);
+  }
+  return { field: lines.field, source: lines.source, values: { ...values } };
 }
 
 function checkExpression(source: unknown, where: string): void {
@@ -212,10 +321,6 @@ function lockOptions(value: unknown, label: string): { skipLocked?: boolean; now
   return out;
 }
 
-function jsonValue(value: unknown): ExprValue {
-  return value === undefined ? null : JSON.parse(JSON.stringify(value)) as ExprValue;
-}
-
 async function loadAction(env: Env, ref: string | number): Promise<ResolvedServerAction | null> {
   await ensureServiceTables(env);
   const db = tenantDriver(env);
@@ -234,7 +339,7 @@ async function loadAction(env: Env, ref: string | number): Promise<ResolvedServe
           text: `SELECT xml_id,name,model,code FROM nx_action WHERE xml_id=$1 AND type='server' AND code IS NOT NULL`, params: [ref],
         });
         if (ui) {
-          return { key: ui.xml_id, name: ui.name, model: ui.model, type: 'script', values: {}, targetModel: null, message: null, children: [], code: ui.code };
+          return { key: ui.xml_id, name: ui.name, model: ui.model, type: 'script', values: {}, targetModel: null, message: null, children: [], code: ui.code, lines: null, thenTransition: null, method: null, args: [], transition: null, matchRule: null };
         }
       }
     }
@@ -246,130 +351,16 @@ async function loadAction(env: Env, ref: string | number): Promise<ResolvedServe
     key: row.key, name: row.name, model: row.model, type: row.type,
     values: (d.values as Record<string, string>) ?? {}, targetModel: (d.targetModel as string | null) ?? null,
     message: (d.message as string | null) ?? null, children: (d.children as string[]) ?? [], code: (d.code as string | null) ?? null,
+    lines: (d.lines as ServerActionLines | null) ?? null, method: (d.method as string | null) ?? null, args: (d.args as string[]) ?? [],
+    thenTransition: (d.thenTransition as string | null) ?? null,
+    transition: (d.transition as string | null) ?? null,
+    matchRule: (d.matchRule as string | null) ?? null,
   };
 }
 
 function charge(state: RunState, rows: number): void {
   if (state.rows + rows > state.maxRows) throw new ValidationError('Server action row quota exceeded');
   state.rows += rows;
-}
-
-/** Where a flat record read by readRecord came from, so expressions can follow its many2one fields. */
-const recordOrigin = new WeakMap<object, { model: string; id: number }>();
-
-async function readRecord(env: Env, model: string, id: number): Promise<Record<string, ExprValue>> {
-  const [row] = await env.model(model).browse(id).read();
-  if (!row) throw new AccessError('Record is unavailable');
-  const record = jsonValue(row) as Record<string, ExprValue>;
-  recordOrigin.set(record, { model, id });
-  return record;
-}
-
-/** Options of one action-side expression evaluation. */
-interface EvalOptions {
-  /** Guards and messages: helpers with side effects (sequence_next) are refused. */
-  readOnly?: boolean;
-  /** Charge rows read to follow relations (the action's row budget). */
-  charge?: (rows: number) => void;
-}
-
-const MAX_RELATION_PATHS = 64;
-const MAX_RELATION_DEPTH = 16;
-const MAX_RELATION_ROWS = 1000;
-
-type PathTree = Map<string, PathTree>;
-
-/**
- * GAP-REL-1: the expression's dotted paths that start at a relational field are loaded with the
- * caller's access (ACL + record rules, never sudo) so `x_product_id.name` and
- * `x_line_ids.sum('x_price_subtotal')` work. Only the paths the expression references are read
- * (statically extracted, like computeExpr dependencies). Bounds: 64 paths, depth 16, 1000 rows per
- * evaluation; inside a server action the rows are also charged to the action's row budget.
- *
- * Semantics:
- * - A traversed many2one becomes an object carrying `id` and the referenced fields; an x2many a list
- *   of such objects. A relational field the expression does not traverse stays the raw id / id list,
- *   so `x_partner_id == 5` keeps working. An expression that both traverses a many2one and uses it
- *   bare is refused (write `x_partner_id.id`): the bare use would silently compare an object.
- * - Fail closed: if a referenced related record is not readable by the caller (ACL or record rule),
- *   the evaluation raises AccessError instead of seeing null (guards, messages and values alike).
- * - Expressions whose dependencies cannot be extracted statically keep the flat record.
- */
-async function relationalScope(env: Env, source: string, record: Record<string, ExprValue>, options: EvalOptions): Promise<Record<string, ExprValue>> {
-  const origin = recordOrigin.get(record);
-  if (!origin) return record;
-  let paths: string[];
-  try { paths = extractDependencies(source); } catch { return record; }
-  const registry = (env as EnvImpl).registry;
-  const fields = registry.get(origin.model).fields;
-  const tree: PathTree = new Map();
-  const bare = new Set<string>();
-  let count = 0;
-  for (const path of paths) {
-    const parts = path.split('.');
-    const type = fields.get(parts[0]!)?.type;
-    if (type !== 'many2one' && type !== 'one2many' && type !== 'many2many') continue;
-    if (parts.length === 1) { bare.add(parts[0]!); continue; }
-    if (++count > MAX_RELATION_PATHS || parts.length > MAX_RELATION_DEPTH) throw new ValidationError('Expression relation quota exceeded');
-    let node = tree;
-    for (const part of parts) {
-      if (!node.has(part)) node.set(part, new Map());
-      node = node.get(part)!;
-    }
-  }
-  if (!tree.size) return record;
-  for (const root of tree.keys()) {
-    if (bare.has(root) && fields.get(root)!.type === 'many2one') {
-      throw new ValidationError(`Expression uses '${root}' both as an id and as a record; write '${root}.id' for the id`);
-    }
-  }
-  let rows = 0;
-  const load = async (model: string, ids: number[], children: PathTree): Promise<Map<number, Record<string, ExprValue>>> => {
-    const unique = [...new Set(ids)];
-    const out = new Map<number, Record<string, ExprValue>>();
-    if (!unique.length) return out;
-    rows += unique.length;
-    if (rows > MAX_RELATION_ROWS) throw new ValidationError('Expression relation row quota exceeded');
-    options.charge?.(unique.length);
-    const meta = registry.get(model);
-    for (const name of children.keys()) if (name !== 'id' && !meta.fields.has(name)) throw new ValidationError(`Unknown field '${model}.${name}'`);
-    const names = [...children.keys()].filter((name) => name !== 'id');
-    const read = await env.model(model).browse(unique).read(names.length ? names : ['id']);
-    if (read.length !== unique.length) throw new AccessError(`A related '${model}' record is not readable`);
-    for (const row of read) out.set(row.id as number, { id: row.id as number });
-    for (const name of names) {
-      const field = meta.fields.get(name)!;
-      const sub = children.get(name)!;
-      const relational = field.type === 'many2one' || field.type === 'one2many' || field.type === 'many2many';
-      if (!sub.size || !relational) {
-        if (sub.size) throw new ValidationError(`Field '${model}.${name}' is not relational`);
-        for (const row of read) out.get(row.id as number)![name] = jsonValue(row[name]);
-        continue;
-      }
-      const targets = (value: unknown): number[] => field.type === 'many2one'
-        ? (typeof value === 'number' ? [value] : [])
-        : (Array.isArray(value) ? value.filter((x): x is number => typeof x === 'number') : []);
-      const nested = await load(field.comodel!, read.flatMap((row) => targets(row[name])), sub);
-      for (const row of read) {
-        const ids = targets(row[name]);
-        out.get(row.id as number)![name] = field.type === 'many2one'
-          ? (ids.length ? nested.get(ids[0]!)! : null)
-          : ids.map((id) => nested.get(id)!);
-      }
-    }
-    return out;
-  };
-  const self = (await load(origin.model, [origin.id], tree)).get(origin.id)!;
-  const out = { ...record };
-  for (const root of tree.keys()) out[root] = self[root] ?? null;
-  return out;
-}
-
-async function evaluateFor(env: Env, source: string, record: Record<string, ExprValue> | null, options: EvalOptions = {}): Promise<ExprValue> {
-  const readOnly = { readOnly: !!options.readOnly };
-  if (!record) return evaluateEnvExpression(env, source, {}, readOnly);
-  const scope = await relationalScope(env, source, record, options);
-  return evaluateEnvExpression(env, source, { ...scope, record: scope }, readOnly);
 }
 
 async function evaluateValues(
@@ -382,6 +373,68 @@ async function evaluateValues(
     Object.defineProperty(out, field, { value, enumerable: true, writable: true, configurable: true });
   }
   return out;
+}
+
+const SOURCE_FIELD = /^(?:record\.)?([A-Za-z_][A-Za-z0-9_]*)$/;
+
+/** Evaluates a create_record.lines mapping into x2many create commands (rows charged, bounded, caller ACL). */
+async function evaluateLines(
+  env: Env, lines: ServerActionLines, sourceModel: string, record: Record<string, ExprValue>, state: RunState,
+): Promise<unknown[]> {
+  const registry = (env as EnvImpl).registry;
+  const raw = await evaluateFor(env, lines.source, record, { charge: (rows) => charge(state, rows) });
+  if (!Array.isArray(raw)) throw new ValidationError('Lines source must evaluate to a list');
+  if (raw.length > MAX_ACTION_LINES) throw new ValidationError(`Lines source has more than ${MAX_ACTION_LINES} items`);
+  if (!raw.length) return [];
+  let items: Record<string, ExprValue>[];
+  if (raw.every((item) => typeof item === 'number')) {
+    // untraversed x2many: a list of ids, read as flat rows with the caller's access
+    const name = SOURCE_FIELD.exec(lines.source.trim())?.[1];
+    const field = name ? registry.get(sourceModel).fields.get(name) : undefined;
+    if (!field || (field.type !== 'one2many' && field.type !== 'many2many') || !field.comodel) {
+      throw new ValidationError('Lines source must be a one2many/many2many field path or a list of objects');
+    }
+    const ids = [...new Set(raw as number[])];
+    charge(state, ids.length);
+    const rows = await env.model(field.comodel).browse(ids).read();
+    if (rows.length !== ids.length) throw new AccessError('A source line is not readable');
+    const byId = new Map(rows.map((row) => {
+      const flat = jsonValue(row) as Record<string, ExprValue>;
+      recordOrigin.set(flat, { model: field.comodel!, id: row.id as number });
+      return [row.id as number, flat] as const;
+    }));
+    items = (raw as number[]).map((id) => byId.get(id)!);
+  } else if (raw.every((item) => typeof item === 'object' && item !== null && !Array.isArray(item))) {
+    items = raw as Record<string, ExprValue>[];
+  } else throw new ValidationError('Lines source items must be record ids or objects');
+  charge(state, items.length); // child rows created
+  const commands: unknown[] = [];
+  // same relation loader as parent values: `record.x_a.name` and `line.x_b.name` follow relations with the caller's access.
+  // The parent scope is loaded once per value expression, not per line (rows are charged once).
+  const charger = (rows: number) => charge(state, rows);
+  const recordScopes = new Map<string, Record<string, ExprValue>>();
+  const lineRelational = new Map<string, boolean>();
+  for (const [name, source] of Object.entries(lines.values)) {
+    if (UNSAFE_KEYS.has(name)) throw new ValidationError(`Invalid field name '${name}'`);
+    recordScopes.set(name, await relationalScope(env, source, record, { charge: charger }));
+    let relational = false;
+    try { relational = extractDependencies(source).some((p) => p.startsWith('line.') && p.split('.').length > 2); } catch { /* not statically analysable */ }
+    lineRelational.set(name, relational);
+  }
+  for (const line of items) {
+    const values: Record<string, unknown> = {};
+    for (const [name, source] of Object.entries(lines.values)) {
+      if (lineRelational.get(name) && !recordOrigin.has(line)) {
+        throw new ValidationError(`Lines value '${name}' follows a relation of 'line', which needs record ids as the lines source`);
+      }
+      const recordScope = recordScopes.get(name)!;
+      const lineScope = await relationalScope(env, source, line, { charge: charger, prefix: 'line' });
+      const value = await evaluateEnvExpression(env, source, { ...recordScope, record: recordScope, line: lineScope }, {});
+      Object.defineProperty(values, name, { value, enumerable: true, writable: true, configurable: true });
+    }
+    commands.push({ op: 'create', values });
+  }
+  return commands;
 }
 
 /**
@@ -447,10 +500,33 @@ async function execute(
       charge(state, sources.length);
       const created: number[] = [];
       for (const id of sources) {
-        const values = await evaluateValues(env, action.values, id === null ? null : await readRecord(env, target!, id), state);
+        const record = id === null ? null : await readRecord(env, target!, id);
+        const values = await evaluateValues(env, action.values, record, state);
+        if (action.lines) {
+          if (!record) throw new ValidationError(`Server action '${action.key}' builds lines from a record`);
+          const commands = await evaluateLines(env, action.lines, target!, record, state);
+          Object.defineProperty(values, action.lines.field, { value: commands, enumerable: true, writable: true, configurable: true });
+        }
         created.push(...(await env.model(createIn).create(values)).ids);
       }
+      if (action.thenTransition) {
+        charge(state, created.length);
+        await new TransitionService(env).run(createIn, created, action.thenTransition);
+      }
       return created;
+    }
+    case 'call_method': {
+      if (!target || !action.method) throw new ValidationError(`Server action '${action.key}' needs a model and a method`);
+      if (!isCallableMethod(target, action.method)) throw new ValidationError(`Method '${target}.${action.method}' is not callable from server actions`);
+      const records = env.model(target);
+      if (!ids.length) await records.checkAccess('read');
+      charge(state, ids.length);
+      const record = ids.length === 1 ? await readRecord(env, target, ids[0]!) : null;
+      const args: unknown[] = [];
+      for (const source of action.args) args.push(await evaluateFor(env, source, record, { charge: (rows) => charge(state, rows) }));
+      // allowlisted methods must bound their own work: the action only charges the target rows
+      const result = await records.browse(ids).call(action.method, ...args);
+      try { return jsonValue(result); } catch { throw new ValidationError(`Method '${target}.${action.method}' returned a value that is not JSON-serializable`); }
     }
     case 'post_message': {
       if (!target) throw new ValidationError(`Server action '${action.key}' needs a model`);
@@ -460,6 +536,18 @@ async function execute(
         await postMessage(env, target, id, typeof message === 'string' ? message : JSON.stringify(message));
       }
       return true;
+    }
+    case 'match':
+    case 'unmatch': {
+      if (!target || !action.matchRule) throw new ValidationError(`Server action '${action.key}' needs a model and matching rule`);
+      charge(state, ids.length);
+      const service = new MatchService(env);
+      return jsonValue(await (action.type === 'match' ? service.match(target, ids, action.matchRule) : service.unmatch(target, ids, action.matchRule)));
+    }
+    case 'transition': {
+      if (!target || !action.transition) throw new ValidationError(`Server action '${action.key}' needs a model and a transition`);
+      charge(state, ids.length);
+      return jsonValue(await new TransitionService(env).run(target, ids, action.transition));
     }
     case 'multi': {
       let last: ExprValue = null;

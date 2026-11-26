@@ -54,7 +54,7 @@ export function tenantDriver(env: Env): SqlDriver {
 }
 
 /** Bump whenever createServiceTables changes, so existing tenants re-run the (idempotent) DDL. */
-export const SERVICE_SCHEMA_VERSION = 3;
+export const SERVICE_SCHEMA_VERSION = 5;
 
 /**
  * Creates the tenant-local persistence used by the optional engine services. One catalog query per call:
@@ -96,9 +96,25 @@ async function createServiceTables(driver: SqlDriver): Promise<void> {
   await driver.query({ text: `
     CREATE TABLE IF NOT EXISTS nx_server_action (
       id BIGSERIAL PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, model TEXT,
-      type TEXT NOT NULL CHECK (type IN ('update_record','create_record','post_message','multi','script')),
+      type TEXT NOT NULL CHECK (type IN ('update_record','create_record','post_message','multi','script','call_method','transition','match','unmatch')),
       definition JSONB NOT NULL DEFAULT '{}'::jsonb
     )`, params: [] });
+  // tables created by an older build carry the narrower type CHECK: widen it once (single statement, advisory-locked)
+  await driver.query({ text: `
+    DO $nx$ DECLARE c RECORD; BEGIN
+      PERFORM pg_advisory_xact_lock(hashtext('nx.service_schema.server_action_type'));
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conrelid = 'nx_server_action'::regclass AND contype = 'c'
+          AND pg_get_constraintdef(oid) LIKE '%unmatch%'
+      ) THEN
+        FOR c IN SELECT conname FROM pg_constraint WHERE conrelid = 'nx_server_action'::regclass AND contype = 'c'
+          AND pg_get_constraintdef(oid) ~ '(^|[^a-z_])type([^a-z_]|$)' LOOP
+          EXECUTE format('ALTER TABLE nx_server_action DROP CONSTRAINT %I', c.conname);
+        END LOOP;
+        ALTER TABLE nx_server_action ADD CONSTRAINT nx_server_action_type_check
+          CHECK (type IN ('update_record','create_record','post_message','multi','script','call_method','transition','match','unmatch'));
+      END IF;
+    END $nx$`, params: [] });
   await driver.query({ text: `
     CREATE TABLE IF NOT EXISTS nx_automation (
       id BIGSERIAL PRIMARY KEY, key TEXT NOT NULL UNIQUE, model TEXT NOT NULL,

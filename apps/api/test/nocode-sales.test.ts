@@ -257,11 +257,11 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
     });
 
     // ---- probes of what Studio cannot express (asserted so a fix flips the test) ----
-    // GAP-COMP-1: stored computes may only depend on local scalar columns, so totals cannot be stored computes
+    // GAP-COMP-1 closed (T35a): stored computes may depend on relational paths
     const storedRelational = await post('studio/field', {
       model: LINE, name: 'x_list_price', type: 'float', store: true, computeExpr: 'x_product_id.product_tmpl_id.list_price',
     }, tokens.admin!);
-    expectRejected(storedRelational, /must be an unrestricted local scalar column/);
+    expect(storedRelational.status, JSON.stringify(storedRelational.body)).toBe(200);
     // GAP-COMP-2 (kept): a precision NAME / currency is tenant data, so float_round / currency_round stay impure in stored computes
     expectRejected(await post('studio/field', {
       model: LINE, name: 'x_subtotal_cur', type: 'float', store: true, computeExpr: "float_round(x_qty * x_price_unit, 'Product Price')",

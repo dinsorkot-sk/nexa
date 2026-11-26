@@ -4,6 +4,9 @@ import {
   checkDefaults, checkSequenceRanges, checkSequences,
 } from '../services/config.js';
 import { checkAccessRecords, checkRuleRecords } from '../security/records.js';
+import { checkLifecycleRecords, dateLockAccess, dateLockModels } from '../policy/index.js';
+import { transitionModels, transitionAccess } from '../policy/transition.js';
+import { matchModels, matchAccess } from '../policy/matching.js';
 
 const all = { read: true, write: true, create: true, unlink: true };
 const SYSTEM = 'base.group_system';
@@ -14,6 +17,9 @@ const SYSTEM = 'base.group_system';
  * services read them at run time. Every create/write is validated by the services' own rules.
  */
 export const configModels: ModelDef[] = [
+  ...transitionModels,
+  ...matchModels,
+  ...dateLockModels,
   {
     name: 'ir.sequence', origin: 'module', module: 'base', order: 'code asc, id asc', description: 'Sequence',
     fields: {
@@ -124,8 +130,16 @@ export const configModels: ModelDef[] = [
       type: {
         type: 'selection', required: true, default: 'update_record',
         selection: [['update_record', 'Update record'], ['create_record', 'Create record'], ['post_message', 'Post message'],
-          ['multi', 'Multiple actions'], ['script', 'Execute code']],
+          ['multi', 'Multiple actions'], ['script', 'Execute code'], ['call_method', 'Call method'], ['transition', 'Run transition'], ['match', 'Match records'], ['unmatch', 'Unmatch records']],
       },
+      lines_field: { type: 'char', string: 'Lines Field', help: 'Create record: one2many field of the created model filled from the lines mapping' },
+      lines_source: { type: 'char', string: 'Lines Source', help: 'Create record: NX-Expr list on the record, e.g. record.x_line_ids' },
+      lines_values_json: { type: 'text', string: 'Line Values (JSON)', help: 'JSON object: child field -> NX-Expr, with line and record in scope' },
+      then_transition: { type: 'char', help: 'Create record: transition key run atomically on the created records' },
+      method: { type: 'char', help: 'Call method: model method (must be in the module callable allowlist)' },
+      args_json: { type: 'text', string: 'Method Arguments (JSON)', help: 'Call method: JSON list of NX-Expr strings' },
+      transition: { type: 'char', help: 'Run transition: ir.transition key on the action model' },
+      match_rule: { type: 'char', help: 'Match/unmatch: ir.match.rule key on the action model' },
       values_json: { type: 'text', string: 'Field Values (JSON)', help: 'JSON object: field name -> NX-Expr (update/create record)' },
       target_model: { type: 'char', string: 'Target Model', help: 'Create record: model to create in (defaults to Model)' },
       message: { type: 'text', help: 'Post message: NX-Expr producing the text' },
@@ -181,9 +195,28 @@ export const configModels: ModelDef[] = [
     },
     constraints: [{ name: 'ir_rule_valid', check: checkRuleRecords }],
   },
+  {
+    name: 'ir.lifecycle', origin: 'module', module: 'base', order: 'model asc, id asc', recName: 'model', description: 'Lifecycle Policy',
+    fields: {
+      model: { type: 'char', required: true, unique: true, string: 'Model', help: 'Technical name of the model whose records are locked by state' },
+      state_field: { type: 'char', string: 'State Field', help: 'Selection field holding the state; leave empty on a child model that only declares engine fields' },
+      initial_state: { type: 'char', string: 'Initial State', help: 'State every new record must start in' },
+      locks: {
+        type: 'json', string: 'Locks',
+        help: 'List of {"states": [...], "writable": [fields], "unlink": false, "frozen_children": [one2many fields]}; fields not listed cannot change while the record is in those states',
+      },
+      transition_only: { type: 'json', string: 'Transition-only Fields', help: 'List of fields that only a transition may change (the state field always is)' },
+      engine_fields: { type: 'json', string: 'Engine Fields', help: 'List of fields maintained by the engine only (numbers, residuals, links)' },
+      active: { type: 'boolean', default: true },
+    },
+    constraints: [{ name: 'ir_lifecycle_valid', check: checkLifecycleRecords }],
+  },
 ];
 
 export const configAccess: AccessRule[] = [
+  ...transitionAccess,
+  ...matchAccess,
+  ...dateLockAccess,
   { model: 'ir.sequence', group: SYSTEM, perms: all },
   { model: 'ir.sequence.date_range', group: SYSTEM, perms: all },
   { model: 'ir.config_parameter', group: SYSTEM, perms: all },
@@ -195,6 +228,7 @@ export const configAccess: AccessRule[] = [
   { model: 'ir.button', group: SYSTEM, perms: all },
   { model: 'ir.model.access', group: SYSTEM, perms: all },
   { model: 'ir.rule', group: SYSTEM, perms: all },
+  { model: 'ir.lifecycle', group: SYSTEM, perms: all },
 ];
 
 export const configRules: RecordRule[] = [
