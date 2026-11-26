@@ -109,7 +109,7 @@ not a stock module.
   - The target needs an `ir.lifecycle` whose delta fields are `engine_fields`, so only the effect can
     write them, through write tokens.
   - The key fields need a unique key.
-- **Partial reservation.** Allowed: `delta = min(line.qty, balance.quantity - balance.reserved)`, with
+- **Partial reservation.** Allowed: `delta = [line.qty, balance.quantity - balance.reserved].min()`, with
   `into` recording the reserved amount on the line.
 - **Negative stock.** It is decided per location. A post-check reads an `allow_negative` flag on the
   location, which defaults to blocked. This is metadata, not engine code.
