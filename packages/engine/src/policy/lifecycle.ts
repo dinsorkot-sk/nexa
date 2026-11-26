@@ -346,12 +346,12 @@ export async function policyIndex(env: EnvImpl): Promise<PolicyIndex> {
   if (!(await tableExists(env, e))) return EMPTY;
   const hasDateLocks = await dateLockTableExists(env, e);
   const [fp] = await env.db.query<{ fp: string }>({
-    text: `SELECT count(*)::text || ':' || coalesce(max(id), 0)::text || ':' || coalesce(max(write_date)::text, '') AS fp FROM ir_lifecycle`,
+    text: `SELECT count(*)::text || ':' || coalesce(max(id), 0)::text || ':' || coalesce(max(write_date)::text, '') || ':' || coalesce(sum(xmin::text::bigint), 0)::text AS fp FROM ir_lifecycle`,
     params: [],
   });
   const [dlFp] = hasDateLocks
     ? await env.db.query<{ fp: string }>({
-      text: `SELECT count(*)::text || ':' || coalesce(max(id), 0)::text || ':' || coalesce(max(write_date)::text, '') AS fp FROM ir_date_lock`,
+      text: `SELECT count(*)::text || ':' || coalesce(max(id), 0)::text || ':' || coalesce(max(write_date)::text, '') || ':' || coalesce(sum(xmin::text::bigint), 0)::text AS fp FROM ir_date_lock`,
       params: [],
     })
     : [{ fp: '' }];

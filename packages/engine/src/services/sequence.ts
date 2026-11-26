@@ -11,6 +11,8 @@ export interface SequenceOptions {
   date?: Date | string;
   /** Company whose sequence is preferred over the global one. Defaults to the env's current company. */
   companyId?: number;
+  /** Refuse a sequence that is not `no_gap` (ADR 0004 I4: gapless document numbers). */
+  requireNoGap?: boolean;
 }
 
 const PLACEHOLDER = /%\(([a-z0-9_]+)\)s/g;
@@ -138,6 +140,7 @@ export async function nextFromRecord(env: Env, code: string, options: SequenceOp
     });
     if (!seq) return null;
     const seqId = Number(seq.id);
+    if (options.requireNoGap && seq.implementation !== 'no_gap') throw new ValidationError(`Sequence '${code}' must use the no_gap implementation`);
     const step = seq.number_increment;
     let range: { id: number; date_from: string } | undefined;
     if (seq.use_date_range) range = await dateRange(tx, seqId, seq.date_range_period === 'month' ? 'month' : 'year', issued);

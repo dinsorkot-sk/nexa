@@ -28,6 +28,11 @@ export const transitionModels: ModelDef[] = [
         help: '[{type:sequence,field,code,date,company,when} | {type:set,values} | {type:child_set,field,values}]',
       },
       active: { type: 'boolean', default: true },
+      model_key: { type: 'char', unique: true, readonly: true, store: true, depends: ['model', 'key'], compute: async (records) => {
+        const values = new Map<number, unknown>();
+        for (const r of await records.read(['model', 'key'])) values.set(Number(r.id), `${String(r.model)}:${String(r.key)}`);
+        return values;
+      } },
     },
     constraints: [{ name: 'ir_transition_valid', check: checkTransitionRecords }],
   },
@@ -156,6 +161,8 @@ export async function checkTransitionRecords(records: Recordset): Promise<void> 
   }
 }
 
+export const MAX_TRANSITION_IDS = 1000;
+
 export interface TransitionResult { done: number[]; skipped: number[] }
 
 export class TransitionService {
@@ -163,8 +170,13 @@ export class TransitionService {
 
   async run(model: string, rawIds: readonly number[], key: string): Promise<TransitionResult> {
     const env = this.env as EnvImpl;
+    if (!Array.isArray(rawIds)) throw new ValidationError('Transition ids must be a list');
+    if (rawIds.some((i) => typeof i !== 'number' || !Number.isSafeInteger(i) || i < 1)) {
+      throw new ValidationError('Transition ids must be positive integers');
+    }
     const ids = [...new Set(rawIds)].sort((a, b) => a - b);
     if (!ids.length) throw new ValidationError('A transition needs at least one record');
+    if (ids.length > MAX_TRANSITION_IDS) throw new ValidationError(`A transition accepts at most ${MAX_TRANSITION_IDS} records`);
     return env.transaction(async () => {
       const index = await policyIndex(env);
       const policy = index.get(model)?.policy;
@@ -204,7 +216,7 @@ export class TransitionService {
       const done: number[] = []; const skipped: number[] = [];
       for (const id of ids) {
         const record = await readRecord(env, model, id);
-        const state = record[stateField];
+        const state = record[stateField] ?? policy!.initialState;
         if (state === def.to && def.already === 'skip') { skipped.push(id); continue; }
         if (typeof state !== 'string' || !def.from.includes(state)) {
           throw new ValidationError(`Cannot ${def.key} record ${id}: it is '${String(state)}', expected ${def.from.join(' or ')}`);
@@ -220,6 +232,8 @@ export class TransitionService {
         for (const e of def.effects) {
           if (e.type === 'sequence') {
             if (e.when && (await evaluateFor(env, e.when, record, ro)) !== true) continue;
+            const current = record[e.field];
+            if (current !== null && current !== undefined && current !== false && current !== '') continue; // already numbered
             const code = await evaluateFor(env, e.code, record, ro);
             if (typeof code !== 'string' || !code) throw new ValidationError('Sequence code must evaluate to text');
             const date = e.date ? await evaluateFor(env, e.date, record, ro) : undefined;
@@ -229,13 +243,15 @@ export class TransitionService {
             const sequenceDate = typeof date === 'string'
               ? date.replace(/T00:00:00\.000Z$/, '')
               : undefined;
-            const companyId = e.company ? await evaluateFor(env, e.company, record, ro) : undefined;
+            const companyId = e.company ? await evaluateFor(env, e.company, record, ro)
+              : meta.fields.get('company_id')?.type === 'many2one' && typeof record.company_id === 'number' ? record.company_id : undefined;
             if (e.company && (typeof companyId !== 'number' || !Number.isSafeInteger(companyId) || companyId < 1)) {
               throw new ValidationError('Sequence company must evaluate to a positive company id');
             }
             const next = await nextFromRecord(env, code, {
               ...(sequenceDate ? { date: sequenceDate } : {}),
               ...(typeof companyId === 'number' ? { companyId } : {}),
+              requireNoGap: true,
             });
             if (next === null) throw new ValidationError(`No sequence '${code}'`);
             header[e.field] = next;
