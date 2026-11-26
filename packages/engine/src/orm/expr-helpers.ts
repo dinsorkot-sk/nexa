@@ -16,6 +16,9 @@ import { expressionContext } from './compute.js';
 
 export const DEFAULT_PRECISION_DIGITS = 2;
 
+/** A helper with side effects was called in a read-only evaluation (computed field, preview, guard). */
+export class SideEffectRefusedError extends ValidationError {}
+
 /** Digits of a named decimal.precision, cached in the env family's record cache. */
 export async function precisionDigits(env: Env, name: string): Promise<number> {
   const impl = env as EnvImpl;
@@ -144,6 +147,11 @@ export interface ExpressionHelperDef {
   sync?: (...args: ExprValue[]) => ExprValue;
   /** Runs with the caller's env; must apply that env's access rights (do not sudo for user data). */
   resolve?: (env: Env, args: ExprValue[]) => Promise<ExprValue> | ExprValue;
+  /**
+   * The helper changes data (for example draws a sequence number). It is unavailable in read-only
+   * evaluations (computed fields), where it would run on every read.
+   */
+  sideEffects?: boolean;
 }
 
 const registered = new Map<string, ExpressionHelperDef>();
@@ -157,6 +165,7 @@ export function registerExpressionHelper(name: string, def: ExpressionHelperDef)
     throw new TypeError(`Expression helper '${name}' needs exactly one of sync or resolve`);
   }
   if (def.pure && def.resolve) throw new TypeError(`Async expression helper '${name}' cannot be pure`);
+  if (def.sideEffects && (def.pure || !def.resolve)) throw new TypeError(`Expression helper '${name}' with side effects must be async and impure`);
   reserveHelperName(name, { pure: !!def.pure });
   registered.set(name, { ...def });
 }
@@ -164,6 +173,8 @@ export function registerExpressionHelper(name: string, def: ExpressionHelperDef)
 export interface EvaluateOptions {
   /** Extra call-local helpers for this evaluation only (trusted caller code). */
   helpers?: Readonly<Record<string, ExpressionHelperDef>>;
+  /** Read-only evaluation (computed fields): helpers with side effects fail instead of running. */
+  readOnly?: boolean;
 }
 
 /** Registered synchronous helpers (also usable by synchronous evaluators such as templates). */
@@ -184,7 +195,9 @@ export async function evaluateEnvExpression(env: Env, source: string, scope: Exp
   const local: string[] = [];
   const environment: ExprEnvironment = { ...scope, ...context };
   const add = (name: string, def: ExpressionHelperDef) => {
-    if (def.resolve) { const resolve = def.resolve; asyncHelpers[name] = { resolve: (args) => resolve(env, args) }; }
+    if (def.resolve && def.sideEffects && options.readOnly) {
+      asyncHelpers[name] = { resolve: () => { throw new SideEffectRefusedError(`Expression helper '${name}' changes data and cannot be used here`); } };
+    } else if (def.resolve) { const resolve = def.resolve; asyncHelpers[name] = { resolve: (args) => resolve(env, args) }; }
     else if (def.sync) environment[name] = def.sync;
   };
   for (const [name, def] of registered) if (def.resolve) add(name, def);
