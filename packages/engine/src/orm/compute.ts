@@ -1,7 +1,8 @@
 import { EngineError, ValidationError, type ComputeFn, type ResolvedModel } from '../contracts/index.js';
 import type { EnvImpl } from './env.js';
-import type { RecordsetImpl } from './recordset.js';
+import { sqlCall, type RecordsetImpl } from './recordset.js';
 import type { ResolvedField } from './registry.js';
+import { roundMonetary } from './decimal.js';
 import { createExpressionHelpers, extractDependencies, type ExprValue } from '../expr/index.js';
 import { userSecurity } from '../security/access.js';
 import { localClock } from './clock.js';
@@ -14,6 +15,11 @@ import { evaluateEnvExpression, registeredSyncHelpers, roundFieldValue } from '.
  * on the model reached after k hops affects the M records found by
  *   search(M, [[p0...p(k-1), 'in', changedIds]])      (or the changed ids themselves when k = 0).
  * one2many hops are also triggered by their inverse many2one on the comodel.
+ *
+ * Code computes (`depends`) and stored NX-Expr computes (`computeExpr`, dependencies extracted
+ * from the expression) share this graph. Recomputation reads the dependencies as superuser and
+ * stores with storeRaw (no ACL, no write_date), so a stored value is the same whoever triggered
+ * it; it is only exposed to users allowed to read the computed field itself.
  */
 interface Trigger {
   field: string;          // field on the triggering model
@@ -44,6 +50,10 @@ function triggerIndex(models: ReadonlyMap<string, ResolvedModel>): Map<string, T
           add(cur.name, { field: parts[k], target: m.name, computed: f.name, prefix: parts.slice(0, k).join('.') });
           if (pf.type === 'one2many' && pf.inverseName) {
             add(pf.comodel!, { field: pf.inverseName, target: m.name, computed: f.name, prefix: parts.slice(0, k + 1).join('.') });
+          }
+          // expressions see only active x2many rows (like a user read): archiving one changes the value
+          if (f.computeExpr && (pf.type === 'one2many' || pf.type === 'many2many') && models.get(pf.comodel!)!.fields.has('active')) {
+            add(pf.comodel!, { field: 'active', target: m.name, computed: f.name, prefix: parts.slice(0, k + 1).join('.') });
           }
           if (pf.type === 'many2many') {
             // '*' fires only when comodel records are created/deleted ('all'): deletion drops relation rows
@@ -102,6 +112,39 @@ export async function affected(env: EnvImpl, model: string, fields: ReadonlySet<
  */
 const MAX_CASCADE = 1000;
 
+/** Records recomputed (and stored) per step; larger fan-outs are processed in several steps. */
+export const RECOMPUTE_BATCH = 1000;
+
+let fanoutLimit = 10_000;
+/**
+ * Ceiling on the distinct records one triggering operation may recompute (all models and levels
+ * together). Above it the operation fails with a ValidationError instead of running an unbounded
+ * transaction. Returns the previous value.
+ */
+export function setRecomputeFanoutLimit(limit: number): number {
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new EngineError('Invalid recompute fan-out limit');
+  const previous = fanoutLimit;
+  fanoutLimit = limit;
+  return previous;
+}
+
+function distinctRecords(...todos: Todo[]): number {
+  const seen = new Map<string, Set<number>>();
+  for (const todo of todos) for (const [model, fields] of todo) {
+    let ids = seen.get(model);
+    if (!ids) seen.set(model, (ids = new Set()));
+    for (const set of fields.values()) for (const id of set) ids.add(id);
+  }
+  let n = 0;
+  for (const ids of seen.values()) n += ids.size;
+  return n;
+}
+
+/** The field reads other records (a dotted path, or an x2many whose membership other rows define). */
+function hasRelationalDependency(meta: ResolvedModel, f: ResolvedField): boolean {
+  return (f.depends ?? []).some((dep) => dep.includes('.') || ['one2many', 'many2many'].includes(meta.fields.get(dep)?.type ?? ''));
+}
+
 /**
  * Recompute and store the fields in `todo`, then follow triggers on the stored results.
  * Returns everything that was recomputed (model -> field -> ids), so callers can validate it.
@@ -109,24 +152,82 @@ const MAX_CASCADE = 1000;
 export async function recompute(env: EnvImpl, todo: Todo, done: Todo = new Map(), depth = 0): Promise<Todo> {
   if (todo.size === 0) return done;
   if (depth > MAX_CASCADE) throw new EngineError('Computed field dependencies do not settle (cycle?)');
+  if (distinctRecords(done, todo) > fanoutLimit) {
+    throw new ValidationError(`This change would recompute more than ${fanoutLimit} records; split it into smaller changes`);
+  }
   const su = env.sudo() as EnvImpl;
   const next: Todo = new Map();
-  for (const [model, fields] of todo) {
+  // deterministic lock order across transactions: by table name, then by id
+  const ordered = [...todo].sort(([a], [b]) => {
+    const ta = env.registry.get(a).table ?? a;
+    const tb = env.registry.get(b).table ?? b;
+    return ta < tb ? -1 : ta > tb ? 1 : 0;
+  });
+  // Defer every pending downstream field, including paths through fields that are not in this
+  // wave yet. For x -> a -> b -> c and x -> c, the first wave contains a and c, but c must wait
+  // until the later b wave has finished. Direct edges alone would evaluate c against stale b.
+  const blocked = new Map<string, Set<string>>();
+  const index = triggerIndex(env.registry.models);
+  for (const [m2, fields2] of todo) {
+    for (const fname of fields2.keys()) {
+      const queue: [string, string][] = [[m2, fname]];
+      const seen = new Map<string, Set<string>>([[m2, new Set([fname])]]);
+      for (let i = 0; i < queue.length; i++) {
+        const [sourceModel, sourceField] = queue[i]!;
+        for (const t of index.get(sourceModel) ?? []) {
+          if (t.field !== sourceField) continue;
+          let visited = seen.get(t.target);
+          if (!visited) seen.set(t.target, (visited = new Set()));
+          if (visited.has(t.computed)) continue;
+          visited.add(t.computed);
+          queue.push([t.target, t.computed]);
+          if (!todo.get(t.target)?.has(t.computed)) continue;
+          let set = blocked.get(t.target);
+          if (!set) blocked.set(t.target, (set = new Set()));
+          set.add(t.computed);
+        }
+      }
+    }
+  }
+  const hasReady = [...todo].some(([m, fs]) => {
+    const b = blocked.get(m);
+    return !b || [...fs.keys()].some((f) => !b.has(f));
+  });
+  for (const [model, fields] of ordered) {
     const meta = env.registry.get(model);
     const allIds = [...new Set([...fields.values()].flatMap((s) => [...s]))];
     // skip records deleted in the meantime
     const alive = new Set((await su.withContext({ activeTest: false }).model(model).search([['id', 'in', allIds]])).ids);
-    for (const [fname, idSet] of fields) {
-      const ids = [...idSet].filter((id) => alive.has(id));
-      if (!ids.length) continue;
-      const f = meta.fields.get(fname) as ResolvedField;
-      const values = await computeValues(su.model(model).browse(ids) as RecordsetImpl, f);
-      if (f.type === 'float' && typeof f.digits === 'string') {
-        for (const [id, value] of values) values.set(id, await roundFieldValue(su, f, fname, value));
+    // Fields reading other records lock their own rows first: concurrent transactions changing
+    // different lines of one order then recompute the order one after the other, each reading the
+    // lines committed before it (PostgreSQL READ COMMITTED takes a new snapshot per statement).
+    const relational = [...fields.keys()].some((fname) => hasRelationalDependency(meta, meta.fields.get(fname) as ResolvedField));
+    if (relational && meta.table) {
+      const lockIds = [...alive].sort((a, b) => a - b);
+      for (let i = 0; i < lockIds.length; i += RECOMPUTE_BATCH) {
+        // lock conflicts / deadlocks become ConcurrencyError (HTTP 409), never a raw driver error
+        await sqlCall(() => env.db.query({ text: `SELECT id FROM "${meta.table}" WHERE id = ANY($1) ORDER BY id FOR NO KEY UPDATE`, params: [lockIds.slice(i, i + RECOMPUTE_BATCH)] }));
       }
-      await (su.model(model) as RecordsetImpl).storeRaw(fname, values);
-      mergeTodo(done, new Map([[model, new Map([[fname, new Set(ids)]])]]));
-      mergeTodo(next, await affected(su, model, new Set([fname]), ids));
+      env.cache.invalidate();
+    }
+    for (const [fname, idSet] of fields) {
+      if (hasReady && blocked.get(model)?.has(fname)) {
+        mergeTodo(next, new Map([[model, new Map([[fname, new Set(idSet)]])]]));
+        continue;
+      }
+      const allAlive = [...idSet].filter((id) => alive.has(id)).sort((a, b) => a - b);
+      const f = meta.fields.get(fname) as ResolvedField;
+      // bounded batches: a many2one fan-out (one partner, many orders) is processed in steps
+      for (let i = 0; i < allAlive.length; i += RECOMPUTE_BATCH) {
+        const ids = allAlive.slice(i, i + RECOMPUTE_BATCH);
+        const values = await computeValues(su.model(model).browse(ids) as RecordsetImpl, f);
+        if (f.type === 'float' && typeof f.digits === 'string') {
+          for (const [id, value] of values) values.set(id, await roundFieldValue(su, f, fname, value));
+        }
+        await (su.model(model) as RecordsetImpl).storeRaw(fname, values);
+        mergeTodo(done, new Map([[model, new Map([[fname, new Set(ids)]])]]));
+        mergeTodo(next, await affected(su, model, new Set([fname]), ids));
+      }
     }
   }
   return recompute(env, next, done, depth + 1);
@@ -173,9 +274,29 @@ function isColumnField(f: ResolvedField): boolean {
 
 /** Evaluate a computed or related field for a batch of records. */
 export async function computeValues(records: RecordsetImpl, f: ResolvedField): Promise<Map<number, unknown>> {
+  const values = await unroundedComputeValues(records, f);
+  if (!f.currencyField) return values;
+  const currencyField = records.env.registry.get(records.model).fields.get(f.currencyField)!;
+  const rows = await records.read([f.currencyField]);
+  for (const row of rows) {
+    const id = row.id as number;
+    const amount = values.get(id);
+    if (amount === null || amount === undefined || amount === false) continue;
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || !Number.isSafeInteger(row[f.currencyField]) || Number(row[f.currencyField]) <= 0) {
+      throw new ValidationError(`Field '${f.name}' requires a valid value and currency`);
+    }
+    const [currency] = await records.env.model(currencyField.comodel!).browse(row[f.currencyField] as number).read(['rounding']);
+    if (typeof currency?.rounding !== 'number') throw new ValidationError(`Invalid currency rounding for '${f.name}'`);
+    values.set(id, roundMonetary(amount, currency.rounding));
+  }
+  return values;
+}
+
+async function unroundedComputeValues(records: RecordsetImpl, f: ResolvedField): Promise<Map<number, unknown>> {
   if (f.related) return followPath(records, f.related);
   if (f.computeExpr) {
-    const paths = f.depends ?? extractDependencies(f.computeExpr);
+    // Trigger-only dependencies (including currencyField rounding) must not change expression values.
+    const paths = extractDependencies(f.computeExpr);
     const out = new Map<number, unknown>();
     for (const id of records.ids) {
       const record = await expressionRecord(records, id, paths);
@@ -238,6 +359,11 @@ export async function expressionRecord(records: RecordsetImpl, id: number, paths
       const rows = await records.env.model(model).browse(ids).read([name]);
       const values = new Map(rows.map((row) => [row.id as number, row[name]]));
       if (!child.children.size) {
+        if (records.env.su && (field.type === 'one2many' || field.type === 'many2many') && records.env.registry.get(field.comodel!).fields.has('active')) {
+          const linked = [...new Set([...values.values()].flatMap((v) => Array.isArray(v) ? v as number[] : []))];
+          const active = new Set(linked.length ? (await records.env.withContext({ activeTest: true }).model(field.comodel!).search([['id', 'in', linked]])).ids : []);
+          for (const [recordId, v] of values) if (Array.isArray(v)) values.set(recordId, (v as number[]).filter((target) => active.has(target)));
+        }
         for (const recordId of ids) out.get(recordId)![name] = expressionScalar(field.type, values.get(recordId) ?? null);
         continue;
       }
@@ -251,6 +377,12 @@ export async function expressionRecord(records: RecordsetImpl, id: number, paths
           : Array.isArray(value) ? value.filter((x): x is number => typeof x === 'number') : [];
         relationIds.set(recordId, targets);
         targets.forEach((target) => allTargets.add(target));
+      }
+      // a superuser read returns every linked row; keep only active ones, like a user read (and Odoo)
+      if (records.env.su && field.type !== 'many2one' && allTargets.size && records.env.registry.get(field.comodel).fields.has('active')) {
+        const active = new Set((await records.env.withContext({ activeTest: true }).model(field.comodel).search([['id', 'in', [...allTargets]]])).ids);
+        for (const [recordId, targets] of relationIds) relationIds.set(recordId, targets.filter((target) => active.has(target)));
+        for (const target of [...allTargets]) if (!active.has(target)) allTargets.delete(target);
       }
       const nested = await hydrate(field.comodel, [...allTargets], child);
       for (const recordId of ids) {

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Context, Env, LockOptions, Recordset, Registry, SqlDriver } from '../contracts/index.js';
 import { RecordsetImpl } from './recordset.js';
 
@@ -62,6 +63,46 @@ export interface RecordHooks {
 let installedHooks: RecordHooks | undefined;
 export function setRecordHooks(hooks: RecordHooks | undefined): void { installedHooks = hooks; }
 export function recordHooks(): RecordHooks | undefined { return installedHooks; }
+
+/**
+ * Record guards (ADR 0004): one installer, not chained. They run first inside the ORM create / write /
+ * unlink transaction (before {@link RecordHooks}), also for the superuser, and a rejection rolls the
+ * operation back. `vals` of beforeCreate is the caller's raw values, `effective` the same record after
+ * defaults were applied.
+ */
+export interface RecordGuards {
+  beforeCreate(env: EnvImpl, model: string, vals: readonly Record<string, unknown>[], effective?: readonly Record<string, unknown>[]): Promise<void>;
+  beforeWrite(env: EnvImpl, model: string, ids: readonly number[], vals: Record<string, unknown>): Promise<void>;
+  beforeUnlink(env: EnvImpl, model: string, ids: readonly number[]): Promise<void>;
+  /** Fields copy() must not copy (the policy supplies them again through defaults). */
+  copyExcluded?(env: EnvImpl, model: string): Promise<ReadonlySet<string> | undefined>;
+}
+
+let installedGuards: RecordGuards | undefined;
+export function setRecordGuards(guards: RecordGuards | undefined): void { installedGuards = guards; }
+export function recordGuards(): RecordGuards | undefined { return installedGuards; }
+
+/**
+ * ORM transaction frames (async-context scoped): process-level caches that mirror uncommitted
+ * configuration (the policy index) register a callback on the OUTERMOST frame, which runs when that
+ * transaction ends (commit or rollback), and only then. Other transactions' ends never trigger it.
+ */
+interface TxFrame { readonly root: TxFrame; readonly onEnd: Array<() => void> }
+const txStorage = new AsyncLocalStorage<TxFrame>();
+function newRootFrame(): TxFrame {
+  const frame = { onEnd: [] as Array<() => void> } as { root?: TxFrame; onEnd: Array<() => void> };
+  frame.root = frame as TxFrame;
+  return frame as TxFrame;
+}
+/** Identity of the outermost ORM transaction of the current async context (undefined outside any). */
+export function currentTransactionRoot(): object | undefined { return txStorage.getStore()?.root; }
+/** Runs `cb` once when the outermost ORM transaction of this async context has ended; false when there is none. */
+export function afterOutermostTransaction(cb: () => void): boolean {
+  const frame = txStorage.getStore();
+  if (!frame) return false;
+  frame.root.onEnd.push(cb);
+  return true;
+}
 
 /**
  * Stored default values (ir.default-like) for a model, already resolved by scope precedence.
@@ -152,11 +193,15 @@ export class EnvImpl implements Env {
    * written inside the rolled-back (sub)transaction may no longer match the database.
    */
   async transaction<T>(fn: (env: Env) => Promise<T>): Promise<T> {
+    const parent = txStorage.getStore();
+    const frame: TxFrame = parent ? { root: parent.root, onEnd: [] } : newRootFrame();
     try {
-      return await this.db.transaction(() => fn(this));
+      return await txStorage.run(frame, () => this.db.transaction(() => fn(this)));
     } catch (err) {
       this.cache.invalidate();
       throw err;
+    } finally {
+      if (frame.root === frame) for (const cb of frame.onEnd) cb();
     }
   }
 }

@@ -55,3 +55,6 @@ export { PgDriver, type PgDriverOptions } from './driver/pg.js';
 export { PgTenantManager, type PgTenantManagerOptions } from './tenant/pg.js';
 export { BaseTenantManager, type BaseTenantManagerOptions } from './tenant/manager.js';
 export { registerCallableMethod, isCallableMethod, MAX_ACTION_LINES, type ServerActionLines } from './services/actions.js';
+export { TransitionService, transitionModels, transitionAccess, type TransitionResult } from './policy/transition.js';
+
+export { MatchService, matchModels, matchAccess, type MatchResult } from './policy/matching.js';

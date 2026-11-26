@@ -16,7 +16,7 @@ const readOnly = { read: true, write: false, create: false, unlink: false };
  */
 export const baseModule: ModuleManifest = {
   name: 'base',
-  version: '1.4.0',
+  version: '1.6.0',
   summary: 'Companies, users, groups, access control, partners, currencies, countries and languages',
   depends: [],
   models: [...securityModels, ...configModels, ...currencyModels, ...countryModels, ...langModels, ...partnerModels],
@@ -91,6 +91,9 @@ export const baseModule: ModuleManifest = {
     { xmlId: 'action_buttons', type: 'window', name: 'Buttons', model: 'ir.button', viewTypes: ['list', 'form'] },
     { xmlId: 'action_access_rights', type: 'window', name: 'Access Rights', model: 'ir.model.access', viewTypes: ['list', 'form'] },
     { xmlId: 'action_record_rules', type: 'window', name: 'Record Rules', model: 'ir.rule', viewTypes: ['list', 'form'] },
+    { xmlId: 'action_lifecycles', type: 'window', name: 'Lifecycle Policies', model: 'ir.lifecycle', viewTypes: ['list', 'form'] },
+    { xmlId: 'action_transitions', type: 'window', name: 'Transitions', model: 'ir.transition', viewTypes: ['list', 'form'] },
+    { xmlId: 'action_match_rules', type: 'window', name: 'Matching Rules', model: 'ir.match.rule', viewTypes: ['list', 'form'] },
     { xmlId: 'action_currencies', type: 'window', name: 'Currencies', model: 'res.currency', viewTypes: ['list', 'form'] },
     { xmlId: 'action_countries', type: 'window', name: 'Countries', model: 'res.country', viewTypes: ['list', 'form'] },
     { xmlId: 'action_langs', type: 'window', name: 'Languages', model: 'res.lang', viewTypes: ['list', 'form'] },
@@ -111,6 +114,9 @@ export const baseModule: ModuleManifest = {
     { xmlId: 'menu_buttons', name: 'Buttons', parent: 'menu_technical', action: 'action_buttons', sequence: 7 },
     { xmlId: 'menu_access_rights', name: 'Access Rights', parent: 'menu_technical', action: 'action_access_rights', sequence: 8 },
     { xmlId: 'menu_record_rules', name: 'Record Rules', parent: 'menu_technical', action: 'action_record_rules', sequence: 9 },
+    { xmlId: 'menu_lifecycles', name: 'Lifecycle Policies', parent: 'menu_technical', action: 'action_lifecycles', sequence: 14 },
+    { xmlId: 'menu_transitions', name: 'Transitions', parent: 'menu_technical', action: 'action_transitions', sequence: 15 },
+    { xmlId: 'menu_match_rules', name: 'Matching Rules', parent: 'menu_technical', action: 'action_match_rules', sequence: 17 },
     { xmlId: 'menu_currencies', name: 'Currencies', parent: 'menu_technical', action: 'action_currencies', sequence: 10 },
     { xmlId: 'menu_countries', name: 'Countries', parent: 'menu_technical', action: 'action_countries', sequence: 11 },
     { xmlId: 'menu_langs', name: 'Languages', parent: 'menu_technical', action: 'action_langs', sequence: 12 },

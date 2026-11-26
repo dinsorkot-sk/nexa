@@ -18,9 +18,9 @@ export const ENGINE_HELPERS: readonly string[] = [
 /**
  * Helpers whose result depends only on their arguments. Everything else reads identity, time,
  * context or tenant data and is rejected in stored compute expressions.
- * float_round/float_compare/float_is_zero are strictly impure because a precision NAME reads
- * tenant data; with literal numeric digits they are deterministic, so a future static check
- * could allow that form in stored computes.
+ * float_* remain impure by name because precision names read tenant data. The registry
+ * permits calls whose precision is proven numeric (digits or a value increment), including
+ * relational numeric fields tracked by the stored-compute dependency graph.
  */
 const PURE = new Set(['currency', 'float', 'uom', 'date', 'round', 'abs', 'date_add_days', 'date_add_months']);
 

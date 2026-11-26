@@ -9,10 +9,12 @@ import { textToHtml } from '../mail/sanitize.js';
 import {
   assertSystem, assertWritable, ensureServiceTables, positiveInt, requireKey, requireModel, tenantDriver,
 } from './common.js';
+import { TransitionService } from '../policy/transition.js';
+import { MatchService } from '../policy/matching.js';
 import { evaluateFor, jsonValue, readRecord, recordOrigin, relationalScope } from './record-scope.js';
 
 /** Odoo ir.actions.server equivalents. Field values and messages are NX-Expr; scripts run in QuickJS. */
-export type ServerActionType = 'update_record' | 'create_record' | 'post_message' | 'multi' | 'script' | 'call_method';
+export type ServerActionType = 'update_record' | 'create_record' | 'post_message' | 'multi' | 'script' | 'call_method' | 'transition' | 'match' | 'unmatch';
 
 /** create_record.lines: child rows created through a one2many of the created record, one per source item. */
 export interface ServerActionLines {
@@ -42,10 +44,16 @@ export interface ServerActionDef {
   code?: string;
   /** create_record: build child rows from `record.<source>` (parent and children are created in one transaction). */
   lines?: ServerActionLines;
+  /** create_record: transition the created records atomically, using the caller's access. */
+  thenTransition?: string;
   /** call_method: model method run on the target records; must be registered with registerCallableMethod. */
   method?: string;
   /** call_method: NX-Expr arguments (`record` is in scope only when exactly one record is targeted). */
   args?: string[];
+  /** transition: key of the `ir.transition` (of `model`) to run on the target records. */
+  transition?: string;
+  /** match/unmatch: key of the ir.match.rule on the model. */
+  matchRule?: string;
 }
 
 export interface ServerActionRunOptions {
@@ -68,7 +76,7 @@ export interface ServerActionLimits {
 interface ResolvedServerAction {
   key: string; name: string; model: string | null; type: ServerActionType;
   values: Record<string, string>; targetModel: string | null; message: string | null; children: string[]; code: string | null;
-  lines: ServerActionLines | null; method: string | null; args: string[];
+  lines: ServerActionLines | null; thenTransition: string | null; method: string | null; args: string[]; transition: string | null; matchRule: string | null;
 }
 
 interface RunState {
@@ -80,7 +88,7 @@ function logHostError(actionKey: string, error: unknown): void {
   console.error(`[nexa] server action '${actionKey}' failed in a host call`, error);
 }
 
-const TYPES = new Set<ServerActionType>(['update_record', 'create_record', 'post_message', 'multi', 'script', 'call_method']);
+const TYPES = new Set<ServerActionType>(['update_record', 'create_record', 'post_message', 'multi', 'script', 'call_method', 'transition', 'match', 'unmatch']);
 /** Upper bound of child rows one create_record.lines mapping may create per created record. */
 export const MAX_ACTION_LINES = 1000;
 const MAX_CALL_ARGS = 20;
@@ -173,8 +181,13 @@ function validateDefinition(env: Env, def: ServerActionDef): ResolvedServerActio
   if (model !== null) knownModel(env, model);
   const out: ResolvedServerAction = {
     key: def.key, name, model, type: def.type, values: {}, targetModel: null, message: null, children: [], code: null,
-    lines: null, method: null, args: [],
+    lines: null, thenTransition: null, method: null, args: [], transition: null, matchRule: null,
   };
+  if (def.thenTransition !== undefined) {
+    if (def.type !== 'create_record') throw new ValidationError(`Server action '${def.key}': thenTransition only applies to create_record`);
+    requireKey(def.thenTransition, 'transition key');
+    out.thenTransition = def.thenTransition;
+  }
   switch (def.type) {
     case 'update_record':
     case 'create_record': {
@@ -223,6 +236,17 @@ function validateDefinition(env: Env, def: ServerActionDef): ResolvedServerActio
       out.args = [...args];
       break;
     }
+    case 'match':
+    case 'unmatch':
+      if (!model) throw new ValidationError(`Server action '${def.key}' needs a model`);
+      requireKey(def.matchRule as string, 'matching rule key');
+      out.matchRule = def.matchRule!;
+      break;
+    case 'transition':
+      if (!model) throw new ValidationError(`Server action '${def.key}' needs a model`);
+      requireKey(def.transition as string, 'transition key');
+      out.transition = def.transition!;
+      break;
     case 'script':
       if (typeof def.code !== 'string' || !def.code.trim() || def.code.length > MAX_SCRIPT) {
         throw new ValidationError(`Server action '${def.key}' needs code of at most ${MAX_SCRIPT} characters`);
@@ -315,7 +339,7 @@ async function loadAction(env: Env, ref: string | number): Promise<ResolvedServe
           text: `SELECT xml_id,name,model,code FROM nx_action WHERE xml_id=$1 AND type='server' AND code IS NOT NULL`, params: [ref],
         });
         if (ui) {
-          return { key: ui.xml_id, name: ui.name, model: ui.model, type: 'script', values: {}, targetModel: null, message: null, children: [], code: ui.code, lines: null, method: null, args: [] };
+          return { key: ui.xml_id, name: ui.name, model: ui.model, type: 'script', values: {}, targetModel: null, message: null, children: [], code: ui.code, lines: null, thenTransition: null, method: null, args: [], transition: null, matchRule: null };
         }
       }
     }
@@ -328,6 +352,9 @@ async function loadAction(env: Env, ref: string | number): Promise<ResolvedServe
     values: (d.values as Record<string, string>) ?? {}, targetModel: (d.targetModel as string | null) ?? null,
     message: (d.message as string | null) ?? null, children: (d.children as string[]) ?? [], code: (d.code as string | null) ?? null,
     lines: (d.lines as ServerActionLines | null) ?? null, method: (d.method as string | null) ?? null, args: (d.args as string[]) ?? [],
+    thenTransition: (d.thenTransition as string | null) ?? null,
+    transition: (d.transition as string | null) ?? null,
+    matchRule: (d.matchRule as string | null) ?? null,
   };
 }
 
@@ -482,6 +509,10 @@ async function execute(
         }
         created.push(...(await env.model(createIn).create(values)).ids);
       }
+      if (action.thenTransition) {
+        charge(state, created.length);
+        await new TransitionService(env).run(createIn, created, action.thenTransition);
+      }
       return created;
     }
     case 'call_method': {
@@ -505,6 +536,18 @@ async function execute(
         await postMessage(env, target, id, typeof message === 'string' ? message : JSON.stringify(message));
       }
       return true;
+    }
+    case 'match':
+    case 'unmatch': {
+      if (!target || !action.matchRule) throw new ValidationError(`Server action '${action.key}' needs a model and matching rule`);
+      charge(state, ids.length);
+      const service = new MatchService(env);
+      return jsonValue(await (action.type === 'match' ? service.match(target, ids, action.matchRule) : service.unmatch(target, ids, action.matchRule)));
+    }
+    case 'transition': {
+      if (!target || !action.transition) throw new ValidationError(`Server action '${action.key}' needs a model and a transition`);
+      charge(state, ids.length);
+      return jsonValue(await new TransitionService(env).run(target, ids, action.transition));
     }
     case 'multi': {
       let last: ExprValue = null;

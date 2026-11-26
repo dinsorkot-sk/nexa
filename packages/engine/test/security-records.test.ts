@@ -70,7 +70,7 @@ describe('base manifest', () => {
     for (const model of ['ir.model.access', 'ir.rule']) {
       expect(configAccess.filter((a) => a.model === model).map((a) => a.group)).toEqual(['base.group_system']);
     }
-    expect(baseModule.version).toBe('1.4.0');
+    expect(baseModule.version).toBe('1.6.0');
   });
 });
 

@@ -12,6 +12,7 @@ import {
   ButtonService, ServerActionService, removeButtonDefinitions, removeServerActionDefinitions, type ServerActionType,
 } from './actions.js';
 import { dropBacking, sequenceAfterWrite, sequenceBeforeWrite } from './sequence.js';
+import { matchingBeforeMutation } from '../policy/matching.js';
 
 export { checkSequenceRanges, checkSequences, computeNumberNextActual } from './sequence.js';
 
@@ -360,10 +361,10 @@ export async function checkServerActionRecords(records: Recordset): Promise<void
   const rows = await tenantDriver(env).query<{
     key: string; name: string | null; model_name: string | null; type: ServerActionType; values_json: string | null;
     target_model: string | null; message: string | null; child_keys: string | null; code: string | null; active: boolean | null;
-    lines_field: string | null; lines_source: string | null; lines_values_json: string | null; method: string | null; args_json: string | null;
+    lines_field: string | null; lines_source: string | null; lines_values_json: string | null; then_transition: string | null; method: string | null; args_json: string | null; transition: string | null; match_rule: string | null;
   }>({
     text: `SELECT key, name, model_name, type, values_json, target_model, message, child_keys, code, active,
-        lines_field, lines_source, lines_values_json, method, args_json
+        lines_field, lines_source, lines_values_json, then_transition, method, args_json, transition, match_rule
       FROM ir_actions_server WHERE id = ANY($1) ORDER BY id`,
     params: [[...records.ids]],
   });
@@ -385,8 +386,11 @@ export async function checkServerActionRecords(records: Recordset): Promise<void
       ...(children.length ? { children } : {}),
       ...(row.code !== null ? { code: row.code } : {}),
       ...(hasLines ? { lines: { field: row.lines_field ?? '', source: row.lines_source ?? '', values: lineValues ?? {} } } : {}),
+      ...(row.then_transition ? { thenTransition: row.then_transition } : {}),
       ...(row.method ? { method: row.method } : {}),
       ...(args ? { args } : {}),
+      ...(row.transition ? { transition: row.transition } : {}),
+      ...(row.match_rule ? { matchRule: row.match_rule } : {}),
     });
   }
 }
@@ -475,6 +479,9 @@ export async function importServiceConfigRecords(env: Env): Promise<number> {
         target_model: (d.targetModel as string | null) ?? null, message: (d.message as string | null) ?? null,
         child_keys: children, code: (d.code as string | null) ?? null, active: true,
         ...(lines ? { lines_field: lines.field, lines_source: lines.source, lines_values_json: JSON.stringify(lines.values ?? {}) } : {}),
+        ...(typeof d.thenTransition === 'string' ? { then_transition: d.thenTransition } : {}),
+        ...(typeof d.transition === 'string' ? { transition: d.transition } : {}),
+        ...(typeof d.matchRule === 'string' ? { match_rule: d.matchRule } : {}),
         ...(typeof d.method === 'string' ? { method: d.method } : {}),
         ...(Array.isArray(d.args) && d.args.length ? { args_json: JSON.stringify(d.args) } : {}),
       });
@@ -536,6 +543,7 @@ if (!previous) throw new Error('Automation record hooks must be installed before
 setRecordHooks({
   afterCreate: async (env, model, ids) => { await previous?.afterCreate(env, model, ids); },
   beforeWrite: async (env, model, ids, vals) => {
+    if (model === 'ir.match.rule') await matchingBeforeMutation(env, ids, vals);
     for (const field of IMMUTABLE[model] ?? []) {
       if (!(field in vals)) continue;
       const table = env.registry.get(model).table!;
@@ -560,6 +568,7 @@ setRecordHooks({
     await securityRecordsAfterWrite(env, model, vals);
   },
   beforeUnlink: async (env, model, ids) => {
+    if (model === 'ir.match.rule') await matchingBeforeMutation(env, ids);
     await previous?.beforeUnlink(env, model, ids);
     await removeRuntime(env, model, ids);
     await securityRecordsBeforeUnlink(env, model, ids);

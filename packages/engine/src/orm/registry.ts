@@ -198,8 +198,11 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
       if (f.currencyField) {
         const currency = m.fields.get(f.currencyField);
         const rounding = currency?.comodel ? out.get(currency.comodel)?.fields.get('rounding') : undefined;
-        if (f.type !== 'monetary' || !!f.compute || !!f.computeExpr || !!f.related || !!currency?.delegated || currency?.type !== 'many2one' || !rounding || !['float', 'monetary'].includes(rounding.type)) {
+        if (f.type !== 'monetary' || !!currency?.delegated || currency?.type !== 'many2one' || !rounding || !['float', 'monetary'].includes(rounding.type)) {
           throw new EngineError(`Monetary field '${m.name}.${f.name}' needs a currency many2one with a numeric rounding field`);
+        }
+        if ((f.compute || f.computeExpr || f.related) && f.store) {
+          f.depends = [...new Set([...(f.depends ?? []), `${f.currencyField}.rounding`])];
         }
       }
     }
@@ -231,7 +234,7 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
           throw new Error(`constraint dependency '${dep}' must be a local stored scalar column`);
         }
         // Stored expression fields are permitted only after the stored-compute validator
-        // below has proved their inputs are local, unrestricted and deterministic.
+        // below has proved their inputs are unrestricted, stored (so triggers keep them fresh) and deterministic.
       }
     } catch (err) {
       throw new EngineError(`Invalid constraint expression '${constraint.name}' on '${m.name}': ${err instanceof Error ? err.message : String(err)}`);
@@ -256,6 +259,7 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
       relations.set(f.relationTable, { key, owner: `${m.name}.${f.name}` });
     }
   }
+  propagateRelatedGroups(out);
   for (const m of out.values()) {
     for (const f of m.fields.values() as Iterable<ResolvedField>) {
       if (f.delegated) continue;
@@ -265,10 +269,8 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
         if (end.type !== f.type) {
           throw new EngineError(`Related field '${m.name}.${f.name}' is ${f.type} but '${f.related}' is ${end.type}`);
         }
-        f.depends = [f.related];
+        f.depends = [...new Set([f.related, ...(f.currencyField && f.store ? [`${f.currencyField}.rounding`] : [])])];
         if (!f.comodel && end.comodel) f.comodel = end.comodel;
-        // a related field must not expose a field restricted to some groups
-        if (!f.groups && end.groups) f.groups = end.groups;
       }
       if (f.computeExpr) {
         if (f.compute) throw new EngineError(`Field '${m.name}.${f.name}' cannot have both compute and computeExpr`);
@@ -276,23 +278,17 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
           const deps = extractDependencies(f.computeExpr);
           const ast = parseExpression(f.computeExpr);
           if (containsBareRecord(ast)) throw new Error('expression must select explicit record fields');
-          if (f.store && containsExternalExpressionReference(ast)) {
+          if (f.store && containsExternalExpressionReference(ast, out, m)) {
             throw new Error('stored expression cannot use identity, context, time, or helper values');
           }
           f.depends = [...new Set([...(f.depends ?? []), ...deps])];
           for (const dep of f.depends) walkPath(out, m, dep, `${m.name}.${f.name} depends`);
-          if (f.store) for (const dep of f.depends) {
-            const source = dep.includes('.') ? undefined : m.fields.get(dep);
-            if (!source || source.delegated || source.compute || source.computeExpr || source.related || source.groups?.length || source.translate ||
-                ['write_uid', 'write_date', 'parent_path'].includes(dep) ||
-                ['many2one', 'one2many', 'many2many'].includes(source.type)) {
-              throw new Error(`stored expression dependency '${dep}' must be an unrestricted local scalar column`);
-            }
-          }
+          if (f.store) for (const dep of f.depends) checkStoredExpressionDependency(out, m, dep);
         } catch (err) {
           throw new EngineError(`Invalid expression or dependency on '${m.name}.${f.name}': ${err instanceof Error ? err.message : String(err)}`);
         }
       }
+      if (f.currencyField && f.store && (f.compute || f.computeExpr || f.related)) checkStoredExpressionDependency(out, m, `${f.currencyField}.rounding`);
       if (f.compute || f.computeExpr || f.related) {
         if (MAGIC_FIELDS[f.name]) throw new EngineError(`Field '${m.name}.${f.name}' cannot be computed`);
         if (typeof f.compute === 'string' && !(m.def.methods && Object.hasOwn(m.def.methods, f.compute))) {
@@ -309,10 +305,10 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
   for (const m of out.values()) for (const f of m.fields.values() as Iterable<ResolvedField>) {
     if (!f.computeExpr) continue;
     const source = `${m.name}.${f.name}`;
-    const edges = (f.depends ?? []).flatMap((dep) => {
-      const target = walkPath(out, m, dep, `${source} depends`);
-      return target.computeExpr ? [`${target.model}.${target.name}`] : [];
-    });
+    // every field along a dependency path is an input (a hop through another expression field too)
+    const edges = (f.depends ?? []).flatMap((dep) => pathFields(out, m, dep)
+      .filter((target) => target.computeExpr)
+      .map((target) => `${target.model}.${target.name}`));
     expressionGraph.set(source, edges);
   }
   const visitedExpressions = new Set<string>();
@@ -329,15 +325,106 @@ export function resolveModels(defs: readonly ModelDef[]): Map<string, ResolvedMo
   return out;
 }
 
-function containsExternalExpressionReference(node: ExprNode): boolean {
+/**
+ * A related field must not expose a field restricted to some groups, nor reach it through a
+ * restricted hop. Runs to a fixed point before any dependency validation, so the result does not
+ * depend on model or field order (a related field over another related field included). The end
+ * field's groups win; otherwise the nearest restricted hop's groups are used.
+ */
+function propagateRelatedGroups(models: ReadonlyMap<string, ResolvedModel>): void {
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const m of models.values()) for (const f of m.fields.values() as Iterable<ResolvedField>) {
+      if (f.delegated || !f.related || f.groups?.length) continue;
+      let path: ResolvedField[];
+      try {
+        walkPath(models, m, f.related, `${m.name}.${f.name} related`);
+        path = pathFields(models, m, f.related);
+      } catch {
+        continue; // reported by the validation pass
+      }
+      const source = [...path].reverse().find((hop) => hop.groups?.length);
+      if (source) {
+        f.groups = [...source.groups!];
+        changed = true;
+      }
+    }
+  }
+}
+
+/** Maximum relational hops in a stored expression dependency path (`a.b.c` = 2 hops). */
+export const MAX_STORED_EXPRESSION_HOPS = 4;
+
+/** Every field along a (validated) dependency path, in order. */
+function pathFields(models: ReadonlyMap<string, ResolvedModel>, model: ResolvedModel, path: string): ResolvedField[] {
+  const fields: ResolvedField[] = [];
+  let cur = model;
+  for (const part of path.split('.')) {
+    const f = cur.fields.get(part) as ResolvedField;
+    fields.push(f);
+    if (f.comodel) cur = models.get(f.comodel)!;
+  }
+  return fields;
+}
+
+/**
+ * Stored expressions are recomputed as superuser by the dependency triggers in orm/compute.ts
+ * (Odoo `@api.depends('line_ids.price_subtotal')`), so the stored value never depends on who
+ * triggered it. Every field along a dependency path must therefore be unrestricted (no groups),
+ * untranslated, not an engine bookkeeping column, and either a column or itself stored (a
+ * non-stored compute never fires a trigger). Paths may traverse many2one / one2many / many2many
+ * fields, at most MAX_STORED_EXPRESSION_HOPS hops deep.
+ */
+function checkStoredExpressionDependency(models: ReadonlyMap<string, ResolvedModel>, model: ResolvedModel, dep: string): void {
+  const hops = dep.split('.').length - 1;
+  if (hops > MAX_STORED_EXPRESSION_HOPS) {
+    throw new Error(`stored expression dependency '${dep}' is deeper than ${MAX_STORED_EXPRESSION_HOPS} relational hops`);
+  }
+  for (const source of pathFields(models, model, dep)) {
+    if (source.delegated || source.groups?.length || source.translate ||
+        ['write_uid', 'write_date', 'parent_path'].includes(source.name) ||
+        (source.compute || source.computeExpr || source.related) && !source.store) {
+      throw new Error(`stored expression dependency '${dep}' must be an unrestricted local scalar column or a path of unrestricted stored fields ('${source.model}.${source.name}' is not)`);
+    }
+  }
+}
+
+/** Prove precision arguments cannot resolve a tenant decimal.precision name. */
+function numericExpression(node: ExprNode, models: ReadonlyMap<string, ResolvedModel>, model: ResolvedModel): boolean {
+  switch (node.kind) {
+    case 'literal': return node.value === null || typeof node.value === 'number';
+    case 'path': {
+      const parts = node.parts[0] === 'record' ? node.parts.slice(1) : node.parts;
+      try { return ['integer', 'float', 'monetary'].includes(walkPath(models, model, parts.join('.'), 'float precision').type); }
+      catch { return false; }
+    }
+    case 'unary': return node.op !== 'not' && numericExpression(node.value, models, model);
+    case 'binary': return ['+', '-', '*', '/', '%', '**', 'or', 'and', '??'].includes(node.op) && numericExpression(node.left, models, model) && numericExpression(node.right, models, model);
+    case 'conditional': return numericExpression(node.yes, models, model) && numericExpression(node.no, models, model);
+    case 'call': return node.callee.kind === 'path' && node.callee.parts.length === 1 && ['round', 'abs', 'currency', 'float', 'uom', 'float_round', 'float_compare'].includes(node.callee.parts[0]!);
+    case 'method': return ['sum', 'count'].includes(node.name);
+    case 'array': return false;
+  }
+}
+
+function containsExternalExpressionReference(node: ExprNode, models: ReadonlyMap<string, ResolvedModel>, model: ResolvedModel): boolean {
+  const external = (child: ExprNode) => containsExternalExpressionReference(child, models, model);
   switch (node.kind) {
     case 'path': return node.parts.length > 0 && (isImpureHelper(node.parts[0]!) || node.parts[0] === 'record' && node.parts.length < 2);
-    case 'array': return node.values.some(containsExternalExpressionReference);
-    case 'unary': return containsExternalExpressionReference(node.value);
-    case 'binary': return containsExternalExpressionReference(node.left) || containsExternalExpressionReference(node.right);
-    case 'conditional': return containsExternalExpressionReference(node.test) || containsExternalExpressionReference(node.yes) || containsExternalExpressionReference(node.no);
-    case 'call': return containsExternalExpressionReference(node.callee) || node.args.some(containsExternalExpressionReference);
-    case 'method': return containsExternalExpressionReference(node.receiver) || node.args.some(containsExternalExpressionReference);
+    case 'array': return node.values.some(external);
+    case 'unary': return external(node.value);
+    case 'binary': return external(node.left) || external(node.right);
+    case 'conditional': return external(node.test) || external(node.yes) || external(node.no);
+    case 'call': {
+      if (node.callee.kind === 'path' && node.callee.parts.length === 1 && ['float_round', 'float_compare', 'float_is_zero'].includes(node.callee.parts[0]!)) {
+        const precisionIndex = node.callee.parts[0] === 'float_compare' ? 2 : 1;
+        // A value increment is explicit in the final slot; otherwise the digits/increment must
+        // be numeric. Names remain impure because changing tenant configuration fires no trigger.
+        return node.args.slice(precisionIndex).some((precision) => !numericExpression(precision, models, model)) || node.args.some(external);
+      }
+      return external(node.callee) || node.args.some(external);
+    }
+    case 'method': return external(node.receiver) || node.args.some(external);
     case 'literal': return false;
   }
 }

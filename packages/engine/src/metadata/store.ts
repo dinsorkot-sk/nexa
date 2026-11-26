@@ -57,7 +57,7 @@ interface FieldRow {
   required: boolean; readonly: boolean; index: boolean; unique: boolean;
   default_value: unknown; selection: [string, string][] | null; comodel: string | null;
   inverse_name: string | null; relation_table: string | null; ondelete: OnDelete | null;
-  field_options: Pick<FieldDef, 'digits' | 'translate' | 'copy' | 'aggregator' | 'currencyField' | 'computeExpr' | 'defaultExpr' | 'depends' | 'store' | 'tracking' | 'checkCompany' | 'writeGroups' | 'ratchet'>;
+  field_options: Pick<FieldDef, 'digits' | 'translate' | 'copy' | 'aggregator' | 'currencyField' | 'computeExpr' | 'defaultExpr' | 'depends' | 'store' | 'tracking' | 'checkCompany' | 'writeGroups' | 'ratchet' | 'groups'>;
 }
 
 function rowToField(r: FieldRow): FieldDef {
@@ -75,6 +75,7 @@ function rowToField(r: FieldRow): FieldDef {
   if (r.field_options?.checkCompany !== undefined) f.checkCompany = r.field_options.checkCompany;
   if (r.field_options?.writeGroups !== undefined) f.writeGroups = r.field_options.writeGroups;
   if (r.field_options?.ratchet !== undefined) f.ratchet = r.field_options.ratchet;
+  if (r.field_options?.groups !== undefined) f.groups = r.field_options.groups;
   if (r.string !== null) f.string = r.string;
   if (r.help !== null) f.help = r.help;
   if (r.required) f.required = true;
@@ -262,6 +263,13 @@ function validateField(model: string, name: string, f: FieldDef): void {
   }
   if (f.depends && (!Array.isArray(f.depends) || f.depends.length > 100 || f.depends.some((dep) => typeof dep !== 'string'))) {
     throw new ValidationError('Invalid compute dependencies');
+  }
+  if (f.groups !== undefined) {
+    if (f.computeExpr === undefined) throw new ValidationError(`Only a computed custom field can be restricted to groups ('${model}.${name}')`);
+    if (!Array.isArray(f.groups) || !f.groups.length || f.groups.length > 20 ||
+        f.groups.some((g) => typeof g !== 'string' || !/^[a-z][a-z0-9_]*[.][a-z][a-z0-9_]*$/.test(g))) {
+      throw new ValidationError(`Invalid groups on '${model}.${name}'`);
+    }
   }
   if (f.selectionAdd) throw new ValidationError(`Custom field '${model}.${name}' cannot extend a selection`);
   if (f.digits !== undefined) {
@@ -514,7 +522,7 @@ export class MetadataStore {
         JSON.stringify({
           digits: f.digits, translate: f.translate, copy: f.copy, aggregator: f.aggregator, currencyField: f.currencyField,
           computeExpr: f.computeExpr, defaultExpr: f.defaultExpr, depends: f.depends, store: f.store, tracking: f.tracking,
-          checkCompany: f.checkCompany, writeGroups: f.writeGroups, ratchet: f.ratchet,
+          checkCompany: f.checkCompany, writeGroups: f.writeGroups, ratchet: f.ratchet, groups: f.groups,
         }),
       ],
     });
