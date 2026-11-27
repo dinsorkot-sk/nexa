@@ -134,12 +134,20 @@ describe('Studio field options over HTTP', () => {
     await ok('model/x_parent/create', { values: { x_name: 'u4' } }, member);
   });
 
-  it('unique: refused on fields without a plain comparable column', async () => {
+  it('unique: a stored computed key acts as a composite unique', async () => {
+    await ok('studio/field', { model: 'x_parent', name: 'x_key', type: 'char', unique: true, store: true, computeExpr: "x_name + ':' + x_note" });
+    await ok('model/x_parent/create', { values: { x_name: 'k', x_note: 'a' } }, member);
+    await ok('model/x_parent/create', { values: { x_name: 'k', x_note: 'b' } }, member);
+    const dup = await post('model/x_parent/create', { values: { x_name: 'k', x_note: 'a' } }, member);
+    expect(client(dup) && JSON.stringify(dup.body)).toMatch(/[Dd]uplicate/);
+  });
+
+  it('unique: refused on fields without a stored comparable column', async () => {
     const bad = [
       { name: 'x_u1', type: 'one2many', comodel: 'x_child', inverseName: 'x_parent_id' },
       { name: 'x_u2', type: 'many2many', comodel: 'res.partner' },
       { name: 'x_u3', type: 'boolean' },
-      { name: 'x_u4', type: 'char', computeExpr: "'x'", store: true },
+      { name: 'x_u4', type: 'char', computeExpr: "'x'" },
       { name: 'x_u5', type: 'char', translate: true },
       { name: 'x_u6', type: 'char', unique: 'yes' },
     ];
@@ -156,7 +164,8 @@ describe('Studio field options over HTTP', () => {
     }
     const source = ((await ok('model/x_parent/create', { values: { x_name: 'orig', x_code: 'COPY-1' } }, member)).ids as number[])[0]!;
     // copied as the admin: x_parent also has a writeGroups field, and copy() writes it even when empty
-    const copied = ((await ok('model/x_parent/copy', { id: source })).ids as number[])[0]!;
+    // a new name keeps the stored computed key x_key (name:note) distinct from the source
+    const copied = ((await ok('model/x_parent/copy', { id: source, defaults: { x_name: 'orig copy' } })).ids as number[])[0]!;
     const read = await ok('model/x_parent/read', { ids: [copied], fields: ['x_code'] }, member);
     expect(((read.records ?? read.result) as Record<string, unknown>[])[0]).toMatchObject({ x_code: null });
   });

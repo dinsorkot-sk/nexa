@@ -285,9 +285,10 @@ function validateField(model: string, name: string, f: FieldDef): void {
   if (f.translate !== undefined && (typeof f.translate !== 'boolean' || (f.translate && !['char', 'text', 'html'].includes(f.type)))) throw new ValidationError('Invalid translate flag');
   if (f.translate && f.unique) throw new ValidationError('Translated fields cannot be unique');
   if (f.unique !== undefined && typeof f.unique !== 'boolean') throw new ValidationError(`Invalid unique flag on '${model}.${name}'`);
-  // a unique index needs a plain column; a computed value backfilled on existing rows could collide mid-migration
-  if (f.unique && (UNIQUE_REFUSED_TYPES.has(f.type) || f.computeExpr || f.compute || f.related)) {
-    throw new ValidationError(`'${model}.${name}' cannot be unique (requires a stored, non-computed char, integer, float, monetary, date, datetime, selection or many2one field)`);
+  // a unique index needs a stored column. A stored compute is allowed (a composite key such as
+  // product:location); if its backfill collides on existing rows, the whole metadata change rolls back.
+  if (f.unique && (UNIQUE_REFUSED_TYPES.has(f.type) || ((f.computeExpr || f.compute || f.related) && !f.store))) {
+    throw new ValidationError(`'${model}.${name}' cannot be unique (requires a stored char, integer, float, monetary, date, datetime, selection or many2one field)`);
   }
   // a literal default gives every record the same value; copying a unique value always collides
   if (f.unique && f.default !== undefined) throw new ValidationError(`'${model}.${name}' is unique, so it cannot have a literal default`);

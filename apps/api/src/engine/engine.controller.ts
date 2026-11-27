@@ -378,7 +378,8 @@ export class EngineController {
     try {
       await MetadataStore.for(handle).addField(req.model, req.name, field);
     } catch (err) {
-      // defensive: a unique index that cannot be built on existing rows is a validation error, not a 500
+      // defensive: a raw unique violation while building the index is a validation error, not a 500.
+      // A stored-compute backfill collision is already a ValidationError ("Duplicate value…") from the ORM.
       if (req.unique && typeof err === 'object' && err !== null && 'code' in err && err.code === '23505') {
         throw new ValidationError(`Field '${req.model}.${req.name}' cannot be unique: existing records share a value`);
       }
