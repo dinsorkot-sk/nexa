@@ -12,7 +12,7 @@ export const CORE_HELPERS: readonly string[] = [
 /** Engine helpers added in T24 (see orm/expr-helpers.ts). */
 export const ENGINE_HELPERS: readonly string[] = [
   'local_now', 'float_round', 'float_compare', 'float_is_zero', 'currency_round', 'currency_convert',
-  'date_add_days', 'date_add_months',
+  'date_add_days', 'date_add_months', 'is_digits',
 ];
 
 /**
@@ -22,7 +22,7 @@ export const ENGINE_HELPERS: readonly string[] = [
  * permits calls whose precision is proven numeric (digits or a value increment), including
  * relational numeric fields tracked by the stored-compute dependency graph.
  */
-const PURE = new Set(['currency', 'float', 'uom', 'date', 'round', 'abs', 'date_add_days', 'date_add_months']);
+const PURE = new Set(['currency', 'float', 'uom', 'date', 'round', 'abs', 'date_add_days', 'date_add_months', 'is_digits']);
 
 export const HELPER_NAME_RE = /^[a-z][a-z0-9_]{0,63}$/;
 const RESERVED = new Set(['record', '__proto__', 'prototype', 'constructor']);

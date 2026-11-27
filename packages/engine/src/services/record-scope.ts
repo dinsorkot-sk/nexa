@@ -50,6 +50,10 @@ type PathTree = Map<string, PathTree>;
  *   bare is refused (write `x_partner_id.id`): the bare use would silently compare an object.
  * - Fail closed: if a referenced related record is not readable by the caller (ACL or record rule),
  *   the evaluation raises AccessError instead of seeing null (guards, messages and values alike).
+ * - Fields of the record that read() leaves out (non-stored computed/related fields) are read when
+ *   the expression names them, so guards and values see them. A field restricted to groups the caller
+ *   lacks then raises AccessError instead of reading as null (fail closed). Inside a transition, these
+ *   values are read at evaluation time, i.e. after earlier effects of the same transition.
  * - Expressions whose dependencies cannot be extracted statically keep the flat record.
  */
 export async function relationalScope(env: Env, source: string, record: Record<string, ExprValue>, options: EvalOptions): Promise<Record<string, ExprValue>> {
@@ -61,6 +65,8 @@ export async function relationalScope(env: Env, source: string, record: Record<s
   const fields = registry.get(origin.model).fields;
   const tree: PathTree = new Map();
   const bare = new Set<string>();
+  // read() returns stored fields only: non-stored computed/related fields the expression names are read explicitly
+  const unread = new Set<string>();
   let count = 0;
   for (const path of paths) {
     let parts = path.split('.');
@@ -69,6 +75,7 @@ export async function relationalScope(env: Env, source: string, record: Record<s
       parts = parts.slice(1);
       if (!parts.length) continue;
     }
+    if (fields.has(parts[0]!) && !(parts[0]! in record)) unread.add(parts[0]!);
     const type = fields.get(parts[0]!)?.type;
     if (type !== 'many2one' && type !== 'one2many' && type !== 'many2many') continue;
     if (parts.length === 1) { bare.add(parts[0]!); continue; }
@@ -79,13 +86,27 @@ export async function relationalScope(env: Env, source: string, record: Record<s
       node = node.get(part)!;
     }
   }
+  let rows = 0;
+  if (unread.size) {
+    const names = [...unread].filter((name) => !tree.has(name));
+    if (names.length) {
+      // one row, charged like a relation read (the computes' own dependency reads are not counted)
+      rows += 1;
+      options.charge?.(1);
+      const [row] = await env.model(origin.model).browse(origin.id).read(names);
+      if (!row) throw new AccessError('Record is unavailable');
+      const merged = { ...record };
+      for (const name of names) merged[name] = jsonValue(row[name]);
+      recordOrigin.set(merged, origin);
+      record = merged;
+    }
+  }
   if (!tree.size) return record;
   for (const root of tree.keys()) {
     if (bare.has(root) && fields.get(root)!.type === 'many2one') {
       throw new ValidationError(`Expression uses '${root}' both as an id and as a record; write '${root}.id' for the id`);
     }
   }
-  let rows = 0;
   const load = async (model: string, ids: number[], children: PathTree): Promise<Map<number, Record<string, ExprValue>>> => {
     const unique = [...new Set(ids)];
     const out = new Map<number, Record<string, ExprValue>>();
