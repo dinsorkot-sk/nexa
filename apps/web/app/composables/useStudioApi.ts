@@ -27,7 +27,7 @@ interface LoginResponse {
 
 interface StudioRequestOptions {
   method?: 'GET' | 'POST'
-  body?: unknown
+  body?: Record<string, unknown>
 }
 
 function responseStatus(error: unknown): number | undefined {
