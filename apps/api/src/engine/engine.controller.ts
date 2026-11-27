@@ -197,7 +197,7 @@ export class EngineController {
     return { models: (await MetadataStore.for(handle).list()).map(({ name, description, fields, onchange, constraints }) => ({
       name, description, onchange, constraints, fields: Object.entries(fields).map(([field, def]) => ({
         name: field, type: def.type, string: def.string ?? field, comodel: def.comodel,
-        translate: def.translate, digits: def.digits, copy: def.copy, aggregator: def.aggregator, currencyField: def.currencyField,
+        required: !!def.required, translate: def.translate, digits: def.digits, copy: def.copy, aggregator: def.aggregator, currencyField: def.currencyField,
         computeExpr: def.computeExpr, defaultExpr: def.defaultExpr, store: def.store, depends: def.depends,
         default: def.default, help: def.help, readonly: def.readonly, index: def.index, unique: def.unique, ondelete: def.ondelete,
         checkCompany: def.checkCompany, writeGroups: def.writeGroups, ratchet: def.ratchet,
