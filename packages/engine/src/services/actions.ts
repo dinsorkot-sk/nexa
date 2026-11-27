@@ -376,6 +376,12 @@ async function evaluateValues(
 }
 
 const SOURCE_FIELD = /^(?:record\.)?([A-Za-z_][A-Za-z0-9_]*)$/;
+/**
+ * Root x2many of a source that only filters or orders it, e.g. `record.x_item_ids.filtered('x_is_base')`.
+ * mapped() and other calls may yield records of another model, so they are not matched. The `record.`
+ * prefix is required so that a context name (e.g. `companies`) can never stand in for the field.
+ */
+const SOURCE_ROOT = /^record\.([A-Za-z_][A-Za-z0-9_]*)(?:\.(?:filtered|sorted)\((?:'[^']*'|"[^"]*")?\))+$/;
 
 /** Evaluates a create_record.lines mapping into x2many create commands (rows charged, bounded, caller ACL). */
 async function evaluateLines(
@@ -387,25 +393,55 @@ async function evaluateLines(
   if (raw.length > MAX_ACTION_LINES) throw new ValidationError(`Lines source has more than ${MAX_ACTION_LINES} items`);
   if (!raw.length) return [];
   let items: Record<string, ExprValue>[];
-  if (raw.every((item) => typeof item === 'number')) {
-    // untraversed x2many: a list of ids, read as flat rows with the caller's access
-    const name = SOURCE_FIELD.exec(lines.source.trim())?.[1];
-    const field = name ? registry.get(sourceModel).fields.get(name) : undefined;
-    if (!field || (field.type !== 'one2many' && field.type !== 'many2many') || !field.comodel) {
-      throw new ValidationError('Lines source must be a one2many/many2many field path or a list of objects');
-    }
-    const ids = [...new Set(raw as number[])];
+  // top-level `line.<field>` names used by the line values
+  const lineFields = new Set<string>();
+  for (const source of Object.values(lines.values)) {
+    try {
+      for (const path of extractDependencies(source)) if (path.startsWith('line.')) lineFields.add(path.split('.')[1]!);
+    } catch { /* not statically analysable: stored fields only */ }
+  }
+  /** Read source records as flat rows with the caller's access, keeping the source order. */
+  const readRows = async (comodel: string, sourceIds: number[]): Promise<Record<string, ExprValue>[]> => {
+    const ids = [...new Set(sourceIds)];
     charge(state, ids.length);
-    const rows = await env.model(field.comodel).browse(ids).read();
+    const records = env.model(comodel).browse(ids);
+    const rows = await records.read();
     if (rows.length !== ids.length) throw new AccessError('A source line is not readable');
+    // read() returns stored fields only: also read the non-stored fields the line values name (e.g. `line.x_flag`)
+    const comodelFields = registry.get(comodel).fields;
+    const extra = [...lineFields].filter((name) => comodelFields.has(name) && !(name in rows[0]!));
+    if (extra.length) {
+      const more = new Map((await records.read(extra)).map((row) => [row.id as number, row]));
+      for (const row of rows) for (const name of extra) row[name] = more.get(row.id as number)?.[name] ?? null;
+    }
     const byId = new Map(rows.map((row) => {
       const flat = jsonValue(row) as Record<string, ExprValue>;
-      recordOrigin.set(flat, { model: field.comodel!, id: row.id as number });
+      recordOrigin.set(flat, { model: comodel, id: row.id as number });
       return [row.id as number, flat] as const;
     }));
-    items = (raw as number[]).map((id) => byId.get(id)!);
+    return sourceIds.map((id) => byId.get(id)!);
+  };
+  const x2many = (name: string | undefined) => {
+    const field = name ? registry.get(sourceModel).fields.get(name) : undefined;
+    return field && (field.type === 'one2many' || field.type === 'many2many') && field.comodel ? field.comodel : undefined;
+  };
+  if (raw.every((item) => typeof item === 'number')) {
+    // untraversed x2many: a list of ids
+    const comodel = x2many(SOURCE_FIELD.exec(lines.source.trim())?.[1]);
+    if (!comodel) throw new ValidationError('Lines source must be a one2many/many2many field path or a list of objects');
+    items = await readRows(comodel, raw as number[]);
   } else if (raw.every((item) => typeof item === 'object' && item !== null && !Array.isArray(item))) {
-    items = raw as Record<string, ExprValue>[];
+    // a filtered or sorted x2many holds only the fields the source read: reload its records in full (caller's access)
+    const comodel = x2many(SOURCE_ROOT.exec(lines.source.trim())?.[1]);
+    const objects = raw as Record<string, ExprValue>[];
+    if (comodel && objects.every((item) => typeof item.id === 'number')) {
+      const rows = await readRows(comodel, objects.map((item) => item.id as number));
+      // read() returns stored columns only: keep the values the source already evaluated (e.g. non-stored computes)
+      items = rows.map((row, i) => {
+        for (const [key, value] of Object.entries(objects[i]!)) if (!(key in row)) row[key] = value;
+        return row;
+      });
+    } else items = objects;
   } else throw new ValidationError('Lines source items must be record ids or objects');
   charge(state, items.length); // child rows created
   const commands: unknown[] = [];

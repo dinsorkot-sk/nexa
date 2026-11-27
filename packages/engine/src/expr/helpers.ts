@@ -98,6 +98,14 @@ export function createExpressionHelpers(extra: Partial<ExprEnvironment> = {}): E
     uom: (value: ExprValue, rounding: ExprValue = 1) => roundIncrement(value, rounding),
     date: (value: ExprValue) => isoDate(value),
     abs: (value: ExprValue) => Math.abs(finite(value)),
+    // true for a non-empty string of ASCII digits only, optionally of an exact length (e.g. a 13-digit tax ID that may start with 0)
+    is_digits: (value: ExprValue, length?: ExprValue) => {
+      if (length !== undefined && length !== null && (typeof length !== 'number' || !Number.isInteger(length) || length < 1 || length > 10_000)) {
+        throw new TypeError('is_digits length must be an integer between 1 and 10000');
+      }
+      return typeof value === 'string' && value.length > 0 && value.length <= 10_000 && /^[0-9]+$/.test(value)
+        && (length === undefined || length === null || value.length === length);
+    },
     float_round: (value: ExprValue, digits: ExprValue = 2, rounding?: ExprValue) => {
       const precision = floatPrecision(digits, rounding);
       return floatRound(value, precision.digits, precision.rounding);

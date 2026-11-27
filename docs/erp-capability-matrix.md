@@ -17,7 +17,7 @@ not through the HTTP surface a tenant administrator uses · **Gap** = missing or
 | Accounting proof, PGlite | `packages/engine`: `npx vitest run test/accounting-nocode.test.ts` | 9 passed |
 | Accounting proof, real PostgreSQL | `packages/engine`: `npx vitest run -c vitest.pg.config.ts test/pg/accounting-nocode.test.ts` | 9 passed |
 | Policy primitives + concurrency, real PostgreSQL | `packages/engine`: `npx vitest run -c vitest.pg.config.ts test/pg/policy-*.test.ts test/pg/concurrency.test.ts` | 30 passed |
-| T3a Sales → invoice → ledger → payment over HTTP, PGlite | `apps/api`: `npx vitest run test/nocode-accounting.test.ts` | 6 passed |
+| T3a + T3b (Thailand) over HTTP, PGlite | `apps/api`: `npx vitest run test/nocode-accounting.test.ts` | 12 passed |
 | Sales proof over HTTP, PGlite | `apps/api`: `npx vitest run test/nocode-sales.test.ts` | 15 passed, 1 todo (GAP-ACT-1) |
 
 Environment notes: the API suite needs `turbo run build --filter=@nexa/api^...` first (`@nexa/engine`
@@ -38,7 +38,7 @@ default. The repository declares Node 26; these runs used Node 24.
 | 7 | Confirm / cancel / mark sent | guarded `ir.button` + `update_record`/`multi` | Proven (HTTP) | `nocode-sales.test.ts` state machine |
 | 8 | Send quotation email, print PDF as one button | — | **Gap** GAP-ACT-1 | `it.todo` at `apps/api/test/nocode-sales.test.ts:646` |
 | 9 | **Sales order → customer invoice** | guarded `multi`: `create_record` with `lines` from `x_line_ids` + `update_record` | Proven (HTTP) | `apps/api/test/nocode-accounting.test.ts` (T3a) |
-| 10 | Invoice tax lines → ledger tax account | `tax_compute` in line mappings | **Gap: not built** (T3b, Thai VAT 7% / WHT) | T3a invoices are untaxed |
+| 10 | Invoice tax lines → ledger tax account (Thailand: output VAT 7%) | VAT item from `tax_compute` on taxed base items, credited to the company's output-VAT account | Proven (HTTP) | `nocode-accounting.test.ts` T3b: VAT only on taxed lines, VAT reversed by credit notes |
 | 11 | Ledger account, move, line models | Studio fields incl. `one2many`, stored monetary compute | Proven (HTTP) | T3a builds them with `POST /api/studio/model` and `/studio/field`; the engine fixture still uses `MetadataStore` |
 | 12 | Unique move number and account code per company (I4 key) | Studio `unique`, stored computed composite key | Proven (HTTP) | T3a: `x_name` unique; `x_key = x_code:company` rejects a duplicate account code. Limits: a duplicate error can surface on a write to a dependency model; `copy()` needs new key inputs; an expression that renders empty parts collides |
 | 13 | Lifecycle lock, post transition, checks | `ir.lifecycle`, `ir.transition` records | Proven (HTTP) | T3a creates them with the generic `model/:model/create` |
@@ -51,6 +51,9 @@ default. The repository declares Node 26; these runs used Node 24.
 | 20 | Reconcile / unreconcile (I8) | `ir.match.rule`, `match`/`unmatch` actions | Proven (engine, both DBs) | suite I8 test |
 | 21 | Invoice payment state (paid / partial) back on the invoice | non-stored compute over its reconcilable ledger lines' `x_residual_currency` | Proven (HTTP) | T3a: not_paid → partial → paid → not_paid after unreconcile |
 | 22 | Concurrency (parallel post / match / lock edits) | row locks, lock order | Proven per primitive (real PostgreSQL); not on the assembled accounting fixture | `test/pg/policy-transition.test.ts` (two concurrent posts: one number, one skip), `policy-matching.test.ts` (no double consumption, duplicate unmatch), `policy-lifecycle.test.ts` (child writes vs lock transition), `policy-datelock.test.ts` (concurrent ratchet), `concurrency.test.ts` (no_gap sequence) |
+| 24 | Thai full tax invoice data and numbering | Studio `x_vat`/`x_branch` on company and partner; `post_th` transition checks `is_digits(x_vat, 13)` and branch; per-type no-gap sequences INV/CN/DN | Proven (HTTP) | T3b; a missing or 12-digit buyer tax ID is refused and rolled back; the number is engine-owned |
+| 25 | Credit and debit notes | credit note button copies base items negated with their taxes; posting requires the origin invoice and a reason; debit note created as a document of type `debit` | Proven (HTTP) | T3b: CN reverses revenue and VAT and settles the invoice by reconciliation |
+| 26 | Customer payment with withholding tax | `x_wht_amount` on the payment; items: bank = amount − WHT, WHT asset, receivable −amount | Proven (HTTP) | T3b: 1,070 invoice paid as 1,040 bank + 30 WHT, invoice paid |
 | 23 | End-user UI | — | **Gap** | `apps/web` is a starter page (`app/pages/index.vue`); every proven surface is HTTP or engine |
 
 ## Platform gaps carried from the Sales proof (status re-checked)
@@ -70,7 +73,14 @@ default. The repository declares Node 26; these runs used Node 24.
 
 - The ledger invariants are proven at engine level on both databases, and the untaxed seam Sales
   order → invoice → post → payment → reconcile → invoice status is proven over HTTP only (T3a).
-  Remaining: Thai VAT and WHT (T3b), the HTTP proof on real PostgreSQL (the API suite runs on PGlite), and a UI.
+  Thai v1 (VAT 7%, full tax invoice data and numbering, credit/debit notes, WHT on receipts) is proven
+  over HTTP (T3b). Remaining: the HTTP proof on real PostgreSQL (the API suite runs on PGlite), a UI,
+  and the excluded Thai items (e-Tax Invoice, P.P.30 / P.N.D. filings, WHT certificates, Thai PDF).
+  T3b limits: VAT is posted only for lines taxed with the company VAT tax (other taxes, e.g. 0% export,
+  post no tax line); the Thai posting button always adds a VAT item, which is zero when no line is
+  taxed; the WHT payment button requires a WHT amount above zero; the tax ID format is checked, not its
+  check digit; a credit note can be issued until the invoice is settled, so several drafts are possible;
+  the generic T3a buttons are narrowed so they cannot post VAT-company invoices or WHT payments.
 - Steps 12 and 14 are now available over HTTP (Studio `unique`; Studio fields on `res.company`,
   user decision 2026-11-27). The accounting proof still has to be rebuilt over HTTP to use them.
 - Step 23 means "user-facing" currently means HTTP API; any UI claim needs separate scope.

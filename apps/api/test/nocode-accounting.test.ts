@@ -15,7 +15,7 @@ import { AuthService } from '../src/engine/auth.service';
 import { EngineService } from '../src/engine/engine.service';
 
 const TENANT = 'nocodeacct';
-const PASSWORDS = { admin: 'nca-admin-password-unique', clerk: 'nca-clerk-password-unique' };
+const PASSWORDS = { admin: 'nca-admin-password-unique', clerk: 'nca-clerk-password-unique', clerk_th: 'nca-clerk-th-password-unique' };
 
 type Json = Record<string, unknown>;
 interface Res { status: number; body: Json }
@@ -50,8 +50,8 @@ const read = async (model: string, id: number, fields: string[], token = tokens.
   ((await ok(`model/${model}/read`, { ids: [id], fields }, token)).records as Json[])[0]!;
 const searchRead = async (model: string, domain: unknown[], fields: string[], token = tokens.admin!) =>
   (await ok(`model/${model}/search_read`, { domain, fields, order: 'id' }, token)).records as Json[];
-const count = async (model: string, domain: unknown[] = []) =>
-  (await ok(`model/${model}/search_count`, { domain })).count as number;
+const count = async (model: string, domain: unknown[] = [], token = tokens.admin!) =>
+  (await ok(`model/${model}/search_count`, { domain }, token)).count as number;
 const button = (model: string, recordIds: number[], action: string, token = tokens.clerk!) =>
   post(`model/${model}/button`, { ids: recordIds, action }, token);
 const field = (model: string, name: string, def: Json) => ok('studio/field', { model, name, ...def });
@@ -94,7 +94,7 @@ beforeAll(async () => {
   vi.stubEnv('NODE_ENV', 'production');
   vi.stubEnv('NEXA_DATA_DIR', ':memory:');
   vi.stubEnv('NEXA_TENANTS', TENANT);
-  vi.stubEnv('NEXA_MODULES', 'base');
+  vi.stubEnv('NEXA_MODULES', 'base,uom,product,account_core');
   app = await NestFactory.create(AppModule, { logger: false, abortOnError: false });
   await app.listen(0, '127.0.0.1');
   base = new URL(await app.getUrl());
@@ -103,6 +103,8 @@ beforeAll(async () => {
   const [mainCompany] = (await su.model('res.company').search([], { limit: 1, order: 'id' })).ids;
   const [groupUser] = (await su.model('res.groups').search([['code', '=', 'base.group_user']])).ids;
   await su.model('res.users').create({ name: 'Clerk', login: 'clerk', company_id: mainCompany, company_ids: [mainCompany], group_ids: [groupUser] });
+  // moved to the Thai company by the administrator over HTTP (T3b)
+  await su.model('res.users').create({ name: 'Thai clerk', login: 'clerk_th', company_id: mainCompany, company_ids: [mainCompany], group_ids: [groupUser] });
   const auth = app.get(AuthService);
   for (const [login, password] of Object.entries(PASSWORDS)) {
     await auth.provisionPassword(TENANT, login, password);
@@ -144,6 +146,7 @@ describe('T3a no-code Sales-to-ledger over HTTP', { timeout: 30_000 }, () => {
       ['x_name', { type: 'char', required: true }], ['x_account_id', { type: 'many2one', comodel: 'x_ledger_account', required: true }],
       ['x_qty', { type: 'float', default: 1 }], ['x_price_unit', { type: 'float', default: 0 }],
       ['x_subtotal', { type: 'float', store: true, computeExpr: 'round(x_qty * x_price_unit, 2)' }],
+      ['x_tax_id', { type: 'many2one', comodel: 'account.tax', ondelete: 'restrict' }],
     ]);
     await field('x_sale_order', 'x_line_ids', { type: 'one2many', comodel: 'x_sale_order_line', inverseName: 'x_order_id' });
     await field('x_sale_order', 'x_amount_total', { type: 'float', store: true, computeExpr: "x_line_ids.sum('x_subtotal')" });
@@ -158,6 +161,10 @@ describe('T3a no-code Sales-to-ledger over HTTP', { timeout: 30_000 }, () => {
       ['x_invoice_id', { type: 'many2one', comodel: 'x_invoice', required: true, ondelete: 'cascade' }],
       ['x_name', { type: 'char' }], ['x_account_id', { type: 'many2one', comodel: 'x_ledger_account', required: true }],
       ['x_amount', { type: 'float', required: true }],
+      ['x_tax_id', { type: 'many2one', comodel: 'account.tax', ondelete: 'restrict' }],
+      ['x_role', state([['base', 'Base'], ['tax', 'Tax'], ['receivable', 'Receivable']])],
+      ['x_is_base', { type: 'boolean', store: true, computeExpr: "x_role == 'base'" }],
+      ['x_is_tax', { type: 'boolean', store: true, computeExpr: "x_role == 'tax'" }],
     ]);
     await field('x_invoice', 'x_item_ids', { type: 'one2many', comodel: 'x_invoice_item', inverseName: 'x_invoice_id' });
     // an item is revenue unless it is the invoice receivable
@@ -201,7 +208,7 @@ describe('T3a no-code Sales-to-ledger over HTTP', { timeout: 30_000 }, () => {
     await field('x_invoice', 'x_line_ids', { type: 'one2many', comodel: 'x_ledger_line', inverseName: 'x_invoice_id' });
     await field('x_invoice', 'x_residual', { type: 'float', computeExpr: "x_line_ids.filtered('x_reconcilable').sum('x_residual_currency')" });
     await field('x_invoice', 'x_payment_state', { type: 'char', computeExpr:
-      "x_state != 'posted' ? 'not_paid' : (float_is_zero(x_residual, 0.01) ? 'paid' : (float_compare(x_residual, x_amount_total, 0.01) < 0 ? 'partial' : 'not_paid'))" });
+      "x_state != 'posted' ? 'not_paid' : (float_is_zero(x_residual, 0.01) ? 'paid' : (float_compare(abs(x_residual), abs(x_amount_total), 0.01) < 0 ? 'partial' : 'not_paid'))" });
 
     await studioModel('x_payment', [...docHeader,
       ['x_state', state([['draft', 'Draft'], ['posted', 'Posted']])],
@@ -276,14 +283,14 @@ describe('T3a no-code Sales-to-ledger over HTTP', { timeout: 30_000 }, () => {
       type: 'create_record', target_model: 'x_invoice',
       values_json: JSON.stringify({ ...headerValues, x_order_id: 'record.id', x_receivable_id: 'record.x_partner_id.x_receivable_id' }),
       lines_field: 'x_item_ids', lines_source: 'record.x_line_ids',
-      lines_values_json: JSON.stringify({ x_name: 'line.x_name', x_account_id: 'line.x_account_id', x_amount: '-line.x_subtotal' }),
+      lines_values_json: JSON.stringify({ x_name: 'line.x_name', x_account_id: 'line.x_account_id', x_amount: '-line.x_subtotal', x_tax_id: 'line.x_tax_id' }),
     });
     await action('nca.order_mark_invoiced', 'x_sale_order', { type: 'update_record', values_json: JSON.stringify({ x_state: "'invoiced'" }) });
     await action('nca.order_invoice', 'x_sale_order', { type: 'multi', child_keys: 'nca.order_create_invoice,nca.order_mark_invoiced' }, "x_state == 'sale'");
 
     // Invoice posting: add the receivable item, create and post the entry, then post the invoice (one transaction)
     await action('nca.invoice_receivable', 'x_invoice', { type: 'create_record', target_model: 'x_invoice_item',
-      values_json: JSON.stringify({ x_invoice_id: 'record.id', x_name: "'Receivable'", x_account_id: 'record.x_receivable_id', x_amount: "-record.x_item_ids.sum('x_amount')" }) });
+      values_json: JSON.stringify({ x_invoice_id: 'record.id', x_name: "'Receivable'", x_account_id: 'record.x_receivable_id', x_amount: "-record.x_item_ids.sum('x_amount')", x_role: "'receivable'" }) });
     await action('nca.invoice_entry', 'x_invoice', { type: 'create_record', target_model: 'x_ledger_move', then_transition: 'post',
       values_json: JSON.stringify({ ...headerValues, x_invoice_id: 'record.id' }),
       lines_field: 'x_line_ids', lines_source: 'record.x_item_ids', lines_values_json: JSON.stringify(ledgerLineValues('record.id')) });
@@ -404,5 +411,173 @@ describe('T3a no-code Sales-to-ledger over HTTP', { timeout: 30_000 }, () => {
     expectStatus(await button('x_invoice', [softInvoice], 'nca.invoice_post', tokens.admin!));
     expectRejected(await post('model/res.company/write', { ids: [ids.company], values: { x_hard_lock: '2026-01-01' } }, tokens.admin!), /can only increase/);
     expect((await post('model/res.company/write', { ids: [ids.company], values: { x_hard_lock: '2026-03-01' } }, tokens.clerk!)).status).toBe(403);
+  });
+});
+
+/**
+ * T3b: Thailand v1 (user, 2026-11-27) on the same generic primitives: output VAT 7% as a tax item,
+ * full tax invoice data (13-digit tax IDs and branch for seller and buyer, gap-free document numbers
+ * per document type), credit and debit notes referencing the original invoice with a reason, and
+ * customer payments with withholding tax. Not a statutory-compliance claim: no e-Tax Invoice,
+ * P.P.30 / P.N.D. filings, WHT certificates or Thai-language PDF layout.
+ */
+describe('T3b Thailand: VAT, tax invoice, credit/debit notes and WHT over HTTP', { timeout: 30_000 }, () => {
+  const th: Record<string, number> = {};
+  const thHeader = () => ({ x_company_id: th.company, x_currency_id: th.thb, x_company_currency_id: th.thb, x_partner_id: th.buyer, x_date: '2026-03-10' });
+  async function thOrder(lines: [string, number, number, number?][], partner = th.buyer): Promise<number> {
+    const order = await create('x_sale_order', { ...thHeader(), x_partner_id: partner, x_line_ids: lines.map(([name, qty, price, tax]) => ({
+      op: 'create', values: { x_name: name, x_account_id: th.revenue, x_qty: qty, x_price_unit: price, ...(tax ? { x_tax_id: tax } : {}) },
+    })) }, tokens.clerk_th);
+    expectStatus(await button('x_sale_order', [order], 'nca.order_confirm', tokens.clerk_th));
+    expectStatus(await button('x_sale_order', [order], 'nca.order_invoice', tokens.clerk_th));
+    return (await searchRead('x_invoice', [['x_order_id', '=', order]], ['id'], tokens.clerk_th))[0]!.id as number;
+  }
+  const totals = (invoice: number) => read('x_invoice', invoice, ['x_name', 'x_state', 'x_amount_untaxed', 'x_amount_tax', 'x_amount_total', 'x_payment_state'], tokens.clerk_th);
+  const ledger = async (invoice: number) => (await searchRead('x_ledger_line', [['x_invoice_id', '=', invoice]], ['x_account_id', 'x_debit', 'x_credit'], tokens.clerk_th))
+    .map((l) => [l.x_account_id, l.x_debit, l.x_credit]);
+  const arLine = async (domain: unknown[]) =>
+    (await searchRead('x_ledger_line', [...domain, ['x_account_id', '=', th.receivable]], ['id'], tokens.clerk_th))[0]!.id as number;
+
+  it('configures a Thai company, VAT 7%, tax IDs, document sequences and Thai posting buttons', async () => {
+    th.thb = await ref('res.currency', [['name', '=', 'THB'], ['active', 'in', [true, false]]]);
+    await ok('model/res.currency/write', { ids: [th.thb], values: { active: true } });
+    th.vat = await create('account.tax', { name: 'VAT 7%', amount_type: 'percent', amount: 7 });
+    th.zero = await create('account.tax', { name: 'VAT 0% (export)', amount_type: 'percent', amount: 0 });
+    // tax identity of seller and buyer; Thai tax settings on the company
+    for (const model of ['res.company', 'res.partner']) {
+      await field(model, 'x_vat', { type: 'char', label: 'Tax ID' });
+      await field(model, 'x_branch', { type: 'char', label: 'Branch (00000 = head office)' });
+    }
+    await field('res.company', 'x_vat_tax_id', { type: 'many2one', comodel: 'account.tax', ondelete: 'set null' });
+    await field('res.company', 'x_output_vat_account_id', { type: 'many2one', comodel: 'x_ledger_account', ondelete: 'set null' });
+    await field('res.company', 'x_wht_account_id', { type: 'many2one', comodel: 'x_ledger_account', ondelete: 'set null' });
+    th.company = await create('res.company', { name: 'Thai Co., Ltd.', currency_id: th.thb, x_vat: '0105500000002', x_branch: '00000', x_vat_tax_id: th.vat });
+    const clerkTh = await ref('res.users', [['login', '=', 'clerk_th']]);
+    await ok('model/res.users/write', { ids: [clerkTh], values: { company_id: th.company, company_ids: [th.company] } });
+
+    // invoice: document type, origin and reason for notes, Thai number; untaxed and VAT totals
+    await field('x_invoice', 'x_type', state([['invoice', 'Tax invoice'], ['refund', 'Credit note'], ['debit', 'Debit note']]));
+    await field('x_invoice', 'x_origin_id', { type: 'many2one', comodel: 'x_invoice', ondelete: 'restrict' });
+    await field('x_invoice', 'x_reason', { type: 'char' });
+    await field('x_invoice', 'x_name', { type: 'char', unique: true });
+    await field('x_invoice', 'x_amount_untaxed', { type: 'float', store: true, computeExpr: "-x_item_ids.filtered('x_is_base').sum('x_amount')" });
+    await field('x_invoice', 'x_amount_tax', { type: 'float', store: true, computeExpr: "-x_item_ids.filtered('x_is_tax').sum('x_amount')" });
+    await field('x_payment', 'x_wht_amount', { type: 'float', default: 0 });
+    await field('x_invoice_item', 'x_vat_taxed', { type: 'boolean', computeExpr: 'x_tax_id != null && x_tax_id == x_invoice_id.x_company_id.x_vat_tax_id' });
+    // the document number is engine-owned (only the posting transition writes it)
+    const lifecycle = await ref('ir.lifecycle', [['model', '=', 'x_invoice']]);
+    await ok('model/ir.lifecycle/write', { ids: [lifecycle], values: { engine_fields: ['x_name'] } });
+    for (const [code, prefix] of [['th.tax_invoice', 'INV/%(year)s/'], ['th.credit_note', 'CN/%(year)s/'], ['th.debit_note', 'DN/%(year)s/']]) {
+      await create('ir.sequence', { name: code, code, prefix, padding: 4, implementation: 'no_gap', company_id: th.company });
+    }
+    await create('ir.transition', {
+      model: 'x_invoice', key: 'post_th', from: ['draft'], to: 'posted',
+      checks: [
+        { expr: 'x_item_ids.count() >= 2', message: 'Nothing to post' },
+        { expr: 'is_digits(x_company_id.x_vat, 13) && x_company_id.x_branch != null', message: 'Seller tax ID (13 digits) and branch are required' },
+        { expr: 'is_digits(x_partner_id.x_vat, 13) && x_partner_id.x_branch != null', message: 'Buyer tax ID (13 digits) and branch are required' },
+        { expr: "x_type == 'invoice' || (x_origin_id != null && x_reason != null)", message: 'Credit and debit notes need the original invoice and a reason' },
+      ],
+      effects: [{ type: 'sequence', field: 'x_name', date: 'x_date', company: 'x_company_id',
+        code: "x_type == 'refund' ? 'th.credit_note' : (x_type == 'debit' ? 'th.debit_note' : 'th.tax_invoice')" }],
+    });
+    // posting: VAT item on the taxed base, then the generic receivable item, entry and state
+    await action('nca.th_invoice_vat', 'x_invoice', { type: 'create_record', target_model: 'x_invoice_item',
+      values_json: JSON.stringify({ x_invoice_id: 'record.id', x_name: "'VAT'", x_role: "'tax'", x_account_id: 'record.x_company_id.x_output_vat_account_id',
+        x_amount: "[tax_compute([record.x_company_id.x_vat_tax_id.id], record.x_item_ids.filtered('x_vat_taxed').sum('x_amount'), 1, null, null, record.x_currency_id)].sum('tax')" }) });
+    await action('nca.th_invoice_state', 'x_invoice', { type: 'transition', transition: 'post_th' });
+    await action('nca.th_invoice_post', 'x_invoice', { type: 'multi', child_keys: 'nca.th_invoice_vat,nca.invoice_receivable,nca.invoice_entry,nca.th_invoice_state' }, "x_state == 'draft'");
+    // credit note: a draft refund of the original base items, with their taxes
+    await action('nca.th_credit_note', 'x_invoice', {
+      type: 'create_record', target_model: 'x_invoice',
+      values_json: JSON.stringify({ ...headerValues, x_date: 'today', x_type: "'refund'", x_origin_id: 'record.id', x_receivable_id: 'record.x_receivable_id' }),
+      lines_field: 'x_item_ids', lines_source: "record.x_item_ids.filtered('x_is_base')",
+      lines_values_json: JSON.stringify({ x_name: 'line.x_name', x_account_id: 'line.x_account_id', x_tax_id: 'line.x_tax_id', x_amount: '-line.x_amount' }),
+    }, "x_state == 'posted' && x_type == 'invoice' && x_payment_state != 'paid'");
+    // payment with withholding tax: bank gets the net, WHT is an asset, the receivable is cleared in full
+    await action('nca.th_payment_bank', 'x_payment', { type: 'create_record', target_model: 'x_payment_item',
+      values_json: JSON.stringify({ x_payment_id: 'record.id', x_account_id: 'record.x_bank_account_id', x_amount: 'record.x_amount - record.x_wht_amount' }) });
+    await action('nca.th_payment_wht', 'x_payment', { type: 'create_record', target_model: 'x_payment_item',
+      values_json: JSON.stringify({ x_payment_id: 'record.id', x_account_id: 'record.x_company_id.x_wht_account_id', x_amount: 'record.x_wht_amount' }) });
+    await action('nca.th_payment_post', 'x_payment', { type: 'multi',
+      child_keys: 'nca.th_payment_bank,nca.th_payment_wht,nca.payment_receivable,nca.payment_entry,nca.payment_state' }, "x_state == 'draft' && x_wht_amount > 0");
+
+    // the generic buttons must not bypass the Thai rules
+    const narrow = async (key: string, guard: string) => ok('model/ir.button/write', { ids: [await ref('ir.button', [['action', '=', key]])], values: { guard } });
+    await narrow('nca.invoice_post', "x_state == 'draft' && x_company_id.x_vat_tax_id == null");
+    await narrow('nca.payment_post', "x_state == 'draft' && x_wht_amount == 0");
+
+    // Thai master data, entered by the Thai clerk (account codes may repeat across companies)
+    const account = (code: string, extra: Json = {}) => create('x_ledger_account', { x_code: code, x_company_id: th.company, ...extra }, tokens.clerk_th);
+    th.receivable = await account('1100', { x_reconcile: true, x_partner_required: true });
+    th.revenue = await account('4000');
+    th.bank = await account('1000');
+    th.outputVat = await account('2201');
+    th.wht = await account('1157');
+    await ok('model/res.company/write', { ids: [th.company], values: { x_output_vat_account_id: th.outputVat, x_wht_account_id: th.wht } });
+    th.buyer = await create('res.partner', { name: 'Buyer Co., Ltd.', x_vat: '0105500000001', x_branch: '00001', x_receivable_id: th.receivable });
+    th.noTaxId = await create('res.partner', { name: 'Walk-in customer', x_receivable_id: th.receivable });
+  }, 120_000);
+
+  it('posts a full tax invoice: 7% VAT on taxed lines only, Thai number, VAT credited to output VAT', async () => {
+    th.invoice = await thOrder([['Service', 2, 500, th.vat], ['Exempt goods', 1, 100], ['Export service', 1, 200, th.zero]]);
+    expectStatus(await button('x_invoice', [th.invoice], 'nca.th_invoice_post', tokens.clerk_th));
+    expect(await totals(th.invoice)).toMatchObject({ x_name: 'INV/2026/0001', x_state: 'posted', x_amount_untaxed: 1300, x_amount_tax: 70, x_amount_total: 1370, x_payment_state: 'not_paid' });
+    expect(await ledger(th.invoice)).toEqual([[th.revenue, 0, 1000], [th.revenue, 0, 100], [th.revenue, 0, 200], [th.outputVat, 0, 70], [th.receivable, 1370, 0]]);
+    expectRejected(await post('model/x_invoice/write', { ids: [th.invoice], values: { x_name: 'INV/2026/9999' } }, tokens.clerk_th!), /field 'x_name' is maintained by the engine/);
+  });
+
+  it('refuses a tax invoice without a valid buyer tax ID, and rolls back', async () => {
+    const invoice = await thOrder([['Service', 1, 100, th.vat]], th.noTaxId);
+    // the generic posting button is not offered for a VAT-registered company
+    expectRejected(await button('x_invoice', [invoice], 'nca.invoice_post', tokens.clerk_th), /not allowed for record \d+ in its current state/);
+    const moves = await count('x_ledger_move', [], tokens.clerk_th);
+    expectRejected(await button('x_invoice', [invoice], 'nca.th_invoice_post', tokens.clerk_th), /Buyer tax ID \(13 digits\) and branch are required/);
+    // the VAT and receivable items and the entry were rolled back
+    expect(await count('x_ledger_move', [], tokens.clerk_th)).toBe(moves);
+    expect(await count('x_invoice_item', [['x_invoice_id', '=', invoice]], tokens.clerk_th)).toBe(1);
+    await ok('model/res.partner/write', { ids: [th.noTaxId], values: { x_vat: '010550000000', x_branch: '00000' } });
+    expectRejected(await button('x_invoice', [invoice], 'nca.th_invoice_post', tokens.clerk_th), /Buyer tax ID/);
+  });
+
+  it('issues a credit note against the invoice with a reason, reverses VAT and settles both', async () => {
+    expectStatus(await button('x_invoice', [th.invoice!], 'nca.th_credit_note', tokens.clerk_th));
+    const note = (await searchRead('x_invoice', [['x_origin_id', '=', th.invoice], ['x_type', '=', 'refund']], ['id'], tokens.clerk_th))[0]!.id as number;
+    expectRejected(await button('x_invoice', [note], 'nca.th_invoice_post', tokens.clerk_th), /need the original invoice and a reason/);
+    await ok('model/x_invoice/write', { ids: [note], values: { x_reason: 'Service not delivered' } }, tokens.clerk_th);
+    expectStatus(await button('x_invoice', [note], 'nca.th_invoice_post', tokens.clerk_th));
+    expect(await totals(note)).toMatchObject({ x_amount_untaxed: -1300, x_amount_tax: -70, x_amount_total: -1370 });
+    expect((await totals(note)).x_name).toMatch(/^CN\/\d{4}\/0001$/);
+    expect(await ledger(note)).toEqual([[th.revenue, 1000, 0], [th.revenue, 100, 0], [th.revenue, 200, 0], [th.outputVat, 70, 0], [th.receivable, 0, 1370]]);
+    expectStatus(await button('x_ledger_line', [await arLine([['x_invoice_id', '=', th.invoice]]), await arLine([['x_invoice_id', '=', note]])], 'nca.reconcile', tokens.clerk_th));
+    expect(await totals(th.invoice!)).toMatchObject({ x_payment_state: 'paid' });
+    expect(await totals(note)).toMatchObject({ x_payment_state: 'paid' });
+    // a credit note cannot itself be credited, and a settled invoice cannot be credited again
+    expectRejected(await button('x_invoice', [note], 'nca.th_credit_note', tokens.clerk_th), /not allowed for record \d+ in its current state/);
+    expectRejected(await button('x_invoice', [th.invoice!], 'nca.th_credit_note', tokens.clerk_th), /not allowed for record \d+ in its current state/);
+  });
+
+  it('issues a debit note referencing the invoice with its own number series', async () => {
+    const note = await create('x_invoice', { ...thHeader(), x_type: 'debit', x_origin_id: th.invoice, x_reason: 'Additional hours', x_receivable_id: th.receivable,
+      x_item_ids: [{ op: 'create', values: { x_name: 'Extra service', x_account_id: th.revenue, x_amount: -200, x_tax_id: th.vat } }] }, tokens.clerk_th);
+    expectStatus(await button('x_invoice', [note], 'nca.th_invoice_post', tokens.clerk_th));
+    expect(await totals(note)).toMatchObject({ x_name: 'DN/2026/0001', x_amount_untaxed: 200, x_amount_tax: 14, x_amount_total: 214 });
+  });
+
+  it('records a customer payment net of 3% withholding tax and still settles the invoice in full', async () => {
+    const invoice = await thOrder([['Consulting', 1, 1000, th.vat]]);
+    expectStatus(await button('x_invoice', [invoice], 'nca.th_invoice_post', tokens.clerk_th));
+    expect(await totals(invoice)).toMatchObject({ x_name: 'INV/2026/0002', x_amount_total: 1070 });
+    const payment = await create('x_payment', { ...thHeader(), x_amount: 1070, x_wht_amount: 30, x_bank_account_id: th.bank, x_receivable_id: th.receivable }, tokens.clerk_th);
+    // the generic payment button would book the gross amount to the bank: refused when WHT is withheld
+    expectRejected(await button('x_payment', [payment], 'nca.payment_post', tokens.clerk_th), /not allowed for record \d+ in its current state/);
+    expectStatus(await button('x_payment', [payment], 'nca.th_payment_post', tokens.clerk_th));
+    const move = (await searchRead('x_ledger_line', [['x_account_id', '=', th.wht]], ['x_move_id', 'x_debit'], tokens.clerk_th))[0]!;
+    expect(move.x_debit).toBe(30);
+    const lines = await searchRead('x_ledger_line', [['x_move_id', '=', move.x_move_id]], ['x_account_id', 'x_debit', 'x_credit'], tokens.clerk_th);
+    expect(lines.map((l) => [l.x_account_id, l.x_debit, l.x_credit])).toEqual([[th.bank, 1040, 0], [th.wht, 30, 0], [th.receivable, 0, 1070]]);
+    const paymentAr = (lines.find((l) => l.x_account_id === th.receivable)!).id as number;
+    expectStatus(await button('x_ledger_line', [await arLine([['x_invoice_id', '=', invoice]]), paymentAr], 'nca.reconcile', tokens.clerk_th));
+    expect(await totals(invoice)).toMatchObject({ x_payment_state: 'paid' });
   });
 });

@@ -47,6 +47,22 @@ describe('NX-Expr', () => {
     expect(evaluateExpression('date("2026-11-24T19:00:00Z")', helpers)).toBe('2026-11-24');
   });
 
+  it('checks digit strings of an exact length (e.g. a 13-digit tax ID with a leading zero)', () => {
+    const helpers = createExpressionHelpers();
+    const valid = (vat: unknown) => evaluateExpression('is_digits(record.vat, 13)', { ...helpers, record: { vat } });
+    expect(valid('0105536000315')).toBe(true);
+    expect(valid('010553600031')).toBe(false);
+    expect(valid('01055360003150')).toBe(false);
+    expect(valid('0105-53600031')).toBe(false);
+    expect(valid('')).toBe(false);
+    expect(valid(null)).toBe(false);
+    expect(evaluateExpression('is_digits("12a")', helpers)).toBe(false);
+    expect(evaluateExpression('is_digits("0012")', helpers)).toBe(true);
+    expect(evaluateExpression('is_digits(1234)', helpers)).toBe(false);
+    expect(() => evaluateExpression('is_digits("1", 0)', helpers)).toThrow(/length must be an integer/);
+    expect(() => evaluateExpression('is_digits("1", 1.5)', helpers)).toThrow(/length must be an integer/);
+  });
+
   it('rejects executable JavaScript and forbidden property access', () => {
     expect(() => evaluateExpression('globalThis.process', {})).toThrow();
     expect(() => evaluateExpression('record.constructor', { record: {} })).toThrow();

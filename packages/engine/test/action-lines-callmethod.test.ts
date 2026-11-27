@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
-  AccessError, PgliteTenantManager, ServerActionService, ValidationError,
+  AccessError, ButtonService, PgliteTenantManager, ServerActionService, UserError, ValidationError,
   ensureSecurityTables, securityModels, writeModuleSecurity, type Env, type ModelDef, type TenantHandle,
 } from '../src/index.js';
 import { configAccess, configModels, configRules } from '../src/base/config-models.js';
@@ -27,6 +27,8 @@ const models: ModelDef[] = [
     label: { type: 'char' },
     qty: { type: 'integer', default: 0 },
     price: { type: 'integer', default: 0 },
+    big: { type: 'boolean', computeExpr: 'qty * price >= 20' },
+    secret: { type: 'char', groups: ['alm.limited'] },
   } },
   { name: 'alm.doc', origin: 'module', fields: {
     name: { type: 'char' },
@@ -164,11 +166,20 @@ describe('create_record.lines', () => {
     expect(rows.every((r) => r.total === 36)).toBe(true);
   });
 
-  it('refuses relational line paths when the source items are not records', async () => {
+  it('refuses relational line paths when the source items are not records of the source x2many', async () => {
+    // mapped() yields records of another model: they stay plain objects without a record origin
     await new ServerActionService(admin).define({ key: 'alm.objs', model: 'alm.order', type: 'create_record', targetModel: 'alm.doc',
-      values: { name: "'Objs'" }, lines: { field: 'line_ids', source: "record.line_ids.sorted('qty')", values: { text: 'line.order_id.name' } } });
+      values: { name: "'Objs'" }, lines: { field: 'line_ids', source: "record.line_ids.mapped('order_id').filtered('name')", values: { text: 'line.order_id.name' } } });
     const id = await orderWithLines(2);
     await expect(new ServerActionService(alice).run('alm.objs', { model: 'alm.order', ids: [id] })).rejects.toThrow(/needs record ids/);
+  });
+
+  it('follows relational line paths when the source only sorts or filters the x2many', async () => {
+    await new ServerActionService(admin).define({ key: 'alm.sorted', model: 'alm.order', type: 'create_record', targetModel: 'alm.doc',
+      values: { name: "'Sorted'" }, lines: { field: 'line_ids', source: "record.line_ids.sorted('qty')", values: { text: 'line.order_id.name' } } });
+    const id = await orderWithLines(2);
+    const [docId] = await new ServerActionService(alice).run('alm.sorted', { model: 'alm.order', ids: [id] }) as number[];
+    expect((await root.model('alm.doc.line').searchRead([['doc_id', '=', docId!]], ['text'])).map((l) => l.text)).toEqual(['SO', 'SO']);
   });
 
   it('rejects readonly, computed and inverse fields in line values', async () => {
@@ -257,6 +268,44 @@ describe('ir.actions.server records', () => {
     const id = await orderWithLines(2);
     const [docId] = await new ServerActionService(alice).run('alm.rec_lines', { model: 'alm.order', ids: [id] }) as number[];
     expect(await root.model('alm.doc.line').searchRead([['doc_id', '=', docId!]], ['id'])).toHaveLength(2);
+  });
+
+  it('reads every line field when the lines source is a filtered or sorted x2many', async () => {
+    const Action = admin.model('ir.actions.server');
+    await Action.create({
+      key: 'alm.rec_filtered', model_name: 'alm.order', type: 'create_record', target_model: 'alm.doc',
+      values_json: JSON.stringify({ name: "'F'" }), lines_field: 'line_ids', lines_source: "record.line_ids.filtered('qty').sorted('label')",
+      // qty and price are not named by the source expression: they must still be read; big is a non-stored compute
+      lines_values_json: JSON.stringify({ text: "line.label + (line.big ? '+' : '')", total: '-(line.qty * line.price)' }),
+    });
+    const id = await orderWithLines(3);
+    const second = (await root.model('alm.order.line').search([['order_id', '=', id], ['label', '=', 'L2']])).ids;
+    await root.model('alm.order.line').browse(second).write({ qty: 0 }); // filtered out
+    const first = (await root.model('alm.order.line').search([['order_id', '=', id], ['label', '=', 'L1']])).ids;
+    await root.model('alm.order.line').browse(first).write({ label: 'Z1' }); // sorts after L3, against id order
+    const [docId] = await new ServerActionService(alice).run('alm.rec_filtered', { model: 'alm.order', ids: [id] }) as number[];
+    const lines = await root.model('alm.doc.line').searchRead([['doc_id', '=', docId!]], ['text', 'total'], { order: 'id' });
+    expect(lines.map((l) => [l.text, l.total])).toEqual([['L3+', -30], ['Z1', -10]]);
+  });
+
+  it('guards and action values see non-stored computed fields of the record', async () => {
+    const svc = new ServerActionService(admin);
+    await svc.define({ key: 'alm.size', model: 'alm.order.line', type: 'update_record', values: { label: "big ? 'big' : 'small'" } });
+    await new ButtonService(admin).define({ model: 'alm.order.line', action: 'alm.size', guard: 'big' });
+    const id = await orderWithLines(3);
+    const lineIds = (await root.model('alm.order.line').search([['order_id', '=', id]], { order: 'id' })).ids; // qty 1, 2, 3 at price 10
+    await expect(new ButtonService(alice).execute('alm.order.line', [lineIds[0]!], { action: 'alm.size' })).rejects.toBeInstanceOf(UserError);
+    await new ButtonService(alice).execute('alm.order.line', [lineIds[2]!], { action: 'alm.size' });
+    await svc.run('alm.size', { model: 'alm.order.line', ids: [lineIds[0]!] });
+    expect((await root.model('alm.order.line').browse([lineIds[0]!, lineIds[2]!]).read(['label'])).map((r) => r.label)).toEqual(['small', 'big']);
+  });
+
+  it('fails closed when a guard or value names a field restricted to groups the caller lacks', async () => {
+    await new ServerActionService(admin).define({ key: 'alm.secret', model: 'alm.order.line', type: 'update_record', values: { label: "secret == null ? 'none' : 'some'" } });
+    const id = await orderWithLines(1);
+    const [lineId] = (await root.model('alm.order.line').search([['order_id', '=', id]])).ids;
+    await expect(new ServerActionService(alice).run('alm.secret', { model: 'alm.order.line', ids: [lineId!] })).rejects.toBeInstanceOf(AccessError);
+    expect((await root.model('alm.order.line').browse(lineId!).read(['label']))[0]!.label).toBe('L1');
   });
 
   it('rejects invalid records', async () => {
