@@ -1,5 +1,7 @@
 # Gap analysis: Nexa engine core vs Odoo 18 (no-code target)
 
+> Snapshot. For the current status of the Sales → ledger vertical see [erp-capability-matrix.md](./erp-capability-matrix.md).
+
 Date: 2026-11-24. Source: 3 read-only explorer reports (ORM, platform services, addon needs).
 Goal: every Odoo feature, including business addons, is buildable **no-code** on the engine
 (metadata + sandboxed expressions + data-defined actions). Backend only. Odoo is a concept
