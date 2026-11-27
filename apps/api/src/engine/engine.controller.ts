@@ -88,6 +88,7 @@ const studioField = z.object({
   help: z.string().max(500).optional(),
   readonly: z.boolean().optional(),
   index: z.boolean().optional(),
+  unique: z.boolean().optional(),
   ondelete: z.enum(['cascade', 'set null', 'restrict']).optional(),
   checkCompany: z.boolean().optional(),
   writeGroups: z.array(z.string().min(1).max(200)).max(50).optional(),
@@ -128,10 +129,16 @@ const STUDIO_PROTECTED_MODELS = new Set([
   'res.users', 'res.groups', 'res.company', 'decimal.precision',
   'mail.message', 'mail.tracking.value', 'mail.followers', 'mail.message.subtype',
 ]);
-function assertStudioTarget(handle: TenantHandle, model: string): void {
+/**
+ * Protected models that still accept plain optional Studio fields (e.g. company lock dates). Mixins,
+ * views and field options that change how core code creates or reads these records stay refused.
+ */
+const STUDIO_FIELD_ONLY_MODELS = new Set(['res.company']);
+function assertStudioTarget(handle: TenantHandle, model: string, opts: { field?: boolean } = {}): void {
   const target = handle.registry.models.get(model);
   if (!target) throw new ValidationError(`Unknown model '${model}'`);
-  if (target.def.abstract || !target.table || STUDIO_PROTECTED_MODELS.has(model) || model.startsWith('ir.') || model.startsWith('nx.')) {
+  const protectedModel = STUDIO_PROTECTED_MODELS.has(model) && !(opts.field && STUDIO_FIELD_ONLY_MODELS.has(model));
+  if (target.def.abstract || !target.table || protectedModel || model.startsWith('ir.') || model.startsWith('nx.')) {
     throw new ValidationError(`Studio cannot modify the model '${model}'`);
   }
 }
@@ -303,7 +310,7 @@ export class EngineController {
         name: field, type: def.type, string: def.string ?? field, comodel: def.comodel,
         translate: def.translate, digits: def.digits, copy: def.copy, aggregator: def.aggregator, currencyField: def.currencyField,
         computeExpr: def.computeExpr, defaultExpr: def.defaultExpr, store: def.store, depends: def.depends,
-        default: def.default, help: def.help, readonly: def.readonly, index: def.index, ondelete: def.ondelete,
+        default: def.default, help: def.help, readonly: def.readonly, index: def.index, unique: def.unique, ondelete: def.ondelete,
         checkCompany: def.checkCompany, writeGroups: def.writeGroups, ratchet: def.ratchet,
       })),
     })) };
@@ -314,7 +321,15 @@ export class EngineController {
   async createStudioField(@CallerParam() c: Caller, @Body() body: unknown) {
     const { env, handle } = await this.studio(c);
     const req = studioField.parse(body);
-    assertStudioTarget(handle, req.model);
+    assertStudioTarget(handle, req.model, { field: true });
+    if (STUDIO_FIELD_ONLY_MODELS.has(req.model)
+      && (req.required || req.unique || req.computeExpr || req.defaultExpr || req.checkCompany || req.ondelete === 'restrict'
+        || req.type === 'one2many' || req.type === 'many2many')) {
+      // core code creates companies without knowing these fields; computed or relational lists would run on every
+      // company read; checkCompany has no owning company_id here; restrict would block deleting the referenced records.
+      // Every internal user can read res.company, so these fields must not hold secrets.
+      throw new ValidationError(`Studio fields on '${req.model}' must be optional, non-unique, non-computed, without checkCompany or ondelete 'restrict', and not one2many/many2many`);
+    }
     if (req.tracking && !isThread(env, req.model)) {
       throw new ValidationError(`Tracking requires '${req.model}' to inherit mail.thread`);
     }
@@ -339,7 +354,8 @@ export class EngineController {
       ...(req.translate !== undefined ? { translate: req.translate } : {}),
       ...(req.digits !== undefined ? { digits: req.digits } : {}),
       ...(req.tracking !== undefined ? { tracking: req.tracking } : {}),
-      ...(req.copy !== undefined ? { copy: req.copy } : {}),
+      // a unique value is never duplicated by copy() unless asked (the engine refuses copy: true with unique)
+      ...(req.copy !== undefined ? { copy: req.copy } : req.unique ? { copy: false } : {}),
       ...(req.aggregator ? { aggregator: req.aggregator } : {}),
       ...(req.currencyField ? { currencyField: req.currencyField } : {}),
       ...(req.computeExpr ? { computeExpr: req.computeExpr } : {}),
@@ -348,6 +364,7 @@ export class EngineController {
       ...(req.help ? { help: req.help } : {}),
       ...(req.readonly !== undefined ? { readonly: req.readonly } : {}),
       ...(req.index !== undefined ? { index: req.index } : {}),
+      ...(req.unique ? { unique: true } : {}),
       ...(req.ondelete ? { ondelete: req.ondelete } : {}),
       ...(req.checkCompany !== undefined ? { checkCompany: req.checkCompany } : {}),
       ...(req.writeGroups ? { writeGroups: req.writeGroups } : {}),
@@ -358,7 +375,15 @@ export class EngineController {
       ...(req.inverseName ? { inverseName: req.inverseName } : {}),
       ...(req.selection ? { selection: req.selection } : {}),
     };
-    await MetadataStore.for(handle).addField(req.model, req.name, field);
+    try {
+      await MetadataStore.for(handle).addField(req.model, req.name, field);
+    } catch (err) {
+      // defensive: a unique index that cannot be built on existing rows is a validation error, not a 500
+      if (req.unique && typeof err === 'object' && err !== null && 'code' in err && err.code === '23505') {
+        throw new ValidationError(`Field '${req.model}.${req.name}' cannot be unique: existing records share a value`);
+      }
+      throw err;
+    }
     return { model: req.model, field: req.name };
   }
 

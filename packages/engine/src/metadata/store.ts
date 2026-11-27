@@ -82,6 +82,8 @@ function rowToField(r: FieldRow): FieldDef {
   if (r.readonly) f.readonly = true;
   if (r.index) f.index = true;
   if (r.unique) f.unique = true;
+  // copying a unique value always collides, so unique fields are not copied unless stated otherwise
+  if (f.unique && f.copy === undefined) f.copy = false;
   if (r.default_value !== null && r.default_value !== undefined) f.default = r.default_value;
   if (r.selection) f.selection = r.selection.map(([v, l]) => [v, l] as const);
   if (r.comodel !== null) f.comodel = r.comodel;
@@ -226,6 +228,8 @@ function modelExpressions(input: CustomModelExpressions): CustomModelExpressions
 }
 
 const RATCHET_TYPES: ReadonlySet<FieldType> = new Set<FieldType>(['date', 'datetime', 'integer', 'float', 'monetary']);
+/** Types without a plain comparable column (x2many), or where uniqueness is meaningless or unindexable. */
+const UNIQUE_REFUSED_TYPES: ReadonlySet<FieldType> = new Set<FieldType>(['one2many', 'many2many', 'boolean', 'text', 'html', 'json', 'binary', 'reference']);
 
 /** A literal default must be plain JSON matching the field type. */
 function checkLiteralDefault(model: string, name: string, f: FieldDef): void {
@@ -280,6 +284,14 @@ function validateField(model: string, name: string, f: FieldDef): void {
   }
   if (f.translate !== undefined && (typeof f.translate !== 'boolean' || (f.translate && !['char', 'text', 'html'].includes(f.type)))) throw new ValidationError('Invalid translate flag');
   if (f.translate && f.unique) throw new ValidationError('Translated fields cannot be unique');
+  if (f.unique !== undefined && typeof f.unique !== 'boolean') throw new ValidationError(`Invalid unique flag on '${model}.${name}'`);
+  // a unique index needs a plain column; a computed value backfilled on existing rows could collide mid-migration
+  if (f.unique && (UNIQUE_REFUSED_TYPES.has(f.type) || f.computeExpr || f.compute || f.related)) {
+    throw new ValidationError(`'${model}.${name}' cannot be unique (requires a stored, non-computed char, integer, float, monetary, date, datetime, selection or many2one field)`);
+  }
+  // a literal default gives every record the same value; copying a unique value always collides
+  if (f.unique && f.default !== undefined) throw new ValidationError(`'${model}.${name}' is unique, so it cannot have a literal default`);
+  if (f.unique && f.copy === true) throw new ValidationError(`'${model}.${name}' is unique, so it cannot be copied`);
   if (f.copy !== undefined && typeof f.copy !== 'boolean') throw new ValidationError('Invalid copy flag');
   if (f.tracking !== undefined && typeof f.tracking !== 'boolean') throw new ValidationError('Invalid tracking flag');
   if (f.aggregator !== undefined && !['sum', 'avg', 'min', 'max', 'count', 'count_distinct'].includes(f.aggregator)) throw new ValidationError('Invalid aggregator');
