@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, StreamableFile, UnauthorizedException, Req } from '@nestjs/common';
-import { AccessError, ButtonService, getAction, isThread, getMenus, getView, MailAliasService, MailQueueService, MailTemplateService, MetadataStore, ReportService, userSecurity, ValidationError, type Domain, type Env, type FieldDef, type TenantHandle, type ViewNode, type ViewType } from '@nexa/engine';
+import { AccessError, ButtonService, getAction, getMenus, getView, MailAliasService, MailQueueService, MailTemplateService, MetadataStore, ReportService, userSecurity, ValidationError, type Domain, type Env, type TenantHandle, type ViewNode, type ViewType } from '@nexa/engine';
 import {
   callRequestSchema, copyRequestSchema, createRequestSchema, defaultGetRequestSchema, fieldsGetRequestSchema,
   nameSearchRequestSchema, onchangeRequestSchema, readGroupRequestSchema, readRequestSchema, searchCountRequestSchema,
@@ -7,10 +7,12 @@ import {
 } from '@nexa/shared';
 import { z } from 'zod';
 import { EngineService } from './engine.service';
+import { assertStudioTarget, createStudioField, createStudioModel, modelName, studioExpressions, studioField, studioModel } from './studio-ops';
 import { CallerParam, type Caller } from './request-env';
 import { AuthService, type AuthenticatedToken } from './auth.service';
 import { ReportPdfService } from './report-pdf.service';
 import { SmtpMailService } from './smtp-mail.service';
+import { applyPackRequest, PacksService } from './packs.service';
 import type { Request } from 'express';
 
 const loginRequest = z.object({
@@ -27,7 +29,6 @@ const revokeKeyRequest = z.object({ id: z.number().int().positive() });
 const pathRecordId = z.string().regex(/^[1-9][0-9]{0,9}$/).transform(Number).pipe(z.number().max(2_147_483_647));
 const reportPdfRequest = z.strictObject({ recordId: z.number().int().positive().max(2_147_483_647) });
 
-const modelName = z.string().regex(/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/).max(120);
 const mailRecordBody = z.strictObject({ recordId: z.number().int().positive().max(2_147_483_647) });
 const mailTemplateQueueBody = mailRecordBody.extend({ requestId: z.uuid() });
 const mailQueueBody = z.strictObject({ limit: z.number().int().min(1).max(5).default(1) });
@@ -50,98 +51,10 @@ const buttonRequest = z.strictObject({
   .refine((b) => b.args === undefined || b.method !== undefined, { message: 'args only apply to method buttons' });
 const viewType = z.enum(['list', 'form', 'kanban', 'search', 'calendar', 'pivot', 'graph']);
 const xmlId = z.string().regex(/^[a-z][a-z0-9_]*\.[a-z0-9_]+$/).max(200);
-const studioModel = z.object({
-  name: z.string().regex(/^x_[a-z0-9_]+$/).max(63),
-  description: z.string().max(200).optional(),
-});
-const studioExpression = z.string().trim().min(1).max(10_000);
-const studioFieldName = z.string().regex(/^[a-z][a-z0-9_]*$/).max(63);
-const studioExpressions = z.strictObject({
-  model: modelName,
-  onchange: z.record(studioFieldName, studioExpression).optional(),
-  constraints: z.array(z.strictObject({
-    name: studioFieldName,
-    expression: studioExpression,
-    fields: z.array(studioFieldName).max(100).optional(),
-    message: z.string().max(200).optional(),
-  })).max(100).optional(),
-});
-const studioField = z.object({
-  model: modelName,
-  name: z.string().regex(/^x_[a-z0-9_]+$/).max(63),
-  type: z.enum(['char', 'text', 'integer', 'float', 'monetary', 'boolean', 'date', 'datetime', 'selection', 'json', 'many2one', 'one2many', 'many2many', 'reference']),
-  label: z.string().max(120).optional(),
-  required: z.boolean().optional(),
-  translate: z.boolean().optional(),
-  // [precision, scale] or the name of a decimal.precision record (checked to exist)
-  digits: z.union([
-    z.tuple([z.number().int().min(1).max(1000), z.number().int().min(0).max(1000)]),
-    z.string().trim().min(1).max(80),
-  ]).optional(),
-  tracking: z.boolean().optional(),
-  copy: z.boolean().optional(),
-  aggregator: z.enum(['sum', 'avg', 'min', 'max', 'count', 'count_distinct']).optional(),
-  currencyField: z.string().regex(/^[a-z][a-z0-9_]*$/).max(63).optional(),
-  computeExpr: studioExpression.optional(),
-  defaultExpr: studioExpression.optional(),
-  default: z.union([z.string().max(10_000), z.number().finite(), z.boolean()]).optional(),
-  help: z.string().max(500).optional(),
-  readonly: z.boolean().optional(),
-  index: z.boolean().optional(),
-  unique: z.boolean().optional(),
-  ondelete: z.enum(['cascade', 'set null', 'restrict']).optional(),
-  checkCompany: z.boolean().optional(),
-  writeGroups: z.array(z.string().min(1).max(200)).max(50).optional(),
-  ratchet: z.literal('up').optional(),
-  store: z.boolean().optional(),
-  depends: z.array(z.string().regex(/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/).max(200)).max(100).optional(),
-  comodel: modelName.optional(),
-  inverseName: z.string().regex(/^[a-z][a-z0-9_]*$/).max(63).optional(),
-  selection: z.array(z.tuple([z.string().min(1).max(40), z.string().min(1).max(80)])).min(1).max(50).optional(),
-}).superRefine((field, ctx) => {
-  if (['many2one', 'one2many', 'many2many'].includes(field.type) && !field.comodel) {
-    ctx.addIssue({ code: 'custom', path: ['comodel'], message: 'Relation fields require a related model.' });
-  }
-  if (field.type === 'one2many' && !field.inverseName) {
-    ctx.addIssue({ code: 'custom', path: ['inverseName'], message: 'One2many fields require the inverse many2one field name.' });
-  }
-  if (field.type === 'one2many' && (field.store !== undefined || field.computeExpr || field.defaultExpr || field.required || field.depends)) {
-    ctx.addIssue({ code: 'custom', path: ['type'], message: 'One2many fields cannot be computed, defaulted, required or set storage.' });
-  }
-  if (field.type === 'selection' && !field.selection) {
-    ctx.addIssue({ code: 'custom', path: ['selection'], message: 'Selection fields require at least one choice.' });
-  }
-  if (field.digits !== undefined && (field.type !== 'float' || (Array.isArray(field.digits) && field.digits[1] > field.digits[0]))) {
-    ctx.addIssue({ code: 'custom', path: ['digits'], message: 'Digits require a float field and scale at most precision.' });
-  }
-  if (field.translate && field.type !== 'char' && field.type !== 'text') {
-    ctx.addIssue({ code: 'custom', path: ['translate'], message: 'Translation requires a text field.' });
-  }
-  if (field.currencyField && field.type !== 'monetary') {
-    ctx.addIssue({ code: 'custom', path: ['currencyField'], message: 'Currency field requires a monetary field.' });
-  }
-});
 const mixinName = z.string().regex(/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$/).max(120);
 const studioMixin = z.strictObject({ model: modelName, mixin: mixinName });
 const studioMixinDetach = z.strictObject({ model: modelName, mixin: mixinName, confirmDestructive: z.boolean().optional() });
 /** Models Studio must not reshape (security, configuration, mail internals); abstract models are refused too. */
-const STUDIO_PROTECTED_MODELS = new Set([
-  'res.users', 'res.groups', 'res.company', 'decimal.precision',
-  'mail.message', 'mail.tracking.value', 'mail.followers', 'mail.message.subtype',
-]);
-/**
- * Protected models that still accept plain optional Studio fields (e.g. company lock dates). Mixins,
- * views and field options that change how core code creates or reads these records stay refused.
- */
-const STUDIO_FIELD_ONLY_MODELS = new Set(['res.company']);
-function assertStudioTarget(handle: TenantHandle, model: string, opts: { field?: boolean } = {}): void {
-  const target = handle.registry.models.get(model);
-  if (!target) throw new ValidationError(`Unknown model '${model}'`);
-  const protectedModel = STUDIO_PROTECTED_MODELS.has(model) && !(opts.field && STUDIO_FIELD_ONLY_MODELS.has(model));
-  if (target.def.abstract || !target.table || protectedModel || model.startsWith('ir.') || model.startsWith('nx.')) {
-    throw new ValidationError(`Studio cannot modify the model '${model}'`);
-  }
-}
 const viewNodeSchema: z.ZodType<ViewNode> = z.lazy(() => z.object({
   tag: z.string().regex(/^[a-z][a-z0-9_-]*$/).max(40),
   attrs: z.record(z.string(), z.unknown()).optional(),
@@ -184,6 +97,7 @@ export class EngineController {
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(ReportPdfService) private readonly reportsPdf: ReportPdfService,
     @Inject(SmtpMailService) private readonly smtpMail: SmtpMailService,
+    @Inject(PacksService) private readonly packs: PacksService,
   ) {}
 
   private async resolveCaller(caller: Caller): Promise<{ tenant: string; uid: number }> {
@@ -274,32 +188,7 @@ export class EngineController {
   async createStudioModel(@CallerParam() c: Caller, @Body() body: unknown) {
     const req = studioModel.parse(body);
     const { handle } = await this.studio(c);
-    const key = req.name;
-    try {
-      await MetadataStore.for(handle).createModel(
-        { name: req.name, ...(req.description ? { description: req.description } : {}) },
-        async (tx) => {
-      await tx.query({
-        text: `INSERT INTO nx_action (module, xml_id, type, name, model, view_types) VALUES ('studio', $1, 'window', $2, $3, ARRAY['list','form'])`,
-        params: [`studio.action_${key}`, req.description || req.name, req.name],
-      });
-      await tx.query({
-        text: `INSERT INTO nx_menu (module, xml_id, name, parent, action, sequence, groups) VALUES ('studio', $1, $2, 'base.menu_settings', $3, 50, ARRAY['base.group_system'])`,
-        params: [`studio.menu_${key}`, req.description || req.name, `studio.action_${key}`],
-      });
-      await tx.query({
-        text: `INSERT INTO nx_access (module, model, group_code, perm_read, perm_write, perm_create, perm_unlink) VALUES ('studio', $1, 'base.group_system', true, true, true, true)`,
-        params: [req.name],
-      });
-        },
-      );
-    } catch (err) {
-      if (typeof err === 'object' && err !== null && 'code' in err && err.code === '23505') {
-        throw new ValidationError(`Model '${req.name}' or its Studio identifiers already exist`);
-      }
-      throw err;
-    }
-    return { model: req.name };
+    return createStudioModel(handle, req);
   }
 
   @Get('studio/models')
@@ -320,72 +209,26 @@ export class EngineController {
   @HttpCode(200)
   async createStudioField(@CallerParam() c: Caller, @Body() body: unknown) {
     const { env, handle } = await this.studio(c);
-    const req = studioField.parse(body);
-    assertStudioTarget(handle, req.model, { field: true });
-    if (STUDIO_FIELD_ONLY_MODELS.has(req.model)
-      && (req.required || req.unique || req.computeExpr || req.defaultExpr || req.checkCompany || req.ondelete === 'restrict'
-        || req.type === 'one2many' || req.type === 'many2many')) {
-      // core code creates companies without knowing these fields; computed or relational lists would run on every
-      // company read; checkCompany has no owning company_id here; restrict would block deleting the referenced records.
-      // Every internal user can read res.company, so these fields must not hold secrets.
-      throw new ValidationError(`Studio fields on '${req.model}' must be optional, non-unique, non-computed, without checkCompany or ondelete 'restrict', and not one2many/many2many`);
-    }
-    if (req.tracking && !isThread(env, req.model)) {
-      throw new ValidationError(`Tracking requires '${req.model}' to inherit mail.thread`);
-    }
-    if (typeof req.digits === 'string') {
-      const count = await env.model('decimal.precision').searchCount([['name', '=', req.digits]]);
-      if (!count) throw new ValidationError(`Unknown decimal precision '${req.digits}'`);
-    }
-    if (req.type === 'one2many') {
-      // the comodel must be a concrete model with a stored many2one back to this model
-      const comodel = handle.registry.models.get(req.comodel!);
-      if (!comodel || comodel.def.abstract) throw new ValidationError(`Unknown related model '${req.comodel}'`);
-      const inverse = comodel.fields.get(req.inverseName!);
-      if (!inverse || inverse.type !== 'many2one' || inverse.comodel !== req.model || inverse.store === false
-        || inverse.compute || inverse.computeExpr || inverse.related) {
-        throw new ValidationError(`'${req.comodel}.${req.inverseName}' must be a stored many2one field to '${req.model}'`);
-      }
-    }
-    const field: FieldDef = {
-      type: req.type,
-      ...(req.label ? { string: req.label } : {}),
-      ...(req.required ? { required: true } : {}),
-      ...(req.translate !== undefined ? { translate: req.translate } : {}),
-      ...(req.digits !== undefined ? { digits: req.digits } : {}),
-      ...(req.tracking !== undefined ? { tracking: req.tracking } : {}),
-      // a unique value is never duplicated by copy() unless asked (the engine refuses copy: true with unique)
-      ...(req.copy !== undefined ? { copy: req.copy } : req.unique ? { copy: false } : {}),
-      ...(req.aggregator ? { aggregator: req.aggregator } : {}),
-      ...(req.currencyField ? { currencyField: req.currencyField } : {}),
-      ...(req.computeExpr ? { computeExpr: req.computeExpr } : {}),
-      ...(req.defaultExpr ? { defaultExpr: req.defaultExpr } : {}),
-      ...(req.default !== undefined ? { default: req.default } : {}),
-      ...(req.help ? { help: req.help } : {}),
-      ...(req.readonly !== undefined ? { readonly: req.readonly } : {}),
-      ...(req.index !== undefined ? { index: req.index } : {}),
-      ...(req.unique ? { unique: true } : {}),
-      ...(req.ondelete ? { ondelete: req.ondelete } : {}),
-      ...(req.checkCompany !== undefined ? { checkCompany: req.checkCompany } : {}),
-      ...(req.writeGroups ? { writeGroups: req.writeGroups } : {}),
-      ...(req.ratchet ? { ratchet: req.ratchet } : {}),
-      ...(req.store !== undefined ? { store: req.store } : {}),
-      ...(req.depends ? { depends: req.depends } : {}),
-      ...(req.comodel ? { comodel: req.comodel } : {}),
-      ...(req.inverseName ? { inverseName: req.inverseName } : {}),
-      ...(req.selection ? { selection: req.selection } : {}),
-    };
-    try {
-      await MetadataStore.for(handle).addField(req.model, req.name, field);
-    } catch (err) {
-      // defensive: a raw unique violation while building the index is a validation error, not a 500.
-      // A stored-compute backfill collision is already a ValidationError ("Duplicate value…") from the ORM.
-      if (req.unique && typeof err === 'object' && err !== null && 'code' in err && err.code === '23505') {
-        throw new ValidationError(`Field '${req.model}.${req.name}' cannot be unique: existing records share a value`);
-      }
-      throw err;
-    }
-    return { model: req.model, field: req.name };
+    return createStudioField(env, handle, studioField.parse(body));
+  }
+
+  /** Built-in starter packs (Settings administrators). */
+  @Get('packs')
+  async listPacks(@CallerParam() c: Caller) {
+    await this.studio(c);
+    return { packs: await this.packs.list() };
+  }
+
+  /** Apply a starter pack with the caller's rights; idempotent (see PacksService). */
+  @Post('packs/:name/apply')
+  @HttpCode(200)
+  async applyPack(@CallerParam() c: Caller, @Param('name') name: string, @Body() body: unknown) {
+    const req = applyPackRequest.parse(body ?? {});
+    const { env, handle } = await this.studio(c);
+    const pack = await this.packs.load(name);
+    // records are created in the target company (which must be one of the caller's allowed companies)
+    const companies = req.params.company !== undefined ? [req.params.company] : undefined;
+    return this.packs.apply(handle, () => this.engine.env(env.tenant, env.uid, companies), pack, req.params);
   }
 
   /** Abstract module mixins that can be attached, and the mixins attached through metadata per model. */
