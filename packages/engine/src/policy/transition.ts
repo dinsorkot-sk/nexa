@@ -1,11 +1,12 @@
-import { AccessError, ValidationError, type AccessRule, type Env, type ModelDef, type Recordset } from '../contracts/index.js';
+import { AccessError, EngineError, ValidationError, type AccessRule, type Env, type ModelDef, type Recordset } from '../contracts/index.js';
 import { extractDependencies, parseExpression, type ExprValue } from '../expr/index.js';
 import type { EnvImpl } from '../orm/env.js';
 import { checkRecordRules, userSecurity } from '../security/access.js';
 import { assertSystem } from '../services/common.js';
 import { evaluateFor, readRecord } from '../services/record-scope.js';
 import { nextFromRecord } from '../services/sequence.js';
-import { policyIndex, type ModelPolicy } from './lifecycle.js';
+import { applyBalance, compileBalance, lockBalances, planKey, type BalanceEffect } from './balance.js';
+import { policyIndex, type ModelPolicy, type PolicyIndex } from './lifecycle.js';
 import { withWriteToken } from './token.js';
 
 /** ADR 0004 `ir.transition`: a named, atomic, guarded state change. */
@@ -25,9 +26,14 @@ export const transitionModels: ModelDef[] = [
       checks: { type: 'json', string: 'Checks', help: 'List of {expr, message}; read-only, relational scope' },
       effects: {
         type: 'json', string: 'Effects',
-        help: '[{type:sequence,field,code,date,company,when} | {type:set,values} | {type:child_set,field,values}]',
+        help: '[{type:sequence,field,code,date,company,when} | {type:set,values} | {type:child_set,field,values} | {type:balance,from,target,entries,into,checks}]',
       },
       active: { type: 'boolean', default: true },
+      model_key: { type: 'char', unique: true, readonly: true, store: true, depends: ['model', 'key'], compute: async (records) => {
+        const values = new Map<number, unknown>();
+        for (const r of await records.read(['model', 'key'])) values.set(Number(r.id), `${String(r.model)}:${String(r.key)}`);
+        return values;
+      } },
     },
     constraints: [{ name: 'ir_transition_valid', check: checkTransitionRecords }],
   },
@@ -41,7 +47,8 @@ interface Check { expr: string; message: string }
 type Effect =
   | { type: 'sequence'; field: string; code: string; date?: string; company?: string; when?: string }
   | { type: 'set'; values: Record<string, string> }
-  | { type: 'child_set'; field: string; values: Record<string, string> };
+  | { type: 'child_set'; field: string; values: Record<string, string> }
+  | BalanceEffect;
 
 interface TransitionDef {
   model: string; key: string; from: string[]; to: string; already: 'error' | 'skip';
@@ -80,7 +87,7 @@ function values(v: unknown, what: string): Record<string, string> {
 }
 
 /** Strict parse + validation of one row against the live registry and lifecycle policy. */
-function compile(env: EnvImpl, row: Row, policy: ModelPolicy | undefined): TransitionDef {
+function compile(env: EnvImpl, row: Row, policy: ModelPolicy | undefined, index: PolicyIndex): TransitionDef {
   const label = `Transition '${row.model}.${row.key}'`;
   const fail = (m: string): never => { throw new ValidationError(`${label}: ${m}`); };
   const meta = env.registry.models.get(row.model);
@@ -135,6 +142,7 @@ function compile(env: EnvImpl, row: Row, policy: ModelPolicy | undefined): Trans
       for (const [k, s] of Object.entries(v)) { known(f.comodel, k); deps(s, f.comodel, false); }
       return { type: 'child_set', field: raw.field as string, values: v };
     }
+    if (raw.type === 'balance') return compileBalance(env, raw, row.model, index, label);
     return fail('unknown effect type');
   });
   return { model: row.model, key: row.key, from, to: row.to, already, groups, guard, checks, effects };
@@ -152,9 +160,11 @@ export async function checkTransitionRecords(records: Recordset): Promise<void> 
   const index = await policyIndex(env);
   for (const row of rows) {
     if (row.dup) throw new ValidationError(`Transition '${row.model}.${row.key}' already exists`);
-    compile(env, row, index.get(row.model)?.policy);
+    compile(env, row, index.get(row.model)?.policy, index);
   }
 }
+
+export const MAX_TRANSITION_IDS = 1000;
 
 export interface TransitionResult { done: number[]; skipped: number[] }
 
@@ -163,14 +173,19 @@ export class TransitionService {
 
   async run(model: string, rawIds: readonly number[], key: string): Promise<TransitionResult> {
     const env = this.env as EnvImpl;
+    if (!Array.isArray(rawIds)) throw new ValidationError('Transition ids must be a list');
+    if (rawIds.some((i) => typeof i !== 'number' || !Number.isSafeInteger(i) || i < 1)) {
+      throw new ValidationError('Transition ids must be positive integers');
+    }
     const ids = [...new Set(rawIds)].sort((a, b) => a - b);
     if (!ids.length) throw new ValidationError('A transition needs at least one record');
+    if (ids.length > MAX_TRANSITION_IDS) throw new ValidationError(`A transition accepts at most ${MAX_TRANSITION_IDS} records`);
     return env.transaction(async () => {
       const index = await policyIndex(env);
       const policy = index.get(model)?.policy;
       const [row] = await env.sudo().model('ir.transition').search([['model', '=', model], ['key', '=', key]]).then((r) => r.read());
       if (!row || row.active === false) throw new ValidationError(`Unknown transition '${model}.${key}'`);
-      const def = compile(env, row as unknown as Row, policy);
+      const def = compile(env, row as unknown as Row, policy, index);
       const stateField = policy!.stateField!;
 
       if (!env.su) {
@@ -186,6 +201,10 @@ export class TransitionService {
       const meta = env.registry.get(model);
       const childFields = new Set<string>(def.effects.flatMap((e) => (e.type === 'child_set' ? [e.field] : [])));
       for (const lock of policy!.locks.values()) for (const f of lock.frozenChildren) childFields.add(f);
+      for (const e of def.effects) if (e.type === 'balance' && e.from) childFields.add(e.from);
+      // balance effects run before every other effect (ADR 0004 A1)
+      const effects = [...def.effects.filter((e) => e.type === 'balance'), ...def.effects.filter((e) => e.type !== 'balance')];
+      const balances = effects.filter((e): e is BalanceEffect => e.type === 'balance');
       const locked = await env.db.query<{ id: number }>({
         text: `SELECT id FROM "${meta.table}" WHERE id = ANY($1) ORDER BY id FOR UPDATE`, params: [ids],
       });
@@ -202,9 +221,31 @@ export class TransitionService {
 
       env.cache.invalidate(); // re-read under the locks: rows cached before them may be stale
       const done: number[] = []; const skipped: number[] = [];
+      const linesOf = async (e: BalanceEffect, id: number): Promise<Record<string, ExprValue>[]> => {
+        if (!e.from) return [await readRecord(env, model, id)];
+        const fd = meta.fields.get(e.from)!;
+        const out: Record<string, ExprValue>[] = [];
+        for (const cid of children.get(e.from) ?? []) {
+          const child = await readRecord(env, fd.comodel!, cid);
+          if (child[fd.inverseName!] === id) out.push(child);
+        }
+        return out;
+      };
+      // step 2b of the lock order: all balance keys of the run, create missing rows, lock by ascending id
+      let plan = new Map<string, (number | null)[]>();
+      if (balances.length) {
+        const runnable: number[] = [];
+        for (const id of ids) {
+          const state = (await readRecord(env, model, id))[stateField] ?? policy!.initialState;
+          if (state === def.to && def.already === 'skip') continue;
+          if (typeof state === 'string' && def.from.includes(state)) runnable.push(id);
+        }
+        plan = await lockBalances(env, balances, model, runnable, linesOf, index);
+        env.cache.invalidate();
+      }
       for (const id of ids) {
         const record = await readRecord(env, model, id);
-        const state = record[stateField];
+        const state = record[stateField] ?? policy!.initialState;
         if (state === def.to && def.already === 'skip') { skipped.push(id); continue; }
         if (typeof state !== 'string' || !def.from.includes(state)) {
           throw new ValidationError(`Cannot ${def.key} record ${id}: it is '${String(state)}', expected ${def.from.join(' or ')}`);
@@ -217,9 +258,18 @@ export class TransitionService {
           if ((await evaluateFor(env, c.expr, record, ro)) !== true) throw new ValidationError(c.message);
         }
         const header: Record<string, unknown> = {};
-        for (const e of def.effects) {
-          if (e.type === 'sequence') {
+        for (const e of effects) {
+          if (e.type === 'balance') {
+            const lineModel = e.from ? meta.fields.get(e.from)!.comodel! : model;
+            for (const line of await linesOf(e, id)) {
+              const buckets = plan.get(planKey(balances.indexOf(e), id, Number(line.id)));
+              if (!buckets) throw new EngineError('Balance plan is missing for a line; refusing to run the transition');
+              await applyBalance(env, e, buckets, record, line, lineModel);
+            }
+          } else if (e.type === 'sequence') {
             if (e.when && (await evaluateFor(env, e.when, record, ro)) !== true) continue;
+            const current = record[e.field];
+            if (current !== null && current !== undefined && current !== false && current !== '') continue; // already numbered
             const code = await evaluateFor(env, e.code, record, ro);
             if (typeof code !== 'string' || !code) throw new ValidationError('Sequence code must evaluate to text');
             const date = e.date ? await evaluateFor(env, e.date, record, ro) : undefined;
@@ -229,13 +279,15 @@ export class TransitionService {
             const sequenceDate = typeof date === 'string'
               ? date.replace(/T00:00:00\.000Z$/, '')
               : undefined;
-            const companyId = e.company ? await evaluateFor(env, e.company, record, ro) : undefined;
+            const companyId = e.company ? await evaluateFor(env, e.company, record, ro)
+              : meta.fields.get('company_id')?.type === 'many2one' && typeof record.company_id === 'number' ? record.company_id : undefined;
             if (e.company && (typeof companyId !== 'number' || !Number.isSafeInteger(companyId) || companyId < 1)) {
               throw new ValidationError('Sequence company must evaluate to a positive company id');
             }
             const next = await nextFromRecord(env, code, {
               ...(sequenceDate ? { date: sequenceDate } : {}),
               ...(typeof companyId === 'number' ? { companyId } : {}),
+              requireNoGap: true,
             });
             if (next === null) throw new ValidationError(`No sequence '${code}'`);
             header[e.field] = next;

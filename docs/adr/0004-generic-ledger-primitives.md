@@ -88,3 +88,36 @@ same primitives. The ADR 0003 invariants I1–I8 remain the requirements.
 - Everything ADR 0003 listed as out of scope.
 - Tax grouping and repartition, and exchange differences (deferred to v1.1).
 - Lot and serial tracking for inventory.
+
+## Amendment A1: `balance` transition effect (user, 2026-11-27)
+
+Inventory (T37) needs keyed running balances, such as on-hand quantity per product×location, and
+reservation. The existing primitives cannot express either. A1 adds one generic transition effect,
+not a stock module.
+
+```
+{ type: 'balance', from?: <one2many on the record; default the record itself>, target: <model>,
+  entries: [{ key: {field: expr}, deltas: {field: expr}, when?: expr }],
+  into?: {field_on_line: expr},          // write a computed value back onto the line
+  checks?: [{expr, message}] }           // evaluated on each touched balance row after the update
+```
+
+- **Expression scope.**
+  - `line` is the child row, or the record itself when `from` is omitted.
+  - `balance` is the locked target row before the delta; a new row reads as zeros.
+- **Write protection.**
+  - The target needs an `ir.lifecycle` whose delta fields are `engine_fields`, so only the effect can
+    write them, through write tokens.
+  - The key fields need a unique key.
+- **Partial reservation.** Allowed: `delta = [line.qty, balance.quantity - balance.reserved].min()`, with
+  `into` recording the reserved amount on the line.
+- **Negative stock.** It is decided per location. A post-check reads an `allow_negative` flag on the
+  location, which defaults to blocked. This is metadata, not engine code.
+- **Lock order.** Balance rows become step 2b in the global order:
+  1. Parents, then children.
+  2. **(2b)** Balance rows: all keys of the whole run are collected first; missing rows are created
+     with `INSERT … ON CONFLICT DO NOTHING`; then rows are locked by ascending id.
+  3. The `ir_sequence` row.
+  4. Link inserts.
+- **Execution order.** Balance effects run before sequence effects.
+- **Valuation.** AVCO and FIFO are deferred to v1.1.

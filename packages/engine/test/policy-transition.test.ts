@@ -109,7 +109,7 @@ describe('ir.transition records', () => {
     ['unknown field in check', { checks: [{ expr: 'nope > 1', message: 'm' }] }, /unknown field 'nope'/],
     ['set of unknown field', { effects: [{ type: 'set', values: { nope: '1' } }] }, /unknown field 'nope'/],
     ['sequence on a plain field', { effects: [{ type: 'sequence', field: 'ref', code: "'tr.post'" }] }, /transition_only or an engine field/],
-    ['duplicate key', { key: 'post' }, /already exists/],
+    ['duplicate key', { key: 'post' }, /already exists|Duplicate value/],
   ])('refuses %s', async (_l, vals, msg) => {
     await expect(mkT(vals)).rejects.toThrow(msg as RegExp);
     await expect(mkT(vals)).rejects.toBeInstanceOf(ValidationError);
@@ -199,5 +199,22 @@ describe('TransitionService', () => {
     expect((await read(id)).state).toBe('posted');
     const bad = await newMove(alice, {}, false);
     await expect(new ButtonService(alice).execute('tr.move', [bad], { action: 'tr_post_action' })).rejects.toThrow('Entry is not balanced');
+  });
+  it('validates and caps ids', async () => {
+    await expect(post(alice, [0])).rejects.toThrow('positive integers');
+    await expect(post(alice, [1.5])).rejects.toThrow('positive integers');
+    await expect(post(alice, ['1' as unknown as number])).rejects.toThrow('positive integers');
+    await expect(post(alice, Array.from({ length: 1001 }, (_, i) => i + 1))).rejects.toThrow('at most 1000');
+  });
+
+  it('treats a NULL state as the initial state and keeps an existing number', async () => {
+    const id = await newMove(alice);
+    const db = (root as unknown as { db: { query: (q: { text: string; params: unknown[] }) => Promise<unknown> } }).db;
+    await db.query({ text: `UPDATE tr_move SET state = NULL, number = 'KEEP/1' WHERE id = $1`, params: [id] });
+    root.cache.invalidate();
+    await post(alice, [id]);
+    const r = await read(id);
+    expect(r.state).toBe('posted');
+    expect(r.number).toBe('KEEP/1');
   });
 });
