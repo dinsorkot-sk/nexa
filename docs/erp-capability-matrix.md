@@ -1,6 +1,6 @@
 # ERP capability matrix: Sales → invoice → ledger → payment
 
-Date: 2026-11-27. Commit `ea47369` (main). Supersedes the status columns of
+Date: 2026-11-27 (updated through T6). Readiness summary: [erp-readiness-sales-to-ledger.md](./erp-readiness-sales-to-ledger.md). Supersedes the status columns of
 [gap-analysis-odoo.md](./gap-analysis-odoo.md) and [nocode-sales-proof.md](./nocode-sales-proof.md)
 for this vertical; those two files are dated snapshots.
 
@@ -18,6 +18,7 @@ not through the HTTP surface a tenant administrator uses · **Gap** = missing or
 | Accounting proof, real PostgreSQL | `packages/engine`: `npx vitest run -c vitest.pg.config.ts test/pg/accounting-nocode.test.ts` | 9 passed |
 | Policy primitives + concurrency, real PostgreSQL | `packages/engine`: `npx vitest run -c vitest.pg.config.ts test/pg/policy-*.test.ts test/pg/concurrency.test.ts` | 30 passed |
 | T3a + T3b (Thailand) over HTTP, PGlite | `apps/api`: `npx vitest run test/nocode-accounting.test.ts` | 12 passed |
+| T3a + T3b (Thailand) over HTTP, real PostgreSQL | `apps/api`: `pnpm test:pg` | 12 passed |
 | Sales proof over HTTP, PGlite | `apps/api`: `npx vitest run test/nocode-sales.test.ts` | 15 passed, 1 todo (GAP-ACT-1) |
 
 Environment notes: the API suite needs `turbo run build --filter=@nexa/api^...` first (`@nexa/engine`
@@ -74,7 +75,7 @@ default. The repository declares Node 26; these runs used Node 24.
 - The ledger invariants are proven at engine level on both databases, and the untaxed seam Sales
   order → invoice → post → payment → reconcile → invoice status is proven over HTTP only (T3a).
   Thai v1 (VAT 7%, full tax invoice data and numbering, credit/debit notes, WHT on receipts) is proven
-  over HTTP (T3b). Remaining: the HTTP proof on real PostgreSQL (the API suite runs on PGlite), a UI,
+  over HTTP (T3b). The HTTP proof also passes on real PostgreSQL (T6). Remaining: a UI,
   and the excluded Thai items (e-Tax Invoice, P.P.30 / P.N.D. filings, WHT certificates, Thai PDF).
   T3b limits: VAT is posted only for lines taxed with the company VAT tax (other taxes, e.g. 0% export,
   post no tax line); the Thai posting button always adds a VAT item, which is zero when no line is
