@@ -17,6 +17,7 @@ not through the HTTP surface a tenant administrator uses · **Gap** = missing or
 | Accounting proof, PGlite | `packages/engine`: `npx vitest run test/accounting-nocode.test.ts` | 9 passed |
 | Accounting proof, real PostgreSQL | `packages/engine`: `npx vitest run -c vitest.pg.config.ts test/pg/accounting-nocode.test.ts` | 9 passed |
 | Policy primitives + concurrency, real PostgreSQL | `packages/engine`: `npx vitest run -c vitest.pg.config.ts test/pg/policy-*.test.ts test/pg/concurrency.test.ts` | 30 passed |
+| T3a Sales → invoice → ledger → payment over HTTP, PGlite | `apps/api`: `npx vitest run test/nocode-accounting.test.ts` | 6 passed |
 | Sales proof over HTTP, PGlite | `apps/api`: `npx vitest run test/nocode-sales.test.ts` | 15 passed, 1 todo (GAP-ACT-1) |
 
 Environment notes: the API suite needs `turbo run build --filter=@nexa/api^...` first (`@nexa/engine`
@@ -36,19 +37,19 @@ default. The repository declares Node 26; these runs used Node 24.
 | 6 | Line pricing, line tax, order totals | `pricelist_price`, `tax_compute`, stored relational compute | Proven (HTTP) | `nocode-sales.test.ts` quotation test |
 | 7 | Confirm / cancel / mark sent | guarded `ir.button` + `update_record`/`multi` | Proven (HTTP) | `nocode-sales.test.ts` state machine |
 | 8 | Send quotation email, print PDF as one button | — | **Gap** GAP-ACT-1 | `it.todo` at `apps/api/test/nocode-sales.test.ts:646` |
-| 9 | **Sales order → customer invoice** | `create_record` + `lines` from `x_line_ids` | **Gap: not built** | No test links `x_sale_order` to `x_invoice`; the two proofs are separate fixtures |
-| 10 | Invoice tax lines → ledger tax account | `tax_compute` in line mappings | **Gap: not built** | Proof invoice has untaxed `x_item_ids` (account, amount); ADR 0004 v1: one tax row per product row |
-| 11 | Ledger account, move, line models | Studio fields incl. `one2many`, stored monetary compute | Engine-only | `accounting-nocode-fixture.ts` uses `MetadataStore.createModel/addField` |
-| 12 | Unique move number (I4 key) | Studio field `unique` | Available (HTTP), not yet used by the accounting proof | `studio-field-options.test.ts` unique tests. A composite key such as (code, company) is a stored computed `unique` field; its duplicate error can surface on a write to a dependency model, `copy()` needs new key inputs, and an expression that renders empty parts (rather than null) makes such records collide Unique fields are not copied by default; a literal `default` is refused; a constant `defaultExpr` is accepted and would collide (use `sequence_next`) |
-| 13 | Lifecycle lock, post transition, checks | `ir.lifecycle`, `ir.transition` records | Engine-only | Fixture creates them with `env.model(...).create`; generic `model/:model/create` has no `ir.*` filter but no HTTP test covers it |
-| 14 | Company lock dates (hard/soft, ratchet, writeGroups) | Studio fields on `res.company` + `ir.date.lock` | Available (HTTP), not yet used by the accounting proof | `res.company` accepts optional, non-unique, non-computed, non-x2many Studio fields without `checkCompany` or `ondelete: restrict`; mixins and views stay refused. Every internal user can read these fields. Tested in `studio-field-options.test.ts` |
+| 9 | **Sales order → customer invoice** | guarded `multi`: `create_record` with `lines` from `x_line_ids` + `update_record` | Proven (HTTP) | `apps/api/test/nocode-accounting.test.ts` (T3a) |
+| 10 | Invoice tax lines → ledger tax account | `tax_compute` in line mappings | **Gap: not built** (T3b, Thai VAT 7% / WHT) | T3a invoices are untaxed |
+| 11 | Ledger account, move, line models | Studio fields incl. `one2many`, stored monetary compute | Proven (HTTP) | T3a builds them with `POST /api/studio/model` and `/studio/field`; the engine fixture still uses `MetadataStore` |
+| 12 | Unique move number and account code per company (I4 key) | Studio `unique`, stored computed composite key | Proven (HTTP) | T3a: `x_name` unique; `x_key = x_code:company` rejects a duplicate account code. Limits: a duplicate error can surface on a write to a dependency model; `copy()` needs new key inputs; an expression that renders empty parts collides |
+| 13 | Lifecycle lock, post transition, checks | `ir.lifecycle`, `ir.transition` records | Proven (HTTP) | T3a creates them with the generic `model/:model/create` |
+| 14 | Company lock dates (hard/soft, ratchet, writeGroups) | Studio fields on `res.company` + `ir.date.lock` | Proven (HTTP) | T3a lock-date test; field limits in `studio-field-options.test.ts` |
 | 15 | Post invoice (I1 balance, I4 numbering, I5 currency, I6 accounts, I7 company) | `transition` action + button | Proven (engine, both DBs) | suite tests I1/I4/I5, I5/I6/I7, I4/I5/I7 |
 | 16 | Rollback of failed batch incl. sequence | transition atomicity | Proven (engine, both DBs) | suite "a failed create-and-post rolls back…" |
 | 17 | Immutability, reversal (I2) | `ir.lifecycle`, `create_record` + `thenTransition` | Proven (engine, both DBs) | suite I2 tests |
 | 18 | Date locks (I3) | `ir.date.lock` | Proven (engine, both DBs) | suite I3 test |
-| 19 | Payment entry | same `create_record` action on a payment-shaped `x_invoice` | Proven (engine), shape is provisional | `proof.payment` reuses the invoice model with negative amounts; no payment model/journal |
+| 19 | Payment entry | `x_payment` document; guarded `multi` creates bank and receivable items, posts the entry, posts the payment | Proven (HTTP) | T3a payment test. No journals, no payment methods, single currency per payment |
 | 20 | Reconcile / unreconcile (I8) | `ir.match.rule`, `match`/`unmatch` actions | Proven (engine, both DBs) | suite I8 test |
-| 21 | Invoice payment state (paid / partial) back on the invoice | stored relational compute over residuals | **Gap: not built** | No field derives invoice status from line residuals |
+| 21 | Invoice payment state (paid / partial) back on the invoice | non-stored compute over its reconcilable ledger lines' `x_residual_currency` | Proven (HTTP) | T3a: not_paid → partial → paid → not_paid after unreconcile |
 | 22 | Concurrency (parallel post / match / lock edits) | row locks, lock order | Proven per primitive (real PostgreSQL); not on the assembled accounting fixture | `test/pg/policy-transition.test.ts` (two concurrent posts: one number, one skip), `policy-matching.test.ts` (no double consumption, duplicate unmatch), `policy-lifecycle.test.ts` (child writes vs lock transition), `policy-datelock.test.ts` (concurrent ratchet), `concurrency.test.ts` (no_gap sequence) |
 | 23 | End-user UI | — | **Gap** | `apps/web` is a starter page (`app/pages/index.vue`); every proven surface is HTTP or engine |
 
@@ -67,11 +68,9 @@ default. The repository declares Node 26; these runs used Node 24.
 
 ## What this means for the plan
 
-- The ledger invariants are proven at engine level on both databases. The remaining work is the
-  **seam**: Sales order → invoice (with tax lines) → post → payment → invoice status, configured
-  through HTTP surfaces only.
+- The ledger invariants are proven at engine level on both databases, and the untaxed seam Sales
+  order → invoice → post → payment → reconcile → invoice status is proven over HTTP only (T3a).
+  Remaining: Thai VAT and WHT (T3b), the HTTP proof on real PostgreSQL (the API suite runs on PGlite), and a UI.
 - Steps 12 and 14 are now available over HTTP (Studio `unique`; Studio fields on `res.company`,
   user decision 2026-11-27). The accounting proof still has to be rebuilt over HTTP to use them.
-- Steps 9, 10, 21 are configuration work on existing primitives, but need the jurisdiction (T4)
-  to fix tax behaviour.
 - Step 23 means "user-facing" currently means HTTP API; any UI claim needs separate scope.
