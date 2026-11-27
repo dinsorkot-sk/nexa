@@ -120,6 +120,105 @@ describe('Studio field options over HTTP', () => {
     expect(req.status).toBeLessThan(500);
   });
 
+  const client = (r: { status: number }) => r.status >= 400 && r.status < 500;
+
+  it('unique: round-trips, refuses duplicates and allows nulls', async () => {
+    await ok('studio/field', { model: 'x_parent', name: 'x_code', type: 'char', unique: true });
+    const models = (await get('studio/models', admin)).body.models as { name: string; fields: Record<string, unknown>[] }[];
+    expect(models.find((m) => m.name === 'x_parent')!.fields.find((f) => f.name === 'x_code')).toMatchObject({ unique: true });
+    await ok('model/x_parent/create', { values: { x_name: 'u1', x_code: 'A-1' } }, member);
+    const dup = await post('model/x_parent/create', { values: { x_name: 'u2', x_code: 'A-1' } }, member);
+    expect(client(dup), JSON.stringify(dup)).toBe(true);
+    expect(JSON.stringify(dup.body)).toMatch(/[Dd]uplicate/);
+    await ok('model/x_parent/create', { values: { x_name: 'u3' } }, member);
+    await ok('model/x_parent/create', { values: { x_name: 'u4' } }, member);
+  });
+
+  it('unique: a stored computed key acts as a composite unique', async () => {
+    await ok('studio/field', { model: 'x_parent', name: 'x_key', type: 'char', unique: true, store: true, computeExpr: "x_name + ':' + x_note" });
+    await ok('model/x_parent/create', { values: { x_name: 'k', x_note: 'a' } }, member);
+    await ok('model/x_parent/create', { values: { x_name: 'k', x_note: 'b' } }, member);
+    const dup = await post('model/x_parent/create', { values: { x_name: 'k', x_note: 'a' } }, member);
+    expect(client(dup) && JSON.stringify(dup.body)).toMatch(/[Dd]uplicate/);
+  });
+
+  it('unique: refused on fields without a stored comparable column', async () => {
+    const bad = [
+      { name: 'x_u1', type: 'one2many', comodel: 'x_child', inverseName: 'x_parent_id' },
+      { name: 'x_u2', type: 'many2many', comodel: 'res.partner' },
+      { name: 'x_u3', type: 'boolean' },
+      { name: 'x_u4', type: 'char', computeExpr: "'x'" },
+      { name: 'x_u5', type: 'char', translate: true },
+      { name: 'x_u6', type: 'char', unique: 'yes' },
+    ];
+    for (const b of bad) {
+      const r = await field('x_parent', b.name, { unique: true, ...b });
+      expect(client(r), JSON.stringify([b, r])).toBe(true);
+    }
+  });
+
+  it('unique: refuses a literal default or copy, and copy() skips a unique value', async () => {
+    for (const b of [{ name: 'x_ud1', default: 'same' }, { name: 'x_ud2', copy: true }]) {
+      const r = await field('x_parent', b.name, { type: 'char', unique: true, ...b });
+      expect(client(r) && JSON.stringify(r.body), JSON.stringify(b)).toMatch(/is unique, so it cannot/);
+    }
+    const source = ((await ok('model/x_parent/create', { values: { x_name: 'orig', x_code: 'COPY-1' } }, member)).ids as number[])[0]!;
+    // copied as the admin: x_parent also has a writeGroups field, and copy() writes it even when empty
+    // a new name keeps the stored computed key x_key (name:note) distinct from the source
+    const copied = ((await ok('model/x_parent/copy', { id: source, defaults: { x_name: 'orig copy' } })).ids as number[])[0]!;
+    const read = await ok('model/x_parent/read', { ids: [copied], fields: ['x_code'] }, member);
+    expect(((read.records ?? read.result) as Record<string, unknown>[])[0]).toMatchObject({ x_code: null });
+  });
+
+  it('res.company: accepts optional lock-date fields enforced by writeGroups and ratchet', async () => {
+    await ok('studio/field', { model: 'res.company', name: 'x_hard_lock', type: 'date', ratchet: 'up', writeGroups: ['base.group_system'] });
+    const search = await ok('model/res.company/search_read', { fields: ['id'], limit: 1 });
+    const company = ((search.records ?? search.result) as { id: number }[])[0]!.id;
+    await ok('model/res.company/write', { ids: [company], values: { x_hard_lock: '2026-01-31' } });
+    const lower = await post('model/res.company/write', { ids: [company], values: { x_hard_lock: '2026-01-01' } }, admin);
+    expect(client(lower) && JSON.stringify(lower.body)).toMatch(/can only increase/);
+    // only base.group_system can write res.company, so writeGroups is exercised with a group the admin lacks
+    await ok('model/res.groups/create', { values: { name: 'Lock auditors', code: 'x_lock.auditor' } });
+    await ok('studio/field', { model: 'res.company', name: 'x_audit_lock', type: 'date', writeGroups: ['x_lock.auditor'] });
+    const denied = await post('model/res.company/write', { ids: [company], values: { x_audit_lock: '2026-01-31' } }, admin);
+    expect(denied.status).toBe(403);
+    expect(JSON.stringify(denied.body)).toMatch(/read-only for you/);
+    // every internal user still reads companies with the default field list
+    const memberRead = await ok('model/res.company/read', { ids: [company] }, member);
+    expect(String(((memberRead.records ?? memberRead.result) as Record<string, unknown>[])[0]!.x_hard_lock)).toMatch(/^2026-01-31/);
+    // core code and the HTTP API still create companies without knowing the fields
+    await ok('model/res.company/create', { values: { name: 'Studio second company' } });
+    const su = (await app.get(EngineService).tenant(TENANT)).env({ uid: 1 });
+    expect((await su.model('res.company').create({ name: 'Studio third company' })).ids).toHaveLength(1);
+  });
+
+  it('res.company: refuses required, unique, computed, checkCompany, restrict and x2many fields, mixins and views', async () => {
+    const bad = [
+      { name: 'x_c1', type: 'char', required: true, default: 'x' },
+      { name: 'x_c2', type: 'char', unique: true },
+      { name: 'x_c3', type: 'char', computeExpr: "'x'" },
+      { name: 'x_c4', type: 'char', defaultExpr: "'x'" },
+      { name: 'x_c5', type: 'many2many', comodel: 'res.partner' },
+      { name: 'x_c6', type: 'one2many', comodel: 'x_child', inverseName: 'x_parent_id' },
+      { name: 'x_c7', type: 'many2one', comodel: 'res.partner', checkCompany: true },
+      { name: 'x_c8', type: 'many2one', comodel: 'res.partner', ondelete: 'restrict' },
+    ];
+    for (const b of bad) {
+      const r = await field('res.company', b.name, b);
+      expect(client(r) && JSON.stringify(r.body), JSON.stringify(b)).toMatch(/must be optional, non-unique/);
+    }
+    await ok('studio/field', { model: 'res.company', name: 'x_bank_partner_id', type: 'many2one', comodel: 'res.partner', ondelete: 'set null' });
+    const mixin = await post('studio/mixin/attach', { model: 'res.company', mixin: 'mail.thread' }, admin);
+    expect(client(mixin) && JSON.stringify(mixin.body)).toMatch(/cannot modify the model 'res.company'/);
+    const view = await post('studio/view', { model: 'res.company', name: 'x_company_form', type: 'form', arch: { tag: 'form' } }, admin);
+    expect(client(view) && JSON.stringify(view.body)).toMatch(/only be added to custom models/);
+    // the other protected models stay closed to fields
+    for (const model of ['res.users', 'res.groups', 'decimal.precision']) {
+      const r = await field(model, 'x_note', { type: 'char' });
+      expect(client(r) && JSON.stringify(r.body), model).toMatch(/cannot modify the model/);
+    }
+  });
+
   it('rejects invalid option combinations with 4xx', async () => {
     const bad = [
       { name: 'x_b1', type: 'char', ratchet: 'up' },

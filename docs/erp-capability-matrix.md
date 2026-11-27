@@ -39,9 +39,9 @@ default. The repository declares Node 26; these runs used Node 24.
 | 9 | **Sales order → customer invoice** | `create_record` + `lines` from `x_line_ids` | **Gap: not built** | No test links `x_sale_order` to `x_invoice`; the two proofs are separate fixtures |
 | 10 | Invoice tax lines → ledger tax account | `tax_compute` in line mappings | **Gap: not built** | Proof invoice has untaxed `x_item_ids` (account, amount); ADR 0004 v1: one tax row per product row |
 | 11 | Ledger account, move, line models | Studio fields incl. `one2many`, stored monetary compute | Engine-only | `accounting-nocode-fixture.ts` uses `MetadataStore.createModel/addField` |
-| 12 | Unique move number (I4 key) | field `unique` | **Gap (HTTP)** | Studio field schema has no `unique` option (`engine.controller.ts` `studioField`) |
+| 12 | Unique move number (I4 key) | Studio field `unique` | Available (HTTP), not yet used by the accounting proof | `studio-field-options.test.ts` unique tests. A composite key such as (code, company) is a stored computed `unique` field; its duplicate error can surface on a write to a dependency model, `copy()` needs new key inputs, and an expression that renders empty parts (rather than null) makes such records collide Unique fields are not copied by default; a literal `default` is refused; a constant `defaultExpr` is accepted and would collide (use `sequence_next`) |
 | 13 | Lifecycle lock, post transition, checks | `ir.lifecycle`, `ir.transition` records | Engine-only | Fixture creates them with `env.model(...).create`; generic `model/:model/create` has no `ir.*` filter but no HTTP test covers it |
-| 14 | Company lock dates (hard/soft, ratchet, writeGroups) | Studio fields on `res.company` + `ir.date.lock` | **Gap (HTTP)** | `res.company` is in `STUDIO_PROTECTED_MODELS`; fixture bypasses Studio via `MetadataStore.addField` |
+| 14 | Company lock dates (hard/soft, ratchet, writeGroups) | Studio fields on `res.company` + `ir.date.lock` | Available (HTTP), not yet used by the accounting proof | `res.company` accepts optional, non-unique, non-computed, non-x2many Studio fields without `checkCompany` or `ondelete: restrict`; mixins and views stay refused. Every internal user can read these fields. Tested in `studio-field-options.test.ts` |
 | 15 | Post invoice (I1 balance, I4 numbering, I5 currency, I6 accounts, I7 company) | `transition` action + button | Proven (engine, both DBs) | suite tests I1/I4/I5, I5/I6/I7, I4/I5/I7 |
 | 16 | Rollback of failed batch incl. sequence | transition atomicity | Proven (engine, both DBs) | suite "a failed create-and-post rolls back…" |
 | 17 | Immutability, reversal (I2) | `ir.lifecycle`, `create_record` + `thenTransition` | Proven (engine, both DBs) | suite I2 tests |
@@ -63,16 +63,15 @@ default. The repository declares Node 26; these runs used Node 24.
 | GAP-REL-2 | Open. Onchange draft is flat | `packages/engine/src/orm/recordset.ts` `onchange` |
 | GAP-SEARCH-1, GAP-ERR-1 | Open (asserted as probes) | `nocode-sales.test.ts:269-274` |
 | GAP-COMP-1, GAP-O2M-1, GAP-SEQ-1, GAP-PRIM-1, GAP-REL-1, GAP-ACL-1, GAP-RULE-1 | Closed | see the snapshot doc |
-| GAP-STUDIO-1 | Mostly closed (`default`, `readonly`, `ondelete`, `help`, `index` exist); `unique` missing | `engine.controller.ts` `studioField` |
+| GAP-STUDIO-1 | Closed for this vertical (`default`, `readonly`, `ondelete`, `help`, `index`, `unique`) | `engine.controller.ts` `studioField` |
 
 ## What this means for the plan
 
 - The ledger invariants are proven at engine level on both databases. The remaining work is the
   **seam**: Sales order → invoice (with tax lines) → post → payment → invoice status, configured
   through HTTP surfaces only.
-- Two HTTP-surface gaps block an honest "configured over the API" claim for accounting: Studio
-  `unique` (step 12) and lock-date fields on `res.company` (step 14). Both need a decision:
-  extend Studio, or model lock dates on a custom `x_` company-settings record.
+- Steps 12 and 14 are now available over HTTP (Studio `unique`; Studio fields on `res.company`,
+  user decision 2026-11-27). The accounting proof still has to be rebuilt over HTTP to use them.
 - Steps 9, 10, 21 are configuration work on existing primitives, but need the jurisdiction (T4)
   to fix tax behaviour.
 - Step 23 means "user-facing" currently means HTTP API; any UI claim needs separate scope.

@@ -18,3 +18,6 @@ team/review/
 
 ref/*
 apps/api/data/
+
+# Claude Code personal settings
+.claude/settings.local.json
