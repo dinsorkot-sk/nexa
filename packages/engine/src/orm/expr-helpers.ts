@@ -18,6 +18,8 @@ export const DEFAULT_PRECISION_DIGITS = 2;
 
 /** A helper with side effects was called in a read-only evaluation (computed field, preview, guard). */
 export class SideEffectRefusedError extends ValidationError {}
+/** An NX-Expr failed while evaluating (type mismatch, unavailable helper, quota). A configuration or data error, not a server fault. */
+export class ExpressionError extends ValidationError {}
 
 /** Digits of a named decimal.precision, cached in the env family's record cache. */
 export async function precisionDigits(env: Env, name: string): Promise<number> {
@@ -217,5 +219,8 @@ export async function evaluateEnvExpression(env: Env, source: string, scope: Exp
     local.push(name);
     add(name, def);
   }
-  return evaluateExpressionAsync(source, environment, { asyncHelpers, helpers: local });
+  return evaluateExpressionAsync(source, environment, { asyncHelpers, helpers: local }).catch((error: unknown) => {
+    if (error instanceof TypeError || error instanceof RangeError) throw new ExpressionError(`Expression failed: ${error.message}`);
+    throw error;
+  });
 }

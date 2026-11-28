@@ -1,5 +1,5 @@
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
-import { AccessError, SUPERUSER_ID, type TenantHandle } from '@nexa/engine';
+import { AccessError, SUPERUSER_ID, userSecurity, ValidationError, type TenantHandle } from '@nexa/engine';
 import { Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { EngineService } from './engine.service';
 
@@ -49,6 +49,49 @@ export class AuthService {
     const handle = await this.engine.tenant(tenant);
     const uid = await this.findActiveUser(handle, login);
     if (uid === null) throw new AccessError('User was not found or is inactive');
+    await this.storePassword(handle, uid, password);
+  }
+
+  /** A signed-in user replaces their own password. Every session and API key of the user is revoked. */
+  async changePassword(token: AuthenticatedToken, currentPassword: string, newPassword: string, clientKey: string): Promise<void> {
+    if (token.kind !== 'session') throw new UnauthorizedException('A login session is required');
+    const accountKey = 'password:' + token.tenant + ':' + token.uid;
+    this.checkLoginRate('ip:' + clientKey, 30);
+    this.checkLoginRate(accountKey, 5);
+    this.checkPasswordPolicy(newPassword);
+    const handle = await this.engine.tenant(token.tenant);
+    const credential = await this.verifyPassword(handle, token.uid, currentPassword);
+    // 403, not 401: a mistyped current password must not end the caller's session in the client
+    if (!credential) throw new AccessError('Current password is incorrect');
+    await this.storePassword(handle, token.uid, newPassword, credential);
+    this.clearLoginAttempts(accountKey);
+  }
+
+  /**
+   * A Settings administrator sets the initial password of another user, or resets it.
+   * Every session and API key of the target user is revoked.
+   */
+  async setUserPassword(token: AuthenticatedToken, targetUid: number, newPassword: string): Promise<void> {
+    if (token.kind !== 'session') throw new UnauthorizedException('A login session is required');
+    const env = await this.engine.env(token.tenant, token.uid);
+    if (!(await userSecurity(env as Parameters<typeof userSecurity>[0])).groups.has('base.group_system')) {
+      throw new AccessError('Only Settings administrators can set user passwords');
+    }
+    if (targetUid === token.uid) throw new AccessError('Change your own password with your current password');
+    this.checkPasswordPolicy(newPassword);
+    const handle = await this.engine.tenant(token.tenant);
+    if (targetUid <= SUPERUSER_ID) throw new NotFoundException('User was not found or is inactive');
+    const [user] = await handle.driver.query<{ active: boolean }>({ text: 'SELECT active FROM res_users WHERE id = $1', params: [targetUid] });
+    if (!user?.active) throw new NotFoundException('User was not found or is inactive');
+    await this.storePassword(handle, targetUid, newPassword);
+  }
+
+  private async storePassword(
+    handle: TenantHandle,
+    uid: number,
+    password: string,
+    expectedCredential?: { salt: string; passwordHash: string },
+  ): Promise<void> {
     const salt = randomBytes(16);
     const hash = await this.hashPassword(password, salt);
     await this.ensureTables(handle);
@@ -56,6 +99,17 @@ export class AuthService {
       transaction<T>(fn: (tx: typeof handle.driver) => Promise<T>): Promise<T>;
     };
     await transactionalDriver.transaction(async (tx) => {
+      const [user] = await tx.query<{ active: boolean }>({ text: 'SELECT active FROM res_users WHERE id = $1 FOR UPDATE', params: [uid] });
+      if (!user?.active) throw new AccessError('User was not found or is inactive');
+      if (expectedCredential) {
+        const [current] = await tx.query<{ salt: string; password_hash: string }>({
+          text: 'SELECT salt, password_hash FROM nx_auth_password WHERE user_id = $1',
+          params: [uid],
+        });
+        if (!current || current.salt !== expectedCredential.salt || current.password_hash !== expectedCredential.passwordHash) {
+          throw new UnauthorizedException('Credentials changed. Sign in again.');
+        }
+      }
       await tx.query({
         text: 'INSERT INTO nx_auth_password (user_id, salt, password_hash, updated_at) VALUES ($1, $2, $3, now()) ON CONFLICT (user_id) DO UPDATE SET salt = EXCLUDED.salt, password_hash = EXCLUDED.password_hash, updated_at = now()',
         params: [uid, salt.toString('hex'), hash.toString('hex')],
@@ -304,6 +358,13 @@ export class AuthService {
   private validatePassword(password: string): void {
     if (typeof password !== 'string' || password.length < PASSWORD_MIN_LENGTH || password.length > PASSWORD_MAX_LENGTH) {
       throw new UnauthorizedException('Password must be between ' + PASSWORD_MIN_LENGTH + ' and ' + PASSWORD_MAX_LENGTH + ' characters');
+    }
+  }
+
+  /** Password policy for signed-in requests: a 422, so the client keeps its session. */
+  private checkPasswordPolicy(password: string): void {
+    if (password.length < PASSWORD_MIN_LENGTH || password.length > PASSWORD_MAX_LENGTH) {
+      throw new ValidationError('Password must be between ' + PASSWORD_MIN_LENGTH + ' and ' + PASSWORD_MAX_LENGTH + ' characters');
     }
   }
 

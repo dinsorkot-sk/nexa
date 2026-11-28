@@ -25,6 +25,11 @@ const apiKeyRequest = z.object({
   password: z.string().min(1).max(1024),
   expiresInDays: z.number().int().min(1).max(365).optional(),
 });
+const changePasswordRequest = z.strictObject({
+  currentPassword: z.string().min(1).max(1024),
+  newPassword: z.string().min(1).max(1024),
+});
+const setPasswordRequest = z.strictObject({ password: z.string().min(1).max(1024) });
 const revokeKeyRequest = z.object({ id: z.number().int().positive() });
 const pathRecordId = z.string().regex(/^[1-9][0-9]{0,9}$/).transform(Number).pipe(z.number().max(2_147_483_647));
 const reportPdfRequest = z.strictObject({ recordId: z.number().int().positive().max(2_147_483_647) });
@@ -150,6 +155,27 @@ export class EngineController {
       token, req.password, req.name, request.socket.remoteAddress ?? 'unknown', req.expiresInDays,
     );
     return { id: result.id, name: result.name, token: result.token, expiresAt: result.expiresAt };
+  }
+
+  @Post('auth/password')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async changePassword(@CallerParam() caller: Caller, @Body() body: unknown, @Req() request: Request) {
+    const req = changePasswordRequest.parse(body);
+    const token = await this.tokenCaller(caller);
+    await this.auth.changePassword(token, req.currentPassword, req.newPassword, request.socket.remoteAddress ?? 'unknown');
+    return { ok: true };
+  }
+
+  @Post('auth/users/:id/password')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async setUserPassword(@CallerParam() caller: Caller, @Param('id') rawId: string, @Body() body: unknown) {
+    const id = pathRecordId.parse(rawId);
+    const req = setPasswordRequest.parse(body);
+    const token = await this.tokenCaller(caller);
+    await this.auth.setUserPassword(token, id, req.password);
+    return { ok: true };
   }
 
   @Post('auth/api-keys/:id/revoke')

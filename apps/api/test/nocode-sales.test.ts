@@ -271,8 +271,10 @@ describe('T33 no-code Sales app, built over HTTP by an administrator', { timeout
     await ok('studio/model', { name: 'x_probe', description: 'Probe' });
     await studioField('x_probe', 'x_line_count', { type: 'integer', computeExpr: `search('${LINE}', []).count()` });
     const probeId = await create('x_probe', {});
-    // ... and the evaluation failure surfaces as an HTTP 500 (GAP-ERR-1), not a validation error
-    expect((await post('model/x_probe/read', { ids: [probeId], fields: ['x_line_count'] }, tokens.admin!)).status).toBe(500);
+    // ... and the evaluation failure surfaces as a 422 validation error (GAP-ERR-1 closed), not HTTP 500
+    const probeRead = await post('model/x_probe/read', { ids: [probeId], fields: ['x_line_count'] }, tokens.admin!);
+    expect(probeRead.status).toBe(422);
+    expect(JSON.stringify(probeRead.body)).toMatch(/Expression failed/);
 
     const fields = (await ok(`model/${ORDER}/fields_get`, {})).fields as Record<string, Json>;
     expect(Object.keys(fields)).toEqual(expect.arrayContaining(['message_ids', 'activity_ids', 'x_state', 'x_amount_total']));
