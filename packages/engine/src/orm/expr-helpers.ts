@@ -1,4 +1,4 @@
-import { ValidationError, type Env, type FieldDef } from '../contracts/index.js';
+import { EngineError, ValidationError, type Env, type FieldDef } from '../contracts/index.js';
 import {
   evaluateExpressionAsync, isHelperName, reserveHelperName, type AsyncExprHelper, type ExprEnvironment, type ExprValue,
 } from '../expr/index.js';
@@ -20,6 +20,10 @@ export const DEFAULT_PRECISION_DIGITS = 2;
 export class SideEffectRefusedError extends ValidationError {}
 /** An NX-Expr failed while evaluating (type mismatch, unavailable helper, quota). A configuration or data error, not a server fault. */
 export class ExpressionError extends ValidationError {}
+/** Carries a failure raised by helper code (ORM, driver), so it is not mistaken for an expression error. */
+class HelperFault extends Error { constructor(readonly original: unknown) { super('helper fault'); } }
+/** Engine errors from helper code are domain outcomes; anything else is a server fault, kept out of ExpressionError. */
+const helperFault = (error: unknown): unknown => (error instanceof EngineError ? error : new HelperFault(error));
 
 /** Digits of a named decimal.precision, cached in the env family's record cache. */
 export async function precisionDigits(env: Env, name: string): Promise<number> {
@@ -209,8 +213,13 @@ export async function evaluateEnvExpression(env: Env, source: string, scope: Exp
   const add = (name: string, def: ExpressionHelperDef) => {
     if (def.resolve && def.sideEffects && options.readOnly) {
       asyncHelpers[name] = { resolve: () => { throw new SideEffectRefusedError(`Expression helper '${name}' changes data and cannot be used here`); } };
-    } else if (def.resolve) { const resolve = def.resolve; asyncHelpers[name] = { resolve: (args) => resolve(env, args) }; }
-    else if (def.sync) environment[name] = def.sync;
+    } else if (def.resolve) {
+      const resolve = def.resolve;
+      asyncHelpers[name] = { resolve: async (args) => { try { return await resolve(env, args); } catch (error) { throw helperFault(error); } } };
+    } else if (def.sync) {
+      const sync = def.sync;
+      environment[name] = (...args: ExprValue[]) => { try { return sync(...args); } catch (error) { throw helperFault(error); } };
+    }
   };
   for (const [name, def] of registered) if (def.resolve) add(name, def);
   for (const [name, def] of Object.entries(options.helpers ?? {})) {
@@ -220,6 +229,7 @@ export async function evaluateEnvExpression(env: Env, source: string, scope: Exp
     add(name, def);
   }
   return evaluateExpressionAsync(source, environment, { asyncHelpers, helpers: local }).catch((error: unknown) => {
+    if (error instanceof HelperFault) throw error.original;
     if (error instanceof TypeError || error instanceof RangeError) throw new ExpressionError(`Expression failed: ${error.message}`);
     throw error;
   });

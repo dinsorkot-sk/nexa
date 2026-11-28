@@ -71,8 +71,17 @@ export class AuthService {
    * A Settings administrator sets the initial password of another user, or resets it.
    * Every session and API key of the target user is revoked.
    */
-  async setUserPassword(token: AuthenticatedToken, targetUid: number, newPassword: string): Promise<void> {
+  async setUserPassword(
+    token: AuthenticatedToken,
+    adminPassword: string,
+    targetUid: number,
+    newPassword: string,
+    clientKey: string,
+  ): Promise<void> {
     if (token.kind !== 'session') throw new UnauthorizedException('A login session is required');
+    const accountKey = 'password:' + token.tenant + ':' + token.uid;
+    this.checkLoginRate('ip:' + clientKey, 30);
+    this.checkLoginRate(accountKey, 5);
     const env = await this.engine.env(token.tenant, token.uid);
     if (!(await userSecurity(env as Parameters<typeof userSecurity>[0])).groups.has('base.group_system')) {
       throw new AccessError('Only Settings administrators can set user passwords');
@@ -80,6 +89,9 @@ export class AuthService {
     if (targetUid === token.uid) throw new AccessError('Change your own password with your current password');
     this.checkPasswordPolicy(newPassword);
     const handle = await this.engine.tenant(token.tenant);
+    // re-authenticate: a stolen admin session alone must not take over other accounts
+    if (!(await this.verifyPassword(handle, token.uid, adminPassword))) throw new AccessError('Current password is incorrect');
+    this.clearLoginAttempts(accountKey);
     if (targetUid <= SUPERUSER_ID) throw new NotFoundException('User was not found or is inactive');
     const [user] = await handle.driver.query<{ active: boolean }>({ text: 'SELECT active FROM res_users WHERE id = $1', params: [targetUid] });
     if (!user?.active) throw new NotFoundException('User was not found or is inactive');
@@ -273,7 +285,7 @@ export class AuthService {
     };
     await transactionalDriver.transaction(async (tx) => {
       const [user] = await tx.query<{ active: boolean }>({
-        text: 'SELECT active FROM res_users WHERE id = $1',
+        text: 'SELECT active FROM res_users WHERE id = $1 FOR SHARE',
         params: [uid],
       });
       if (!user?.active) throw new UnauthorizedException('User is inactive');
