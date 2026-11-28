@@ -63,10 +63,10 @@ default. The repository declares Node 26; these runs used Node 24.
 |---|---|---|
 | GAP-ACT-1 | Open. `ServerActionType` has no `mail_template` / `report` type | `packages/engine/src/services/actions.ts:17` |
 | GAP-CRON-1 | Open. `apps/api` never calls `SchedulerService.runDue` | `apps/api/src/engine/` |
-| GAP-AUTH-1 | Open. HTTP auth routes are login, logout and API keys only; no set-password / invite | `engine.controller.ts` `auth/*` |
+| GAP-AUTH-1 | Closed (T11): admin set/reset password and self-service change over HTTP; emailed invite still open | `engine.controller.ts` `auth/password`, `auth/users/:id/password`; `test/auth.test.ts` |
 | GAP-MAIL-2 | Open. Template queue is Settings-only | `packages/engine/src/mail/template.ts` `queue` |
 | GAP-REL-2 | Open. Onchange draft is flat | `packages/engine/src/orm/recordset.ts` `onchange` |
-| GAP-SEARCH-1, GAP-ERR-1 | Open (asserted as probes) | `nocode-sales.test.ts:269-274` |
+| GAP-SEARCH-1 (open), GAP-ERR-1 (closed in T11: 422) | Asserted as probes | `nocode-sales.test.ts:269-274` |
 | GAP-COMP-1, GAP-O2M-1, GAP-SEQ-1, GAP-PRIM-1, GAP-REL-1, GAP-ACL-1, GAP-RULE-1 | Closed | see the snapshot doc |
 | GAP-STUDIO-1 | Closed for this vertical (`default`, `readonly`, `ondelete`, `help`, `index`, `unique`) | `engine.controller.ts` `studioField` |
 

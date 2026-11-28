@@ -72,13 +72,15 @@ Gaps, in recommended order:
 1. **UI.** There are no forms or lists for orders, invoices, payments or reconciliation. The UX
    standard (states, validation, accessibility, Thai number, date and currency formatting) applies
    once a UI exists.
-2. **User onboarding (GAP-AUTH-1).** No HTTP endpoint invites a user or sets a password. Tests use
-   the server-side provisioning helper.
+2. **User onboarding (GAP-AUTH-1) — closed in T11.** A Settings administrator sets or resets another
+   user's password with `POST /api/auth/users/:id/password`; a signed-in user changes their own with
+   `POST /api/auth/password` (current password required). Both revoke the user's sessions and API keys.
+   Still missing: an emailed invitation link.
 3. **Scheduled jobs (GAP-CRON-1).** The API runs no scheduler worker.
 4. **One-button email and print (GAP-ACT-1).** No server action type sends a mail template or
    renders a report.
-5. **Error mapping (GAP-ERR-1).** An expression that fails at run time, such as a type error,
-   still returns HTTP 500 instead of 422.
+5. **Error mapping (GAP-ERR-1) — closed in T11.** An expression that fails at run time now raises
+   `ExpressionError` (a `ValidationError`) and returns HTTP 422.
 6. **Pre-existing bugs found during this work, not fixed:**
    - `copy()` by a non-member fails on any model that has a `writeGroups` field.
    - HTTP returns `date` fields as ISO datetimes.

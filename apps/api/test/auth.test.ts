@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { AuthService } from '../src/engine/auth.service';
 import { EngineService } from '../src/engine/engine.service';
@@ -220,5 +220,70 @@ describe('tenant-bound authentication', () => {
       expect((await post('auth/api-keys', { name: 'limited', password: betaPassword }, token)).status).toBe(401);
     }
     expect((await post('auth/api-keys', { name: 'limited', password: alphaPassword }, token)).status).toBe(401);
+  });
+});
+
+describe('user onboarding over HTTP (GAP-AUTH-1)', () => {
+  const onboardPassword = 'onboard-initial-password';
+  const onboardNewPassword = 'onboard-rotated-password';
+  let onboardId: number;
+
+  beforeAll(async () => {
+    const alpha = (await engine.tenant('alpha')).env({ uid: 1 });
+    const [companyId] = (await alpha.model('res.company').search([['name', '=', 'Alpha company']])).ids;
+    const [groupId] = (await alpha.model('res.groups').search([['code', '=', 'base.group_user']])).ids;
+    [onboardId] = (await alpha.model('res.users').create({
+      name: 'Onboarded user', login: 'onboard', company_id: companyId, group_ids: [groupId],
+    })).ids;
+    // earlier cases rotate these credentials; start from known ones
+    await auth.provisionPassword('alpha', 'admin', alphaPassword);
+    await auth.provisionPassword('alpha', 'member', userPassword);
+    await auth.provisionPassword('beta', 'admin', betaPassword);
+  });
+  // every case signs in several times; start each from a clean per-IP login budget
+  beforeEach(() => { (auth as unknown as { loginAttempts: Map<string, unknown> }).loginAttempts.clear(); });
+
+  it('lets only a Settings administrator set another active user password', async () => {
+    const admin = await session('alpha', 'admin', alphaPassword);
+    const member = await session('alpha', 'member', userPassword);
+    expect(await login('alpha', 'onboard', onboardPassword)).toMatchObject({ status: 401 });
+
+    expect(await post(`auth/users/${onboardId}/password`, { currentPassword: userPassword, password: onboardPassword }, member)).toMatchObject({ status: 403 });
+    expect(await post(`auth/users/${onboardId}/password`, { password: onboardPassword })).toMatchObject({ status: 401 });
+    expect(await post(`auth/users/${alphaAdmin}/password`, { currentPassword: alphaPassword, password: onboardPassword }, admin)).toMatchObject({ status: 403 });
+    expect(await post('auth/users/1/password', { currentPassword: alphaPassword, password: onboardPassword }, admin)).toMatchObject({ status: 404 });
+    expect(await post('auth/users/999999/password', { currentPassword: alphaPassword, password: onboardPassword }, admin)).toMatchObject({ status: 404 });
+    // the administrator must re-enter their own password
+    expect(await post(`auth/users/${onboardId}/password`, { currentPassword: 'wrong-admin-password', password: onboardPassword }, admin))
+      .toMatchObject({ status: 403 });
+    // a weak password is a 422 and the administrator stays signed in
+    expect(await post(`auth/users/${onboardId}/password`, { currentPassword: alphaPassword, password: 'short' }, admin)).toMatchObject({ status: 422 });
+
+    expect(await post(`auth/users/${onboardId}/password`, { currentPassword: alphaPassword, password: onboardPassword }, admin)).toMatchObject({ status: 200 });
+    const onboardSession = await session('alpha', 'onboard', onboardPassword);
+
+    // a reset revokes the user's existing sessions
+    expect(await post(`auth/users/${onboardId}/password`, { currentPassword: alphaPassword, password: onboardPassword + '-reset' }, admin)).toMatchObject({ status: 200 });
+    expect(await post('auth/logout', undefined, onboardSession)).toMatchObject({ status: 401 });
+    expect(await post(`auth/users/${onboardId}/password`, { currentPassword: alphaPassword, password: onboardPassword }, admin)).toMatchObject({ status: 200 });
+  });
+
+  it('refuses a user in another tenant', async () => {
+    const beta = await session('beta', 'admin', betaPassword);
+    expect(await post(`auth/users/${onboardId}/password`, { currentPassword: betaPassword, password: onboardPassword }, beta)).toMatchObject({ status: 404 });
+    expect(await login('alpha', 'onboard', onboardPassword)).toMatchObject({ status: 200 });
+  });
+
+  it('lets a signed-in user change their own password with the current one', async () => {
+    const current = await session('alpha', 'onboard', onboardPassword);
+    expect(await post('auth/password', { currentPassword: 'wrong-password-value', newPassword: onboardNewPassword }, current))
+      .toMatchObject({ status: 403 });
+    expect(await post('auth/password', { currentPassword: onboardPassword, newPassword: 'short' }, current))
+      .toMatchObject({ status: 422 });
+    expect(await post('auth/password', { currentPassword: onboardPassword, newPassword: onboardNewPassword }, current))
+      .toMatchObject({ status: 200 });
+    expect(await post('auth/logout', undefined, current)).toMatchObject({ status: 401 });
+    expect(await login('alpha', 'onboard', onboardPassword)).toMatchObject({ status: 401 });
+    await session('alpha', 'onboard', onboardNewPassword);
   });
 });

@@ -49,7 +49,7 @@ export * from './report/index.js';
 export * from './uom/index.js';
 export * from './product/index.js';
 export * from './account-core/index.js';
-export { evaluateEnvExpression, registerExpressionHelper, precisionDigits, fieldDigits, type ExpressionHelperDef, type EvaluateOptions } from './orm/expr-helpers.js';
+export { ExpressionError, evaluateEnvExpression, registerExpressionHelper, precisionDigits, fieldDigits, type ExpressionHelperDef, type EvaluateOptions } from './orm/expr-helpers.js';
 export { localClock } from './orm/clock.js';
 export * from './bus/index.js';
 export { PgDriver, type PgDriverOptions } from './driver/pg.js';
