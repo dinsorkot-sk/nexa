@@ -43,6 +43,7 @@ export {
   type Cell, type ExportOptions, type ExportResult, type ImportError, type ImportOptions, type ImportResult, type ExportTemplate,
 } from './services/data-transfer.js';
 export { SavedFilterService, type SavedFilterInput, type SavedFilter } from './services/filters.js';
+export { ExternalIdService, type ExternalIdRow } from './services/external-ids.js';
 export * from './mail/index.js';
 export * from './report/index.js';
 export * from './uom/index.js';

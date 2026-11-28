@@ -5,7 +5,10 @@ export default defineNuxtConfig({
   app: {
     head: {
       htmlAttrs: { lang: 'en' },
-      title: 'Nexa Starter',
+      title: 'Nexa Studio',
     },
+  },
+  runtimeConfig: {
+    apiBase: 'http://127.0.0.1:3001/api',
   },
 })

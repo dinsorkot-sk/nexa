@@ -1,3 +1,4 @@
+import { PacksService } from './packs.service';
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { EngineController } from './engine.controller';
@@ -12,7 +13,7 @@ import { SmtpMailService } from './smtp-mail.service';
 
 @Module({
   controllers: [EngineController, DataTransferController, PortalController, BusController],
-  providers: [EngineService, AuthService, ReportPdfService, SmtpMailService, { provide: APP_FILTER, useClass: EngineErrorFilter }],
+  providers: [EngineService, AuthService, ReportPdfService, SmtpMailService, PacksService, { provide: APP_FILTER, useClass: EngineErrorFilter }],
   exports: [EngineService],
 })
 export class EngineModule {}

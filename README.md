@@ -117,9 +117,9 @@ Expression constraint ใช้ได้กับฟิลด์ scalar ที�
 | `packages/engine` | ORM, domain, security, module system และ UI metadata ของ ERP (ทำงานบน PGlite) |
 | `packages/core` | กติกาธุรกิจและ use cases พร้อม interface ของ dependency ที่ use case ต้องใช้ |
 | `packages/shared` | Types, validation schemas และ API contracts ที่ใช้ข้ามแอป |
-| `packages/ui` | Nuxt layer สำหรับธีมและ wrappers กลาง `NexaForm`, `NexaTable` และ `NexaDialog` |
+| `packages/ui` | Nuxt layer สำหรับการตั้งค่าธีมและ Nuxt UI |
 
-เริ่มเพิ่มกติกาธุรกิจใน `core` แล้วให้ Nest ประกอบ implementation ที่ต้องติดต่อฐานข้อมูล ใช้หน้าแรกของเว็บเป็นตัวอย่างการใช้ wrapper ทั้งสาม และใช้ไฟล์ layer สำหรับกำหนดธีมเริ่มต้นของโปรเจกต์
+เริ่มเพิ่มกติกาธุรกิจใน `core` แล้วให้ Nest ประกอบ implementation ที่ต้องติดต่อฐานข้อมูล หน้าเว็บใช้ Nuxt UI components โดยตรง และใช้ไฟล์ layer สำหรับกำหนดธีมเริ่มต้นของโปรเจกต์
 
 ## ตรวจงาน
 

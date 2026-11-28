@@ -1,0 +1,2710 @@
+{
+ "name": "th_accounting",
+ "version": "1.0.0",
+ "title": "Thailand accounting starter (VAT 7%, tax invoices, credit/debit notes, WHT)",
+ "description": "Sales order to tax invoice, ledger, payment and reconciliation for one Thai company, built on generic primitives. Not a statutory-compliance claim: no e-Tax Invoice, P.P.30 / P.N.D. filings, WHT certificates or Thai PDF layout.",
+ "modules": [
+  "base",
+  "uom",
+  "product",
+  "account_core"
+ ],
+ "params": {
+  "company": {
+   "model": "res.company",
+   "label": "Company to set up (its currency should be THB)"
+  }
+ },
+ "requires": {
+  "currency": "THB"
+ },
+ "steps": [
+  {
+   "model": {
+    "name": "x_ledger_account",
+    "description": "Ledger accounts"
+   }
+  },
+  {
+   "record": {
+    "id": "access_x_ledger_account",
+    "model": "ir.model.access",
+    "values": {
+     "name": "x_ledger_account users",
+     "model_name": "x_ledger_account",
+     "group_id": {
+      "$search": {
+       "model": "res.groups",
+       "domain": [
+        [
+         "code",
+         "=",
+         "base.group_user"
+        ]
+       ]
+      }
+     },
+     "perm_read": true,
+     "perm_write": true,
+     "perm_create": true,
+     "perm_unlink": true
+    }
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_account",
+    "name": "x_code",
+    "type": "char",
+    "required": true,
+    "label": "Code"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_account",
+    "name": "x_name",
+    "type": "char",
+    "label": "Name"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_account",
+    "name": "x_company_id",
+    "type": "many2one",
+    "comodel": "res.company",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_account",
+    "name": "x_key",
+    "type": "char",
+    "unique": true,
+    "store": true,
+    "computeExpr": "x_code + ':' + x_company_id"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_account",
+    "name": "x_active",
+    "type": "boolean",
+    "default": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_account",
+    "name": "x_deprecated",
+    "type": "boolean",
+    "default": false
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_account",
+    "name": "x_reconcile",
+    "type": "boolean",
+    "default": false
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_account",
+    "name": "x_partner_required",
+    "type": "boolean",
+    "default": false
+   }
+  },
+  {
+   "field": {
+    "model": "res.partner",
+    "name": "x_receivable_id",
+    "type": "many2one",
+    "comodel": "x_ledger_account",
+    "ondelete": "restrict",
+    "label": "Receivable account"
+   }
+  },
+  {
+   "field": {
+    "model": "res.company",
+    "name": "x_vat",
+    "type": "char",
+    "label": "Tax ID"
+   }
+  },
+  {
+   "field": {
+    "model": "res.company",
+    "name": "x_branch",
+    "type": "char",
+    "label": "Branch (00000 = head office)"
+   }
+  },
+  {
+   "field": {
+    "model": "res.partner",
+    "name": "x_vat",
+    "type": "char",
+    "label": "Tax ID"
+   }
+  },
+  {
+   "field": {
+    "model": "res.partner",
+    "name": "x_branch",
+    "type": "char",
+    "label": "Branch (00000 = head office)"
+   }
+  },
+  {
+   "field": {
+    "model": "res.company",
+    "name": "x_hard_lock",
+    "type": "date",
+    "ratchet": "up",
+    "writeGroups": [
+     "base.group_system"
+    ],
+    "label": "Hard lock date"
+   }
+  },
+  {
+   "field": {
+    "model": "res.company",
+    "name": "x_soft_lock",
+    "type": "date",
+    "ratchet": "up",
+    "writeGroups": [
+     "base.group_system"
+    ],
+    "label": "Soft lock date"
+   }
+  },
+  {
+   "field": {
+    "model": "res.company",
+    "name": "x_vat_tax_id",
+    "type": "many2one",
+    "comodel": "account.tax",
+    "ondelete": "set null",
+    "label": "Output VAT tax"
+   }
+  },
+  {
+   "field": {
+    "model": "res.company",
+    "name": "x_output_vat_account_id",
+    "type": "many2one",
+    "comodel": "x_ledger_account",
+    "ondelete": "set null",
+    "label": "Output VAT account"
+   }
+  },
+  {
+   "field": {
+    "model": "res.company",
+    "name": "x_wht_account_id",
+    "type": "many2one",
+    "comodel": "x_ledger_account",
+    "ondelete": "set null",
+    "label": "Withholding tax receivable account"
+   }
+  },
+  {
+   "model": {
+    "name": "x_sale_order",
+    "description": "Sales orders"
+   }
+  },
+  {
+   "record": {
+    "id": "access_x_sale_order",
+    "model": "ir.model.access",
+    "values": {
+     "name": "x_sale_order users",
+     "model_name": "x_sale_order",
+     "group_id": {
+      "$search": {
+       "model": "res.groups",
+       "domain": [
+        [
+         "code",
+         "=",
+         "base.group_user"
+        ]
+       ]
+      }
+     },
+     "perm_read": true,
+     "perm_write": true,
+     "perm_create": true,
+     "perm_unlink": true
+    }
+   }
+  },
+  {
+   "field": {
+    "model": "x_sale_order",
+    "name": "x_company_id",
+    "type": "many2one",
+    "comodel": "res.company",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_sale_order",
+    "name": "x_currency_id",
+    "type": "many2one",
+    "comodel": "res.currency",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_sale_order",
+    "name": "x_company_currency_id",
+    "type": "many2one",
+    "comodel": "res.currency",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_sale_order",
+    "name": "x_partner_id",
+    "type": "many2one",
+    "comodel": "res.partner",
+    "ondelete": "restrict"
+   }
+  },
+  {
+   "field": {
+    "model": "x_sale_order",
+    "name": "x_date",
+    "type": "date",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_sale_order",
+    "name": "x_state",
+    "type": "selection",
+    "selection": [
+     [
+      "draft",
+      "Quotation"
+     ],
+     [
+      "sale",
+      "Sales order"
+     ],
+     [
+      "invoiced",
+      "Invoiced"
+     ]
+    ],
+    "default": "draft",
+    "required": true
+   }
+  },
+  {
+   "model": {
+    "name": "x_sale_order_line",
+    "description": "Sales order lines"
+   }
+  },
+  {
+   "record": {
+    "id": "access_x_sale_order_line",
+    "model": "ir.model.access",
+    "values": {
+     "name": "x_sale_order_line users",
+     "model_name": "x_sale_order_line",
+     "group_id": {
+      "$search": {
+       "model": "res.groups",
+       "domain": [
+        [
+         "code",
+         "=",
+         "base.group_user"
+        ]
+       ]
+      }
+     },
+     "perm_read": true,
+     "perm_write": true,
+     "perm_create": true,
+     "perm_unlink": true
+    }
+   }
+  },
+  {
+   "field": {
+    "model": "x_sale_order_line",
+    "name": "x_order_id",
+    "type": "many2one",
+    "comodel": "x_sale_order",
+    "required": true,
+    "ondelete": "cascade"
+   }
+  },
+  {
+   "field": {
+    "model": "x_sale_order_line",
+    "name": "x_name",
+    "type": "char",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_sale_order_line",
+    "name": "x_account_id",
+    "type": "many2one",
+    "comodel": "x_ledger_account",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_sale_order_line",
+    "name": "x_qty",
+    "type": "float",
+    "default": 1
+   }
+  },
+  {
+   "field": {
+    "model": "x_sale_order_line",
+    "name": "x_price_unit",
+    "type": "float",
+    "default": 0
+   }
+  },
+  {
+   "field": {
+    "model": "x_sale_order_line",
+    "name": "x_subtotal",
+    "type": "float",
+    "store": true,
+    "computeExpr": "round(x_qty * x_price_unit, 2)"
+   }
+  },
+  {
+   "field": {
+    "model": "x_sale_order_line",
+    "name": "x_tax_id",
+    "type": "many2one",
+    "comodel": "account.tax",
+    "ondelete": "restrict"
+   }
+  },
+  {
+   "field": {
+    "model": "x_sale_order",
+    "name": "x_line_ids",
+    "type": "one2many",
+    "comodel": "x_sale_order_line",
+    "inverseName": "x_order_id"
+   }
+  },
+  {
+   "field": {
+    "model": "x_sale_order",
+    "name": "x_amount_total",
+    "type": "float",
+    "store": true,
+    "computeExpr": "x_line_ids.sum('x_subtotal')"
+   }
+  },
+  {
+   "model": {
+    "name": "x_ledger_full",
+    "description": "Full reconciliations"
+   }
+  },
+  {
+   "record": {
+    "id": "access_x_ledger_full",
+    "model": "ir.model.access",
+    "values": {
+     "name": "x_ledger_full users",
+     "model_name": "x_ledger_full",
+     "group_id": {
+      "$search": {
+       "model": "res.groups",
+       "domain": [
+        [
+         "code",
+         "=",
+         "base.group_user"
+        ]
+       ]
+      }
+     },
+     "perm_read": true,
+     "perm_write": true,
+     "perm_create": true,
+     "perm_unlink": true
+    }
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_full",
+    "name": "x_state",
+    "type": "selection",
+    "selection": [
+     [
+      "locked",
+      "Locked"
+     ]
+    ],
+    "default": "locked",
+    "required": true
+   }
+  },
+  {
+   "model": {
+    "name": "x_invoice",
+    "description": "Tax invoices and notes"
+   }
+  },
+  {
+   "record": {
+    "id": "access_x_invoice",
+    "model": "ir.model.access",
+    "values": {
+     "name": "x_invoice users",
+     "model_name": "x_invoice",
+     "group_id": {
+      "$search": {
+       "model": "res.groups",
+       "domain": [
+        [
+         "code",
+         "=",
+         "base.group_user"
+        ]
+       ]
+      }
+     },
+     "perm_read": true,
+     "perm_write": true,
+     "perm_create": true,
+     "perm_unlink": true
+    }
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_company_id",
+    "type": "many2one",
+    "comodel": "res.company",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_currency_id",
+    "type": "many2one",
+    "comodel": "res.currency",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_company_currency_id",
+    "type": "many2one",
+    "comodel": "res.currency",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_partner_id",
+    "type": "many2one",
+    "comodel": "res.partner",
+    "ondelete": "restrict"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_date",
+    "type": "date",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_state",
+    "type": "selection",
+    "selection": [
+     [
+      "draft",
+      "Draft"
+     ],
+     [
+      "posted",
+      "Posted"
+     ]
+    ],
+    "default": "draft",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_type",
+    "type": "selection",
+    "selection": [
+     [
+      "invoice",
+      "Tax invoice"
+     ],
+     [
+      "refund",
+      "Credit note"
+     ],
+     [
+      "debit",
+      "Debit note"
+     ]
+    ],
+    "default": "invoice",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_name",
+    "type": "char",
+    "unique": true,
+    "label": "Number"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_order_id",
+    "type": "many2one",
+    "comodel": "x_sale_order",
+    "ondelete": "restrict"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_origin_id",
+    "type": "many2one",
+    "comodel": "x_invoice",
+    "ondelete": "restrict",
+    "label": "Original invoice"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_reason",
+    "type": "char"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_receivable_id",
+    "type": "many2one",
+    "comodel": "x_ledger_account",
+    "required": true,
+    "checkCompany": true
+   }
+  },
+  {
+   "model": {
+    "name": "x_invoice_item",
+    "description": "Invoice items"
+   }
+  },
+  {
+   "record": {
+    "id": "access_x_invoice_item",
+    "model": "ir.model.access",
+    "values": {
+     "name": "x_invoice_item users",
+     "model_name": "x_invoice_item",
+     "group_id": {
+      "$search": {
+       "model": "res.groups",
+       "domain": [
+        [
+         "code",
+         "=",
+         "base.group_user"
+        ]
+       ]
+      }
+     },
+     "perm_read": true,
+     "perm_write": true,
+     "perm_create": true,
+     "perm_unlink": true
+    }
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice_item",
+    "name": "x_invoice_id",
+    "type": "many2one",
+    "comodel": "x_invoice",
+    "required": true,
+    "ondelete": "cascade"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice_item",
+    "name": "x_name",
+    "type": "char"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice_item",
+    "name": "x_account_id",
+    "type": "many2one",
+    "comodel": "x_ledger_account",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice_item",
+    "name": "x_amount",
+    "type": "float",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice_item",
+    "name": "x_tax_id",
+    "type": "many2one",
+    "comodel": "account.tax",
+    "ondelete": "restrict"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice_item",
+    "name": "x_role",
+    "type": "selection",
+    "selection": [
+     [
+      "base",
+      "Base"
+     ],
+     [
+      "tax",
+      "Tax"
+     ],
+     [
+      "receivable",
+      "Receivable"
+     ]
+    ],
+    "default": "base",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice_item",
+    "name": "x_is_base",
+    "type": "boolean",
+    "store": true,
+    "computeExpr": "x_role == 'base'"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice_item",
+    "name": "x_is_tax",
+    "type": "boolean",
+    "store": true,
+    "computeExpr": "x_role == 'tax'"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice_item",
+    "name": "x_vat_taxed",
+    "type": "boolean",
+    "computeExpr": "x_tax_id != null && x_tax_id == x_invoice_id.x_company_id.x_vat_tax_id"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_item_ids",
+    "type": "one2many",
+    "comodel": "x_invoice_item",
+    "inverseName": "x_invoice_id"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_amount_untaxed",
+    "type": "float",
+    "store": true,
+    "computeExpr": "-x_item_ids.filtered('x_is_base').sum('x_amount')"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_amount_tax",
+    "type": "float",
+    "store": true,
+    "computeExpr": "-x_item_ids.filtered('x_is_tax').sum('x_amount')"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_amount_total",
+    "type": "float",
+    "store": true,
+    "computeExpr": "x_amount_untaxed + x_amount_tax"
+   }
+  },
+  {
+   "model": {
+    "name": "x_ledger_move",
+    "description": "Journal entries"
+   }
+  },
+  {
+   "record": {
+    "id": "access_x_ledger_move",
+    "model": "ir.model.access",
+    "values": {
+     "name": "x_ledger_move users",
+     "model_name": "x_ledger_move",
+     "group_id": {
+      "$search": {
+       "model": "res.groups",
+       "domain": [
+        [
+         "code",
+         "=",
+         "base.group_user"
+        ]
+       ]
+      }
+     },
+     "perm_read": true,
+     "perm_write": true,
+     "perm_create": true,
+     "perm_unlink": true
+    }
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_move",
+    "name": "x_company_id",
+    "type": "many2one",
+    "comodel": "res.company",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_move",
+    "name": "x_currency_id",
+    "type": "many2one",
+    "comodel": "res.currency",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_move",
+    "name": "x_company_currency_id",
+    "type": "many2one",
+    "comodel": "res.currency",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_move",
+    "name": "x_partner_id",
+    "type": "many2one",
+    "comodel": "res.partner",
+    "ondelete": "restrict"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_move",
+    "name": "x_date",
+    "type": "date",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_move",
+    "name": "x_name",
+    "type": "char",
+    "unique": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_move",
+    "name": "x_ref",
+    "type": "char"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_move",
+    "name": "x_state",
+    "type": "selection",
+    "selection": [
+     [
+      "draft",
+      "Draft"
+     ],
+     [
+      "posted",
+      "Posted"
+     ]
+    ],
+    "default": "draft",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_move",
+    "name": "x_invoice_id",
+    "type": "many2one",
+    "comodel": "x_invoice",
+    "ondelete": "restrict"
+   }
+  },
+  {
+   "model": {
+    "name": "x_ledger_line",
+    "description": "Journal items"
+   }
+  },
+  {
+   "record": {
+    "id": "access_x_ledger_line",
+    "model": "ir.model.access",
+    "values": {
+     "name": "x_ledger_line users",
+     "model_name": "x_ledger_line",
+     "group_id": {
+      "$search": {
+       "model": "res.groups",
+       "domain": [
+        [
+         "code",
+         "=",
+         "base.group_user"
+        ]
+       ]
+      }
+     },
+     "perm_read": true,
+     "perm_write": true,
+     "perm_create": true,
+     "perm_unlink": true
+    }
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_state",
+    "type": "selection",
+    "selection": [
+     [
+      "draft",
+      "Draft"
+     ],
+     [
+      "posted",
+      "Posted"
+     ]
+    ],
+    "default": "draft",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_move_id",
+    "type": "many2one",
+    "comodel": "x_ledger_move",
+    "required": true,
+    "ondelete": "cascade"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_account_id",
+    "type": "many2one",
+    "comodel": "x_ledger_account",
+    "required": true,
+    "ondelete": "restrict",
+    "checkCompany": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_invoice_id",
+    "type": "many2one",
+    "comodel": "x_invoice",
+    "ondelete": "restrict"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_partner_id",
+    "type": "many2one",
+    "comodel": "res.partner",
+    "ondelete": "restrict"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_company_id",
+    "type": "many2one",
+    "comodel": "res.company",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_currency_id",
+    "type": "many2one",
+    "comodel": "res.currency",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_company_currency_id",
+    "type": "many2one",
+    "comodel": "res.currency",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_debit",
+    "type": "monetary",
+    "currencyField": "x_company_currency_id",
+    "default": 0
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_credit",
+    "type": "monetary",
+    "currencyField": "x_company_currency_id",
+    "default": 0
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_amount_currency",
+    "type": "monetary",
+    "currencyField": "x_currency_id"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_balance",
+    "type": "monetary",
+    "store": true,
+    "computeExpr": "float_round(x_debit - x_credit, 0.01)"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_match_amount",
+    "type": "monetary",
+    "currencyField": "x_company_currency_id"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_residual",
+    "type": "float"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_residual_currency",
+    "type": "float"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_reconcilable",
+    "type": "boolean",
+    "store": true,
+    "computeExpr": "x_account_id.x_reconcile"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_full_id",
+    "type": "many2one",
+    "comodel": "x_ledger_full",
+    "ondelete": "restrict"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_account_ok",
+    "type": "boolean",
+    "computeExpr": "x_account_id.x_active && !x_account_id.x_deprecated && (!x_account_id.x_partner_required || x_partner_id != null)"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_company_ok",
+    "type": "boolean",
+    "computeExpr": "x_account_id.x_company_id == x_company_id && x_move_id.x_company_id == x_company_id"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_line",
+    "name": "x_currency_ok",
+    "type": "boolean",
+    "computeExpr": "x_currency_id == x_move_id.x_currency_id && float_compare(x_balance, currency_convert(x_amount_currency, x_currency_id, x_company_currency_id, x_move_id.x_date, x_company_id), 0.01) == 0 && x_debit >= 0 && x_credit >= 0 && (x_debit == 0 || x_credit == 0)"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_move",
+    "name": "x_line_ids",
+    "type": "one2many",
+    "comodel": "x_ledger_line",
+    "inverseName": "x_move_id"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_move",
+    "name": "x_total",
+    "type": "monetary",
+    "store": true,
+    "computeExpr": "float_round(x_line_ids.sum('x_debit'), 0.01)"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_full",
+    "name": "x_line_ids",
+    "type": "one2many",
+    "comodel": "x_ledger_line",
+    "inverseName": "x_full_id"
+   }
+  },
+  {
+   "model": {
+    "name": "x_ledger_link",
+    "description": "Partial reconciliations"
+   }
+  },
+  {
+   "record": {
+    "id": "access_x_ledger_link",
+    "model": "ir.model.access",
+    "values": {
+     "name": "x_ledger_link users",
+     "model_name": "x_ledger_link",
+     "group_id": {
+      "$search": {
+       "model": "res.groups",
+       "domain": [
+        [
+         "code",
+         "=",
+         "base.group_user"
+        ]
+       ]
+      }
+     },
+     "perm_read": true,
+     "perm_write": true,
+     "perm_create": true,
+     "perm_unlink": true
+    }
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_link",
+    "name": "x_state",
+    "type": "selection",
+    "selection": [
+     [
+      "locked",
+      "Locked"
+     ]
+    ],
+    "default": "locked",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_link",
+    "name": "x_positive_id",
+    "type": "many2one",
+    "comodel": "x_ledger_line",
+    "required": true,
+    "ondelete": "restrict"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_link",
+    "name": "x_negative_id",
+    "type": "many2one",
+    "comodel": "x_ledger_line",
+    "required": true,
+    "ondelete": "restrict"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_link",
+    "name": "x_amount",
+    "type": "float"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_link",
+    "name": "x_positive_currency",
+    "type": "float"
+   }
+  },
+  {
+   "field": {
+    "model": "x_ledger_link",
+    "name": "x_negative_currency",
+    "type": "float"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_line_ids",
+    "type": "one2many",
+    "comodel": "x_ledger_line",
+    "inverseName": "x_invoice_id"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_residual",
+    "type": "float",
+    "computeExpr": "x_line_ids.filtered('x_reconcilable').sum('x_residual_currency')"
+   }
+  },
+  {
+   "field": {
+    "model": "x_invoice",
+    "name": "x_payment_state",
+    "type": "char",
+    "computeExpr": "x_state != 'posted' ? 'not_paid' : (float_is_zero(x_residual, 0.01) ? 'paid' : (float_compare(abs(x_residual), abs(x_amount_total), 0.01) < 0 ? 'partial' : 'not_paid'))"
+   }
+  },
+  {
+   "model": {
+    "name": "x_payment",
+    "description": "Customer payments"
+   }
+  },
+  {
+   "record": {
+    "id": "access_x_payment",
+    "model": "ir.model.access",
+    "values": {
+     "name": "x_payment users",
+     "model_name": "x_payment",
+     "group_id": {
+      "$search": {
+       "model": "res.groups",
+       "domain": [
+        [
+         "code",
+         "=",
+         "base.group_user"
+        ]
+       ]
+      }
+     },
+     "perm_read": true,
+     "perm_write": true,
+     "perm_create": true,
+     "perm_unlink": true
+    }
+   }
+  },
+  {
+   "field": {
+    "model": "x_payment",
+    "name": "x_company_id",
+    "type": "many2one",
+    "comodel": "res.company",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_payment",
+    "name": "x_currency_id",
+    "type": "many2one",
+    "comodel": "res.currency",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_payment",
+    "name": "x_company_currency_id",
+    "type": "many2one",
+    "comodel": "res.currency",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_payment",
+    "name": "x_partner_id",
+    "type": "many2one",
+    "comodel": "res.partner",
+    "ondelete": "restrict"
+   }
+  },
+  {
+   "field": {
+    "model": "x_payment",
+    "name": "x_date",
+    "type": "date",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_payment",
+    "name": "x_state",
+    "type": "selection",
+    "selection": [
+     [
+      "draft",
+      "Draft"
+     ],
+     [
+      "posted",
+      "Posted"
+     ]
+    ],
+    "default": "draft",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_payment",
+    "name": "x_amount",
+    "type": "float",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_payment",
+    "name": "x_wht_amount",
+    "type": "float",
+    "default": 0,
+    "label": "Withholding tax"
+   }
+  },
+  {
+   "field": {
+    "model": "x_payment",
+    "name": "x_bank_account_id",
+    "type": "many2one",
+    "comodel": "x_ledger_account",
+    "required": true,
+    "checkCompany": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_payment",
+    "name": "x_receivable_id",
+    "type": "many2one",
+    "comodel": "x_ledger_account",
+    "required": true,
+    "checkCompany": true
+   }
+  },
+  {
+   "model": {
+    "name": "x_payment_item",
+    "description": "Payment items"
+   }
+  },
+  {
+   "record": {
+    "id": "access_x_payment_item",
+    "model": "ir.model.access",
+    "values": {
+     "name": "x_payment_item users",
+     "model_name": "x_payment_item",
+     "group_id": {
+      "$search": {
+       "model": "res.groups",
+       "domain": [
+        [
+         "code",
+         "=",
+         "base.group_user"
+        ]
+       ]
+      }
+     },
+     "perm_read": true,
+     "perm_write": true,
+     "perm_create": true,
+     "perm_unlink": true
+    }
+   }
+  },
+  {
+   "field": {
+    "model": "x_payment_item",
+    "name": "x_payment_id",
+    "type": "many2one",
+    "comodel": "x_payment",
+    "required": true,
+    "ondelete": "cascade"
+   }
+  },
+  {
+   "field": {
+    "model": "x_payment_item",
+    "name": "x_account_id",
+    "type": "many2one",
+    "comodel": "x_ledger_account",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_payment_item",
+    "name": "x_amount",
+    "type": "float",
+    "required": true
+   }
+  },
+  {
+   "field": {
+    "model": "x_payment",
+    "name": "x_item_ids",
+    "type": "one2many",
+    "comodel": "x_payment_item",
+    "inverseName": "x_payment_id"
+   }
+  },
+  {
+   "record": {
+    "id": "rule_x_ledger_account",
+    "model": "ir.rule",
+    "values": {
+     "name": "x_ledger_account companies",
+     "model_name": "x_ledger_account",
+     "domain_force": {
+      "$jsonText": [
+       [
+        "x_company_id",
+        "in",
+        {
+         "$ctx": "company_ids"
+        }
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "rule_x_sale_order",
+    "model": "ir.rule",
+    "values": {
+     "name": "x_sale_order companies",
+     "model_name": "x_sale_order",
+     "domain_force": {
+      "$jsonText": [
+       [
+        "x_company_id",
+        "in",
+        {
+         "$ctx": "company_ids"
+        }
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "rule_x_invoice",
+    "model": "ir.rule",
+    "values": {
+     "name": "x_invoice companies",
+     "model_name": "x_invoice",
+     "domain_force": {
+      "$jsonText": [
+       [
+        "x_company_id",
+        "in",
+        {
+         "$ctx": "company_ids"
+        }
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "rule_x_ledger_move",
+    "model": "ir.rule",
+    "values": {
+     "name": "x_ledger_move companies",
+     "model_name": "x_ledger_move",
+     "domain_force": {
+      "$jsonText": [
+       [
+        "x_company_id",
+        "in",
+        {
+         "$ctx": "company_ids"
+        }
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "rule_x_ledger_line",
+    "model": "ir.rule",
+    "values": {
+     "name": "x_ledger_line companies",
+     "model_name": "x_ledger_line",
+     "domain_force": {
+      "$jsonText": [
+       [
+        "x_company_id",
+        "in",
+        {
+         "$ctx": "company_ids"
+        }
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "rule_x_payment",
+    "model": "ir.rule",
+    "values": {
+     "name": "x_payment companies",
+     "model_name": "x_payment",
+     "domain_force": {
+      "$jsonText": [
+       [
+        "x_company_id",
+        "in",
+        {
+         "$ctx": "company_ids"
+        }
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "rule_x_sale_order_line",
+    "model": "ir.rule",
+    "values": {
+     "name": "x_sale_order_line companies",
+     "model_name": "x_sale_order_line",
+     "domain_force": {
+      "$jsonText": [
+       [
+        "x_order_id.x_company_id",
+        "in",
+        {
+         "$ctx": "company_ids"
+        }
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "rule_x_invoice_item",
+    "model": "ir.rule",
+    "values": {
+     "name": "x_invoice_item companies",
+     "model_name": "x_invoice_item",
+     "domain_force": {
+      "$jsonText": [
+       [
+        "x_invoice_id.x_company_id",
+        "in",
+        {
+         "$ctx": "company_ids"
+        }
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "rule_x_payment_item",
+    "model": "ir.rule",
+    "values": {
+     "name": "x_payment_item companies",
+     "model_name": "x_payment_item",
+     "domain_force": {
+      "$jsonText": [
+       [
+        "x_payment_id.x_company_id",
+        "in",
+        {
+         "$ctx": "company_ids"
+        }
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "rule_x_ledger_link",
+    "model": "ir.rule",
+    "values": {
+     "name": "link companies",
+     "model_name": "x_ledger_link",
+     "domain_force": {
+      "$jsonText": [
+       [
+        "x_positive_id.x_company_id",
+        "in",
+        {
+         "$ctx": "company_ids"
+        }
+       ],
+       [
+        "x_negative_id.x_company_id",
+        "in",
+        {
+         "$ctx": "company_ids"
+        }
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "rule_x_ledger_full",
+    "model": "ir.rule",
+    "values": {
+     "name": "full companies",
+     "model_name": "x_ledger_full",
+     "domain_force": {
+      "$jsonText": [
+       "|",
+       [
+        "x_line_ids",
+        "=",
+        false
+       ],
+       [
+        "x_line_ids.x_company_id",
+        "in",
+        {
+         "$ctx": "company_ids"
+        }
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "lifecycle_move",
+    "model": "ir.lifecycle",
+    "values": {
+     "model": "x_ledger_move",
+     "state_field": "x_state",
+     "initial_state": "draft",
+     "engine_fields": [
+      "x_name"
+     ],
+     "locks": [
+      {
+       "states": [
+        "posted"
+       ],
+       "writable": [
+        "x_ref"
+       ],
+       "unlink": false,
+       "frozen_children": [
+        "x_line_ids"
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "lifecycle_line",
+    "model": "ir.lifecycle",
+    "values": {
+     "model": "x_ledger_line",
+     "state_field": "x_state",
+     "initial_state": "draft",
+     "engine_fields": [
+      "x_match_amount",
+      "x_residual",
+      "x_residual_currency",
+      "x_full_id"
+     ],
+     "locks": [
+      {
+       "states": [
+        "posted"
+       ],
+       "writable": [],
+       "unlink": false
+      }
+     ]
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "lifecycle_full",
+    "model": "ir.lifecycle",
+    "values": {
+     "model": "x_ledger_full",
+     "state_field": "x_state",
+     "initial_state": "locked",
+     "locks": [
+      {
+       "states": [
+        "locked"
+       ],
+       "writable": [],
+       "unlink": false
+      }
+     ]
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "lifecycle_link",
+    "model": "ir.lifecycle",
+    "values": {
+     "model": "x_ledger_link",
+     "state_field": "x_state",
+     "initial_state": "locked",
+     "locks": [
+      {
+       "states": [
+        "locked"
+       ],
+       "writable": [],
+       "unlink": false
+      }
+     ],
+     "engine_fields": [
+      "x_positive_id",
+      "x_negative_id",
+      "x_amount",
+      "x_positive_currency",
+      "x_negative_currency"
+     ]
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "lifecycle_invoice",
+    "model": "ir.lifecycle",
+    "values": {
+     "model": "x_invoice",
+     "state_field": "x_state",
+     "initial_state": "draft",
+     "engine_fields": [
+      "x_name"
+     ],
+     "locks": [
+      {
+       "states": [
+        "posted"
+       ],
+       "writable": [],
+       "unlink": false,
+       "frozen_children": [
+        "x_item_ids"
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "lifecycle_payment",
+    "model": "ir.lifecycle",
+    "values": {
+     "model": "x_payment",
+     "state_field": "x_state",
+     "initial_state": "draft",
+     "locks": [
+      {
+       "states": [
+        "posted"
+       ],
+       "writable": [],
+       "unlink": false,
+       "frozen_children": [
+        "x_item_ids"
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "date_lock_move",
+    "model": "ir.date.lock",
+    "values": {
+     "model": "x_ledger_move",
+     "date": "x_date",
+     "when": "x_state == 'posted'",
+     "hard": "x_company_id.x_hard_lock",
+     "soft": "x_company_id.x_soft_lock",
+     "bypass_groups": [
+      "base.group_system"
+     ]
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "seq_journal",
+    "model": "ir.sequence",
+    "values": {
+     "name": "Journal entries",
+     "code": "th_acc.journal",
+     "prefix": "JV/%(year)s/",
+     "padding": 4,
+     "implementation": "no_gap",
+     "company_id": {
+      "$param": "company"
+     }
+    },
+    "perCompany": true
+   }
+  },
+  {
+   "record": {
+    "id": "seq_invoice",
+    "model": "ir.sequence",
+    "values": {
+     "name": "Tax invoices",
+     "code": "th_acc.tax_invoice",
+     "prefix": "INV/%(year)s/",
+     "padding": 4,
+     "implementation": "no_gap",
+     "company_id": {
+      "$param": "company"
+     }
+    },
+    "perCompany": true
+   }
+  },
+  {
+   "record": {
+    "id": "seq_credit",
+    "model": "ir.sequence",
+    "values": {
+     "name": "Credit notes",
+     "code": "th_acc.credit_note",
+     "prefix": "CN/%(year)s/",
+     "padding": 4,
+     "implementation": "no_gap",
+     "company_id": {
+      "$param": "company"
+     }
+    },
+    "perCompany": true
+   }
+  },
+  {
+   "record": {
+    "id": "seq_debit",
+    "model": "ir.sequence",
+    "values": {
+     "name": "Debit notes",
+     "code": "th_acc.debit_note",
+     "prefix": "DN/%(year)s/",
+     "padding": 4,
+     "implementation": "no_gap",
+     "company_id": {
+      "$param": "company"
+     }
+    },
+    "perCompany": true
+   }
+  },
+  {
+   "record": {
+    "id": "transition_move_post",
+    "model": "ir.transition",
+    "values": {
+     "model": "x_ledger_move",
+     "key": "post",
+     "from": [
+      "draft"
+     ],
+     "to": "posted",
+     "already": "skip",
+     "checks": [
+      {
+       "expr": "x_line_ids.count() >= 2 && float_is_zero(x_line_ids.sum('x_balance'), 0.01)",
+       "message": "Unbalanced entry"
+      },
+      {
+       "expr": "x_line_ids.all('x_account_ok')",
+       "message": "Invalid account or missing partner"
+      },
+      {
+       "expr": "x_line_ids.all('x_company_ok')",
+       "message": "Company mismatch"
+      },
+      {
+       "expr": "x_company_currency_id == x_company_id.currency_id",
+       "message": "Company currency mismatch"
+      },
+      {
+       "expr": "x_line_ids.all('x_currency_ok')",
+       "message": "Currency mismatch"
+      }
+     ],
+     "effects": [
+      {
+       "type": "sequence",
+       "field": "x_name",
+       "code": "'th_acc.journal'",
+       "date": "x_date",
+       "company": "x_company_id"
+      },
+      {
+       "type": "child_set",
+       "field": "x_line_ids",
+       "values": {
+        "x_state": "'posted'",
+        "x_match_amount": "x_balance",
+        "x_residual": "x_balance",
+        "x_residual_currency": "x_amount_currency"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "transition_invoice_post",
+    "model": "ir.transition",
+    "values": {
+     "model": "x_invoice",
+     "key": "post",
+     "from": [
+      "draft"
+     ],
+     "to": "posted",
+     "checks": [
+      {
+       "expr": "x_item_ids.count() >= 2",
+       "message": "Nothing to post"
+      },
+      {
+       "expr": "is_digits(x_company_id.x_vat, 13) && x_company_id.x_branch != null",
+       "message": "Seller tax ID (13 digits) and branch are required"
+      },
+      {
+       "expr": "is_digits(x_partner_id.x_vat, 13) && x_partner_id.x_branch != null",
+       "message": "Buyer tax ID (13 digits) and branch are required"
+      },
+      {
+       "expr": "x_type == 'invoice' || (x_origin_id != null && x_reason != null)",
+       "message": "Credit and debit notes need the original invoice and a reason"
+      }
+     ],
+     "effects": [
+      {
+       "type": "sequence",
+       "field": "x_name",
+       "date": "x_date",
+       "company": "x_company_id",
+       "code": "x_type == 'refund' ? 'th_acc.credit_note' : (x_type == 'debit' ? 'th_acc.debit_note' : 'th_acc.tax_invoice')"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "transition_payment_post",
+    "model": "ir.transition",
+    "values": {
+     "model": "x_payment",
+     "key": "post",
+     "from": [
+      "draft"
+     ],
+     "to": "posted",
+     "checks": [
+      {
+       "expr": "x_item_ids.count() >= 2",
+       "message": "Nothing to post"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "match_reconcile",
+    "model": "ir.match.rule",
+    "values": {
+     "model": "x_ledger_line",
+     "key": "reconcile",
+     "eligible": "x_move_id.x_state == 'posted' && x_account_id.x_reconcile",
+     "group_by": [
+      "x_account_id",
+      "x_company_id",
+      "x_partner_id",
+      "x_currency_id"
+     ],
+     "amount_field": "x_match_amount",
+     "residual_field": "x_residual",
+     "rounding": 0.01,
+     "secondary_amount_field": "x_amount_currency",
+     "secondary_residual_field": "x_residual_currency",
+     "secondary_rounding": 0.01,
+     "lock_parents": [
+      "x_move_id"
+     ],
+     "full": {
+      "model": "x_ledger_full",
+      "field": "x_full_id"
+     },
+     "link": {
+      "model": "x_ledger_link",
+      "positive_field": "x_positive_id",
+      "negative_field": "x_negative_id",
+      "amount_field": "x_amount",
+      "positive_secondary_field": "x_positive_currency",
+      "negative_secondary_field": "x_negative_currency"
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_order_confirm",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.order_confirm",
+     "model_name": "x_sale_order",
+     "type": "update_record",
+     "values_json": {
+      "$jsonText": {
+       "x_state": "'sale'"
+      }
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "button_th_acc_order_confirm",
+    "model": "ir.button",
+    "values": {
+     "model_name": "x_sale_order",
+     "action": "th_acc.order_confirm",
+     "guard": "x_state == 'draft' && x_line_ids.count() > 0"
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_order_create_invoice",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.order_create_invoice",
+     "model_name": "x_sale_order",
+     "type": "create_record",
+     "target_model": "x_invoice",
+     "lines_field": "x_item_ids",
+     "lines_source": "record.x_line_ids",
+     "values_json": {
+      "$jsonText": {
+       "x_company_id": "record.x_company_id",
+       "x_currency_id": "record.x_currency_id",
+       "x_company_currency_id": "record.x_company_currency_id",
+       "x_partner_id": "record.x_partner_id",
+       "x_date": "record.x_date",
+       "x_order_id": "record.id",
+       "x_receivable_id": "record.x_partner_id.x_receivable_id"
+      }
+     },
+     "lines_values_json": {
+      "$jsonText": {
+       "x_name": "line.x_name",
+       "x_account_id": "line.x_account_id",
+       "x_amount": "-line.x_subtotal",
+       "x_tax_id": "line.x_tax_id"
+      }
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_order_mark_invoiced",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.order_mark_invoiced",
+     "model_name": "x_sale_order",
+     "type": "update_record",
+     "values_json": {
+      "$jsonText": {
+       "x_state": "'invoiced'"
+      }
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_order_invoice",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.order_invoice",
+     "model_name": "x_sale_order",
+     "type": "multi",
+     "child_keys": "th_acc.order_create_invoice,th_acc.order_mark_invoiced"
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "button_th_acc_order_invoice",
+    "model": "ir.button",
+    "values": {
+     "model_name": "x_sale_order",
+     "action": "th_acc.order_invoice",
+     "guard": "x_state == 'sale'"
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_invoice_vat",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.invoice_vat",
+     "model_name": "x_invoice",
+     "type": "create_record",
+     "target_model": "x_invoice_item",
+     "values_json": {
+      "$jsonText": {
+       "x_invoice_id": "record.id",
+       "x_name": "'VAT'",
+       "x_role": "'tax'",
+       "x_account_id": "record.x_company_id.x_output_vat_account_id",
+       "x_amount": "[tax_compute([record.x_company_id.x_vat_tax_id.id], record.x_item_ids.filtered('x_vat_taxed').sum('x_amount'), 1, null, null, record.x_currency_id)].sum('tax')"
+      }
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_invoice_receivable",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.invoice_receivable",
+     "model_name": "x_invoice",
+     "type": "create_record",
+     "target_model": "x_invoice_item",
+     "values_json": {
+      "$jsonText": {
+       "x_invoice_id": "record.id",
+       "x_name": "'Receivable'",
+       "x_role": "'receivable'",
+       "x_account_id": "record.x_receivable_id",
+       "x_amount": "-record.x_item_ids.sum('x_amount')"
+      }
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_invoice_entry",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.invoice_entry",
+     "model_name": "x_invoice",
+     "type": "create_record",
+     "target_model": "x_ledger_move",
+     "then_transition": "post",
+     "lines_field": "x_line_ids",
+     "lines_source": "record.x_item_ids",
+     "values_json": {
+      "$jsonText": {
+       "x_company_id": "record.x_company_id",
+       "x_currency_id": "record.x_currency_id",
+       "x_company_currency_id": "record.x_company_currency_id",
+       "x_partner_id": "record.x_partner_id",
+       "x_date": "record.x_date",
+       "x_invoice_id": "record.id"
+      }
+     },
+     "lines_values_json": {
+      "$jsonText": {
+       "x_company_id": "record.x_company_id",
+       "x_currency_id": "record.x_currency_id",
+       "x_company_currency_id": "record.x_company_currency_id",
+       "x_partner_id": "record.x_partner_id",
+       "x_account_id": "line.x_account_id",
+       "x_amount_currency": "line.x_amount",
+       "x_invoice_id": "record.id",
+       "x_debit": "line.x_amount > 0 ? currency_convert(line.x_amount, record.x_currency_id, record.x_company_currency_id, record.x_date, record.x_company_id) : 0",
+       "x_credit": "line.x_amount < 0 ? -currency_convert(line.x_amount, record.x_currency_id, record.x_company_currency_id, record.x_date, record.x_company_id) : 0"
+      }
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_invoice_state",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.invoice_state",
+     "model_name": "x_invoice",
+     "type": "transition",
+     "transition": "post"
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_invoice_post",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.invoice_post",
+     "model_name": "x_invoice",
+     "type": "multi",
+     "child_keys": "th_acc.invoice_vat,th_acc.invoice_receivable,th_acc.invoice_entry,th_acc.invoice_state"
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "button_th_acc_invoice_post",
+    "model": "ir.button",
+    "values": {
+     "model_name": "x_invoice",
+     "action": "th_acc.invoice_post",
+     "guard": "x_state == 'draft'"
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_credit_note",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.credit_note",
+     "model_name": "x_invoice",
+     "type": "create_record",
+     "target_model": "x_invoice",
+     "lines_field": "x_item_ids",
+     "lines_source": "record.x_item_ids.filtered('x_is_base')",
+     "values_json": {
+      "$jsonText": {
+       "x_company_id": "record.x_company_id",
+       "x_currency_id": "record.x_currency_id",
+       "x_company_currency_id": "record.x_company_currency_id",
+       "x_partner_id": "record.x_partner_id",
+       "x_date": "today",
+       "x_type": "'refund'",
+       "x_origin_id": "record.id",
+       "x_receivable_id": "record.x_receivable_id"
+      }
+     },
+     "lines_values_json": {
+      "$jsonText": {
+       "x_name": "line.x_name",
+       "x_account_id": "line.x_account_id",
+       "x_tax_id": "line.x_tax_id",
+       "x_amount": "-line.x_amount"
+      }
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "button_th_acc_credit_note",
+    "model": "ir.button",
+    "values": {
+     "model_name": "x_invoice",
+     "action": "th_acc.credit_note",
+     "guard": "x_state == 'posted' && x_type == 'invoice' && x_payment_state != 'paid'"
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_payment_bank",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.payment_bank",
+     "model_name": "x_payment",
+     "type": "create_record",
+     "target_model": "x_payment_item",
+     "values_json": {
+      "$jsonText": {
+       "x_payment_id": "record.id",
+       "x_account_id": "record.x_bank_account_id",
+       "x_amount": "record.x_amount - record.x_wht_amount"
+      }
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_payment_wht",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.payment_wht",
+     "model_name": "x_payment",
+     "type": "create_record",
+     "target_model": "x_payment_item",
+     "values_json": {
+      "$jsonText": {
+       "x_payment_id": "record.id",
+       "x_account_id": "record.x_company_id.x_wht_account_id",
+       "x_amount": "record.x_wht_amount"
+      }
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_payment_receivable",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.payment_receivable",
+     "model_name": "x_payment",
+     "type": "create_record",
+     "target_model": "x_payment_item",
+     "values_json": {
+      "$jsonText": {
+       "x_payment_id": "record.id",
+       "x_account_id": "record.x_receivable_id",
+       "x_amount": "-record.x_amount"
+      }
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_payment_entry",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.payment_entry",
+     "model_name": "x_payment",
+     "type": "create_record",
+     "target_model": "x_ledger_move",
+     "then_transition": "post",
+     "lines_field": "x_line_ids",
+     "lines_source": "record.x_item_ids",
+     "values_json": {
+      "$jsonText": {
+       "x_company_id": "record.x_company_id",
+       "x_currency_id": "record.x_currency_id",
+       "x_company_currency_id": "record.x_company_currency_id",
+       "x_partner_id": "record.x_partner_id",
+       "x_date": "record.x_date"
+      }
+     },
+     "lines_values_json": {
+      "$jsonText": {
+       "x_company_id": "record.x_company_id",
+       "x_currency_id": "record.x_currency_id",
+       "x_company_currency_id": "record.x_company_currency_id",
+       "x_partner_id": "record.x_partner_id",
+       "x_account_id": "line.x_account_id",
+       "x_amount_currency": "line.x_amount",
+       "x_invoice_id": "false",
+       "x_debit": "line.x_amount > 0 ? currency_convert(line.x_amount, record.x_currency_id, record.x_company_currency_id, record.x_date, record.x_company_id) : 0",
+       "x_credit": "line.x_amount < 0 ? -currency_convert(line.x_amount, record.x_currency_id, record.x_company_currency_id, record.x_date, record.x_company_id) : 0"
+      }
+     }
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_payment_state",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.payment_state",
+     "model_name": "x_payment",
+     "type": "transition",
+     "transition": "post"
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_payment_post",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.payment_post",
+     "model_name": "x_payment",
+     "type": "multi",
+     "child_keys": "th_acc.payment_bank,th_acc.payment_receivable,th_acc.payment_entry,th_acc.payment_state"
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "button_th_acc_payment_post",
+    "model": "ir.button",
+    "values": {
+     "model_name": "x_payment",
+     "action": "th_acc.payment_post",
+     "guard": "x_state == 'draft' && x_wht_amount == 0"
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_payment_post_wht",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.payment_post_wht",
+     "model_name": "x_payment",
+     "type": "multi",
+     "child_keys": "th_acc.payment_bank,th_acc.payment_wht,th_acc.payment_receivable,th_acc.payment_entry,th_acc.payment_state"
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "button_th_acc_payment_post_wht",
+    "model": "ir.button",
+    "values": {
+     "model_name": "x_payment",
+     "action": "th_acc.payment_post_wht",
+     "guard": "x_state == 'draft' && x_wht_amount > 0"
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_reconcile",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.reconcile",
+     "model_name": "x_ledger_line",
+     "type": "match",
+     "match_rule": "reconcile"
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "button_th_acc_reconcile",
+    "model": "ir.button",
+    "values": {
+     "model_name": "x_ledger_line",
+     "action": "th_acc.reconcile"
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "action_th_acc_unreconcile",
+    "model": "ir.actions.server",
+    "values": {
+     "key": "th_acc.unreconcile",
+     "model_name": "x_ledger_line",
+     "type": "unmatch",
+     "match_rule": "reconcile"
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "button_th_acc_unreconcile",
+    "model": "ir.button",
+    "values": {
+     "model_name": "x_ledger_line",
+     "action": "th_acc.unreconcile"
+    }
+   }
+  },
+  {
+   "update": {
+    "model": "res.currency",
+    "target": {
+     "$search": {
+      "model": "res.currency",
+      "domain": [
+       [
+        "name",
+        "=",
+        "THB"
+       ],
+       [
+        "active",
+        "in",
+        [
+         true,
+         false
+        ]
+       ]
+      ]
+     }
+    },
+    "values": {
+     "active": true
+    }
+   }
+  },
+  {
+   "record": {
+    "id": "tax_vat7",
+    "model": "account.tax",
+    "values": {
+     "name": "VAT 7%",
+     "amount_type": "percent",
+     "amount": 7
+    },
+    "noupdate": true
+   }
+  },
+  {
+   "record": {
+    "id": "tax_vat0",
+    "model": "account.tax",
+    "values": {
+     "name": "VAT 0% (export)",
+     "amount_type": "percent",
+     "amount": 0
+    },
+    "noupdate": true
+   }
+  },
+  {
+   "record": {
+    "id": "acc_1000",
+    "model": "x_ledger_account",
+    "values": {
+     "x_code": "1000",
+     "x_name": "Cash and bank",
+     "x_company_id": {
+      "$param": "company"
+     }
+    },
+    "perCompany": true,
+    "noupdate": true
+   }
+  },
+  {
+   "record": {
+    "id": "acc_1100",
+    "model": "x_ledger_account",
+    "values": {
+     "x_code": "1100",
+     "x_name": "Trade receivables",
+     "x_company_id": {
+      "$param": "company"
+     },
+     "x_reconcile": true,
+     "x_partner_required": true
+    },
+    "perCompany": true,
+    "noupdate": true
+   }
+  },
+  {
+   "record": {
+    "id": "acc_1157",
+    "model": "x_ledger_account",
+    "values": {
+     "x_code": "1157",
+     "x_name": "Withholding tax receivable",
+     "x_company_id": {
+      "$param": "company"
+     }
+    },
+    "perCompany": true,
+    "noupdate": true
+   }
+  },
+  {
+   "record": {
+    "id": "acc_2201",
+    "model": "x_ledger_account",
+    "values": {
+     "x_code": "2201",
+     "x_name": "Output VAT",
+     "x_company_id": {
+      "$param": "company"
+     }
+    },
+    "perCompany": true,
+    "noupdate": true
+   }
+  },
+  {
+   "record": {
+    "id": "acc_4000",
+    "model": "x_ledger_account",
+    "values": {
+     "x_code": "4000",
+     "x_name": "Revenue from sales and services",
+     "x_company_id": {
+      "$param": "company"
+     }
+    },
+    "perCompany": true,
+    "noupdate": true
+   }
+  },
+  {
+   "update": {
+    "model": "res.company",
+    "target": {
+     "$param": "company"
+    },
+    "values": {
+     "x_vat_tax_id": {
+      "$ref": "tax_vat7"
+     },
+     "x_output_vat_account_id": {
+      "$ref": "acc_2201"
+     },
+     "x_wht_account_id": {
+      "$ref": "acc_1157"
+     }
+    }
+   }
+  }
+ ]
+}

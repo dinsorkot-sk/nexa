@@ -262,12 +262,16 @@ describe('no-code Studio', () => {
     expect(await post('/api/studio/field', admin, {
       model: 'x_studio_task', name: 'x_cost', type: 'float', digits: [9, 2], copy: false, aggregator: 'sum',
     })).toMatchObject({ status: 200 });
+    expect(await post('/api/studio/field', admin, {
+      model: 'x_studio_task', name: 'x_required', type: 'char', required: true, default: 'draft',
+    })).toMatchObject({ status: 200 });
     const studioModels = await call('GET', '/api/studio/models', admin);
     expect(studioModels.body.models).toEqual(expect.arrayContaining([
       expect.objectContaining({
         name: 'x_studio_task',
         fields: expect.arrayContaining([
           expect.objectContaining({ name: 'x_cost', digits: [9, 2], copy: false, aggregator: 'sum' }),
+          expect.objectContaining({ name: 'x_required', required: true }),
         ]),
       }),
     ]));

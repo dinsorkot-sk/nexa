@@ -34,10 +34,11 @@ export class EngineService implements OnModuleDestroy {
    * Environment of an authenticated user, carrying the user's language and time zone (res.users
    * lang / tz) in its context. Never the superuser: uid 1 is internal only.
    */
-  async env(tenant: string, uid: number): Promise<Env> {
+  /** `companyIds` narrows the active companies; each must be one of the user's allowed companies. */
+  async env(tenant: string, uid: number, companyIds?: number[]): Promise<Env> {
     if (!Number.isInteger(uid) || uid <= SUPERUSER_ID) throw new AccessError('Invalid user');
     const h = await this.tenant(tenant);
-    const env = h.env({ uid });
+    const env = h.env({ uid, ...(companyIds?.length ? { companyIds } : {}) });
     if (env.su) throw new AccessError('Invalid user');
     // fail early for unknown/archived users (loads the security context once)
     await env.model('res.users').checkAccess('read');
