@@ -175,6 +175,11 @@ const registered = new Map<string, ExpressionHelperDef>();
 /**
  * Register a process-wide NX-Expr helper for ORM-evaluated expressions. Call at module load,
  * before tenant registries are built, so dependency extraction knows the name.
+ *
+ * Reject bad user input with ValidationError (HTTP 422): any other
+ * error a registered helper throws is treated as a server fault (HTTP 500), not an expression error.
+ * Known gap (T11 review): built-in helpers and registered sync helpers are not wrapped yet, so a
+ * TypeError/RangeError raised inside them still surfaces as ExpressionError (422).
  */
 export function registerExpressionHelper(name: string, def: ExpressionHelperDef): void {
   if (!def || (typeof def.sync === 'function') === (typeof def.resolve === 'function')) {
